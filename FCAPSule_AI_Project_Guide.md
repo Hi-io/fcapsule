@@ -1,1238 +1,1134 @@
-# FCAPSule AI — Project Development Guide
+# FCAPSule AI — Project Design and P1 Development Guide
 
-**Project subtitle:** A Multimodal Telemetry Attention Engine for Cloud Incident Evidence  
-**Public tagline:** *A flight recorder for cloud incidents.*  
-**Academic framing:** Orchestrating pre-trained AI models to generate compact, investigation-ready evidence capsules from FCAPS-style telemetry.
+**Project:** FCAPSule AI  
+**Full title:** FCAPSule AI: A Multimodal Telemetry Attention Engine for Cloud Incident Evidence  
+**Current target:** Prototype 1 (P1)  
+**Long-term target:** Evolve the same repository into the final university project and demo system  
+**Primary audience for this document:** Codex / AI coding agent / future developer  
+**Secondary audience:** project author, reviewers, supervisors, future contributors
 
 ---
 
 ## 0. Executive Summary
 
-FCAPSule AI is an AI orchestration project designed to solve a specific problem in modern observability: when large-scale cloud systems degrade, they generate too much telemetry for humans or AI agents to inspect directly. Logs, metrics, fault alerts, Kafka delays, OpenSearch indexing delays, Kubernetes metadata, and dashboards all contain useful evidence, but the useful signal is buried inside massive noisy streams.
+FCAPSule AI is an evidence-selection and preservation system for cloud-native incident investigation. It is designed for environments where applications produce large amounts of observability telemetry: logs, performance metrics, fault alerts, and infrastructure metadata. In sectors such as telecom, raw telemetry volume can be extremely large, and retention constraints make it impossible to store all logs and metrics indefinitely. Troubleshooting may last days or weeks, while raw data may be deleted, rotated, or become expensive to query.
 
-The project does **not** try to be another generic AI SRE chatbot or a full root-cause analysis platform. Instead, it focuses on the earlier and more fundamental bottleneck:
+The purpose of FCAPSule AI is to generate a compact, structured, investigation-ready **evidence capsule** from raw or semi-raw telemetry. The capsule should preserve the most useful evidence before raw telemetry expires, reduce noise, support human investigation, and provide grounded context for future AIOps agents.
 
-> **Before humans or AI agents can reason about an incident, someone has to select the right evidence.**
+Prototype 1 should **not** attempt to be a production-ready system. P1 should prove the core concept:
 
-FCAPSule AI generates an **Incident Evidence Capsule**: a compact, explainable package containing the most relevant log patterns, anomalous metrics, fault timeline, affected infrastructure context, telemetry delay indicators, and suggested next investigation steps.
+> Given a prepared incident case containing alert, log, metric, and metadata files, can FCAPSule AI reduce noisy telemetry into a compact evidence capsule while preserving important investigation signal?
 
-The project is inspired by the FCAPS network management model: Fault, Configuration, Accounting/Administration, Performance, and Security. In the first implementation, the practical focus is mainly on:
-
-- **Fault**: alerts, faults, severity, fault timelines.
-- **Performance**: Prometheus metrics, metric anomalies, resource saturation, latency/error signals.
-- **Logs**: OpenSearch/Kafka logs, log templates, log volume, log delays, repeated patterns.
-- **Configuration / Context**: Kubernetes metadata, app name, namespace, cluster, pod, service, stage, owners if available.
-
-The final system should demonstrate orchestration of multiple pre-trained models across different data domains, as required by the University of London CM3020 Artificial Intelligence template 4.1: **Orchestrating AI models to achieve a goal**.
+The first implementation should use a CLI and file-based inputs. Live Prometheus, OpenSearch, Kafka, and Alertmanager integrations are part of the roadmap, not mandatory for P1.
 
 ---
 
-## 1. Core Project Idea
+## 1. Project Positioning
 
-### 1.1 One-sentence version
+### 1.1 What FCAPSule AI is
 
-**FCAPSule AI uses multiple AI models to compress noisy production telemetry into compact evidence capsules for cloud incident investigation.**
+FCAPSule AI is a **multimodal telemetry attention engine**. It consumes multiple telemetry sources and produces a compact evidence capsule.
 
-### 1.2 Product-style explanation
+It should:
 
-When production gets noisy, engineers often face millions of logs, hundreds of metrics, and many fault alerts. FCAPSule AI acts like a flight recorder for cloud incidents: it captures the important evidence around an event and packages it into a small, readable, AI-grounded investigation capsule.
+- load prepared incident case files;
+- align evidence around common entities such as service, namespace, pod, cluster, and CNCC UUID or equivalent labels;
+- reduce raw logs into templates and representative lines;
+- identify relevant or anomalous metrics;
+- build an alert/fault timeline;
+- rank evidence across logs, metrics, and alerts;
+- generate grounded investigation hypotheses;
+- verify whether the hypotheses are supported by actual evidence;
+- generate a final capsule in Markdown and structured machine-readable formats;
+- produce evaluation metrics to compare against simple baselines.
 
-### 1.3 Academic research question
+### 1.2 What FCAPSule AI is not, especially in P1
 
-> **Can orchestrated pre-trained AI models select and summarize useful multimodal telemetry evidence while preserving diagnostic signal and reducing investigation context size?**
+P1 is not:
 
-Alternative research question:
+- a production observability platform;
+- a replacement for Prometheus, OpenSearch, Grafana, Alertmanager, or Kafka;
+- a fully automated root cause analysis system;
+- a real-time incident response agent;
+- an auto-remediation tool;
+- a polished web application;
+- a full ingestion pipeline.
 
-> **How can multi-model AI orchestration transform large-scale FCAPS telemetry into compact evidence capsules that are useful for human and AI-assisted incident investigation?**
+The project should avoid claiming guaranteed RCA accuracy unless ground-truth cases become available. The safer and more accurate claim is:
 
-### 1.4 Problem being solved
+> FCAPSule AI generates ranked, evidence-grounded investigation hypotheses and preserves compact incident evidence.
 
-Observability systems collect huge amounts of telemetry, but large volume does not automatically produce understanding. During incidents, engineers need to know:
+### 1.3 Why this matters
 
-- What changed?
-- Which metrics became abnormal?
-- Which fault alerts appeared first?
-- Which log patterns dominated the incident window?
-- Were logs delayed or missing?
-- Which clusters/pods/services were affected?
-- What evidence is worth reading first?
+The motivation is not only faster incident investigation. A major motivation is **data retention under storage constraints**.
 
-FCAPSule AI addresses this by constructing a compact evidence pack instead of asking humans or LLMs to inspect raw telemetry directly.
+Large-scale systems can generate huge volumes of telemetry. It is not realistic to store every log and metric forever for every application. However, investigations may continue after raw telemetry has expired. FCAPSule AI aims to preserve the operationally useful evidence in a compact form so that engineers can continue investigating even when raw logs are no longer available.
 
----
+This gives the project two complementary value propositions:
 
-## 2. Why This Is Not Just Another AI SRE Chatbot
-
-Many AI observability projects focus on:
-
-- Root-cause prediction.
-- Chat with logs.
-- Incident summary generation.
-- Auto-remediation.
-- Alert triage.
-
-FCAPSule AI focuses on a different layer:
-
-> **Telemetry attention and evidence selection.**
-
-The system is valuable even when root cause is unknown or when the observability team does not receive feedback about how an application team fixed the issue.
-
-Instead of claiming:
-
-> “The root cause is definitely X.”
-
-FCAPSule AI produces:
-
-> “Here is the strongest evidence collected from logs, metrics, faults and infrastructure context. Here is what was included, what was excluded, and why.”
-
-This is easier to evaluate, safer to deploy, and better aligned with an observability framework team.
+1. **Investigation acceleration:** reduce telemetry overload and help engineers see what matters first.
+2. **Evidence preservation:** retain compact, useful incident evidence under telemetry retention constraints.
 
 ---
 
-## 3. University Template Alignment — 101% Checklist
+## 2. University Template Alignment
 
-The selected template is:
+### 2.1 Chosen template
 
-> **CM3020 Artificial Intelligence — Project Idea 4.1: Orchestrating AI models to achieve a goal**
+The chosen university template is:
 
-The university template expects a working software system that combines multiple pre-trained models into a workflow to achieve a clear goal. It specifically expects at least three pre-trained models, ideally operating on different domains or data spaces.
+**Template 4.1 — Orchestrating AI Models to Achieve a Goal**
 
-### 3.1 Template requirement: Clear goal
+The project must clearly show that multiple models or AI-assisted methods are orchestrated into a workflow. Do not implement a single chatbot and call it orchestration.
 
-**Goal:** Generate compact, useful incident evidence capsules from large-scale multimodal telemetry.
+### 2.2 Goal under the template
 
-The project goal is specific and testable:
+The goal is:
 
-Input:
+> Orchestrate multiple AI models and analysis methods to generate compact, grounded, and useful incident evidence capsules from multimodal observability telemetry.
 
-- Incident time window or alert trigger.
-- Application/service/namespace/cluster.
-- Logs, metrics, faults, infrastructure context.
+### 2.3 Required domains / model families
 
-Output:
+The project should include at least three distinct domains. P1 should implement at least three of the following:
 
-- Evidence capsule with ranked evidence, timeline, anomalous metrics, key log templates, fault sequence, telemetry health signals, and next investigation steps.
+1. **Logs / text telemetry**
+   - log masking;
+   - template extraction;
+   - severity detection;
+   - frequency analysis;
+   - representative log selection;
+   - optional embeddings or LLM semantic scoring.
 
-### 3.2 Template requirement: Multiple pre-trained models
+2. **Performance metrics / time-series telemetry**
+   - z-score;
+   - robust z-score;
+   - moving average;
+   - baseline comparison;
+   - percentage change;
+   - anomaly window detection.
 
-Use at least three models from different domains. Recommended minimum:
+3. **Fault alerts / event stream**
+   - alert parsing;
+   - severity ranking;
+   - timeline construction;
+   - entity matching with logs and metrics.
 
-| Model | Domain | Purpose |
-|---|---|---|
-| Log parsing / embedding model | Text/logs | Cluster logs into templates, detect similarity, select representative snippets |
-| Time-series anomaly model | Metrics | Detect abnormal Prometheus metric windows |
-| LLM reasoning model | Natural language / orchestration | Rank evidence, explain findings, generate capsule report |
+4. **Infrastructure / topology context**
+   - service, namespace, pod, cluster mapping;
+   - CNCC UUID or equivalent label resolution;
+   - matching evidence across telemetry sources.
 
-Strong version:
+5. **LLM-based reasoning**
+   - hypothesis generation;
+   - explanation;
+   - missing evidence identification;
+   - suggested next checks;
+   - final capsule writing.
 
-| Model | Domain | Purpose |
-|---|---|---|
-| Log template extraction model or algorithm + embedding model | Logs/text | Reduce millions of raw logs into templates and clusters |
-| Sentence embedding model | Text semantics | Similarity search and retrieval over log patterns / past capsules |
-| Time-series anomaly detector | Metrics | Detect metric windows worth including |
-| LLM planner/reasoner | Language | Coordinate evidence, generate explanations, rank usefulness |
-| Optional VLM | Visual/dashboard | Interpret Grafana/OpenSearch screenshots for demo multimodality |
-| Optional graph/topology model | Infrastructure relationships | Connect app → service → namespace → pod → cluster → fault/metric/log evidence |
+6. **LLM or rule-based verification**
+   - claim grounding;
+   - evidence ID validation;
+   - hallucination reduction;
+   - confidence adjustment.
 
-### 3.3 Template requirement: Different data spaces/domains
+### 2.4 How to exceed the template requirements
 
-FCAPSule AI uses multiple telemetry domains:
+To target a high mark, the project should demonstrate:
 
-- **Text logs** from Kafka/OpenSearch.
-- **Time-series metrics** from Prometheus.
-- **Fault/event streams** from alert/fault systems.
-- **Infrastructure metadata** from Kubernetes/app registry/config.
-- **Optional visual evidence** from dashboard screenshots.
+- clear orchestration, not just parallel model calls;
+- justification for each model or method;
+- comparison against simpler baselines;
+- objective and subjective evaluation;
+- clear discussion of limitations;
+- iterative design and testing;
+- evidence that the system is useful for real users in the domain;
+- clean documentation and reproducible case examples.
 
-This exceeds the minimum “three domains” requirement.
+---
 
-### 3.4 Template requirement: Evidence of testing and rejecting models
+## 3. P1 Scope
 
-The report should include experiments comparing multiple model combinations:
+### 3.1 P1 objective
 
-- Log parser A vs log parser B.
-- Embedding model A vs embedding model B.
-- Time-series anomaly model A vs statistical baseline.
-- DeepSeek vs Qwen vs local Llama vs other LLM for evidence ranking.
-- Single LLM over sampled logs vs orchestrated multi-model pipeline.
+P1 should answer this question:
 
-Record:
+> Can FCAPSule AI reduce a prepared noisy incident telemetry bundle into a compact evidence capsule while preserving important investigation signal?
 
-- Accuracy / usefulness.
-- Cost.
-- Latency.
-- Token usage.
-- Hallucination / unsupported claim rate.
-- Human usefulness score.
+### 3.2 Included in P1
 
-### 3.5 Template requirement: Working integrated software
+Implement:
 
-The final product should be a working CLI, API or small web app.
+- CLI interface;
+- file-based case input;
+- schema validation;
+- case loading;
+- entity resolution;
+- log reduction;
+- metric anomaly analysis;
+- alert timeline building;
+- evidence ranking;
+- hypothesis generation;
+- hypothesis verification;
+- capsule generation;
+- objective evaluation metrics;
+- baseline comparison;
+- documentation.
 
-Minimum acceptable final demo:
+### 3.3 Excluded from P1
 
-```bash
-fcapsule investigate \
-  --app checkout-service \
-  --cluster prod-cluster-a \
-  --from 2026-05-01T10:00:00Z \
-  --to 2026-05-01T11:00:00Z
-```
+Do not implement unless everything else is complete:
 
-Expected output:
+- real Kafka consumer;
+- real Alertmanager webhook trigger;
+- real Prometheus adapter;
+- real OpenSearch adapter;
+- production deployment;
+- authentication;
+- web UI;
+- Grafana dashboard generation;
+- parallel agent execution;
+- automatic remediation.
+
+### 3.4 Roadmap after P1
+
+The repository should be designed so that future versions can add:
+
+| Phase | Goal |
+|---|---|
+| P2 | Real Prometheus and OpenSearch adapters |
+| P3 | Alertmanager webhook trigger |
+| P4 | More advanced evidence attention scoring |
+| P5 | Local web UI for case review |
+| P6 | Retention-aware capsule store |
+| P7 | More case studies and user feedback |
+| P8 | Optional integration with Grafana dashboards |
+| P9 | Optional downstream AIOps/RCA agent |
+
+Do not hard-code P1 in a way that blocks these future phases.
+
+---
+
+## 4. Expected Repository Structure
+
+Use a clean Python project structure.
 
 ```text
-FCAPSule Evidence Capsule
-- Summary
-- Timeline
-- Top faults
-- Top anomalous metrics
-- Top log templates
-- Telemetry delay notes
-- Evidence ranking
-- Suggested next steps
-- Confidence / limitations
+fcapsule-ai/
+  README.md
+  PROJECT_DESIGN.md
+  ROADMAP.md
+  EVALUATION_PLAN.md
+  DATA_SCHEMA.md
+  PROMPTS.md
+  CHANGELOG.md
+  pyproject.toml
+  requirements.txt
+  .gitignore
+  .env.example
+
+  fcapsule/
+    __init__.py
+    cli.py
+    config.py
+
+    models/
+      __init__.py
+      schemas.py
+
+    io/
+      __init__.py
+      case_loader.py
+      output_writer.py
+      archive_writer.py
+
+    processing/
+      __init__.py
+      entity_resolver.py
+      log_reducer.py
+      metrics_analyzer.py
+      alert_timeline.py
+      anonymizer.py
+
+    attention/
+      __init__.py
+      evidence_scorer.py
+      evidence_selector.py
+
+    reasoning/
+      __init__.py
+      llm_client.py
+      hypothesis_generator.py
+      hypothesis_verifier.py
+      capsule_writer.py
+      prompts.py
+
+    evaluation/
+      __init__.py
+      metrics.py
+      baselines.py
+      rubric.py
+      report.py
+
+    adapters/
+      __init__.py
+      prometheus_adapter.py      # future, can be stubbed
+      opensearch_adapter.py      # future, can be stubbed
+      alertmanager_adapter.py    # future, can be stubbed
+
+  cases/
+    case_001/
+      alert.json
+      prometheus_metrics.json
+      opensearch_logs.json
+      metadata.yaml
+      expected_notes.md
+
+  outputs/
+    .gitkeep
+
+  tests/
+    test_case_loader.py
+    test_entity_resolver.py
+    test_log_reducer.py
+    test_metrics_analyzer.py
+    test_evidence_scorer.py
+    test_capsule_writer.py
+
+  docs/
+    architecture.md
+    p1_usage.md
+    p1_evaluation.md
+    data_privacy.md
+    design_decisions.md
 ```
 
-### 3.6 Template requirement: Evaluation
-
-Evaluation must be explicit. Suggested metrics:
-
-| Metric | Meaning |
-|---|---|
-| Compression ratio | Raw telemetry size vs evidence capsule size |
-| Signal preservation | Whether key fault/anomaly windows remain represented |
-| Evidence coverage | Whether logs + metrics + faults are all represented |
-| Human usefulness score | Expert review from observability engineers |
-| Token reduction | How many LLM tokens saved compared with raw/sampled logs |
-| Latency | Time to generate capsule |
-| Cost | Estimated model/API cost |
-| Hallucination rate | Unsupported claims in generated summaries |
-| Faithfulness | Every conclusion must cite evidence source IDs |
-| Model comparison | Single-model baseline vs multi-model orchestration |
-
-### 3.7 Template requirement: Prototype scope
-
-Prototype should demonstrate models operating successfully and being combined toward the overall goal.
-
-Prototype target:
-
-- Use a small dataset or anonymized/synthetic data.
-- Process logs, metrics, and faults for one incident window.
-- Generate one evidence capsule.
-- Show that each model contributes a different type of evidence.
-
-### 3.8 Template requirement: Outstanding project behavior
-
-To aim for top marks:
-
-- Use at least four data domains.
-- Compare several model choices.
-- Evaluate against baselines.
-- Include human review.
-- Provide clear software tests.
-- Show iterative development.
-- Explain limitations honestly.
-- Produce a polished demo and report.
-- Make the architecture extensible with adapters.
+The developer should create or rewrite documentation files so that they match the current project design. Avoid stale docs.
 
 ---
 
-## 4. Main System Output — Incident Evidence Capsule
+## 5. P1 Input Format
 
-The evidence capsule is the core artifact.
+### 5.1 Case folder
 
-### 4.1 Capsule structure
+Each case should be self-contained.
 
-Suggested JSON schema:
+```text
+cases/case_001/
+  alert.json
+  prometheus_metrics.json
+  opensearch_logs.json
+  metadata.yaml
+  expected_notes.md
+```
+
+### 5.2 `metadata.yaml`
+
+Example:
+
+```yaml
+case_id: case_001
+case_title: High log volume and suspected indexing delay
+service: checkout-service
+cluster: prod-cluster-a
+namespace: checkout
+cncc_uuid: cncc-12345
+window:
+  start: "2026-06-21T09:30:00Z"
+  end: "2026-06-21T10:30:00Z"
+timezone: UTC
+telemetry_sources:
+  logs: opensearch_logs.json
+  metrics: prometheus_metrics.json
+  alert: alert.json
+fields:
+  log_time_field: "@timestamp"
+  log_message_field: "message"
+  log_level_field: "level"
+  service_label: "cncc_uuid"
+privacy:
+  anonymized: true
+notes:
+  - "Prepared sample case for P1."
+```
+
+### 5.3 `alert.json`
+
+Example:
 
 ```json
 {
-  "capsule_id": "fcapsule-2026-05-01-checkout-service-prod-a",
-  "app": "checkout-service",
-  "cluster": "prod-a",
-  "namespace": "checkout",
-  "time_window": {
-    "from": "2026-05-01T10:00:00Z",
-    "to": "2026-05-01T11:00:00Z"
+  "alertname": "HighLogVolume",
+  "status": "firing",
+  "severity": "warning",
+  "startsAt": "2026-06-21T10:00:00Z",
+  "endsAt": null,
+  "labels": {
+    "service": "checkout-service",
+    "namespace": "checkout",
+    "cluster": "prod-cluster-a",
+    "pod": "checkout-api-7c9d",
+    "cncc_uuid": "cncc-12345"
   },
-  "summary": "Short human-readable summary of the event window.",
-  "timeline": [
-    {
-      "timestamp": "2026-05-01T10:04:00Z",
-      "type": "fault",
-      "description": "High error rate fault triggered",
-      "source": "fault-system",
-      "evidence_id": "fault-001"
-    }
-  ],
-  "faults": [
-    {
-      "fault_id": "fault-001",
-      "name": "HighErrorRate",
-      "severity": "critical",
-      "first_seen": "2026-05-01T10:04:00Z",
-      "last_seen": "2026-05-01T10:32:00Z",
-      "affected_entities": ["checkout-service", "pod-abc"]
-    }
-  ],
-  "metric_anomalies": [
-    {
-      "metric": "http_requests_error_rate",
-      "score": 0.94,
-      "window": "10:03-10:30",
-      "description": "Error rate increased 8x above baseline",
-      "evidence_id": "metric-001"
-    }
-  ],
-  "log_patterns": [
-    {
-      "template": "Request failed with timeout after <*> ms",
-      "count": 184220,
-      "change_vs_baseline": "12.4x",
-      "severity": "ERROR",
-      "representative_examples": ["..."],
-      "usefulness_score": 0.91,
-      "evidence_id": "log-001"
-    }
-  ],
-  "telemetry_health": {
-    "log_indexing_delay_p95_seconds": 430,
-    "kafka_lag_status": "elevated",
-    "prometheus_scrape_gaps": 2,
-    "notes": [
-      "OpenSearch delay increased during the same window, so late-arriving logs may be missing from the first capsule."
-    ]
+  "annotations": {
+    "summary": "Log volume increased above baseline",
+    "description": "The application is producing more logs than expected."
+  }
+}
+```
+
+### 5.4 `prometheus_metrics.json`
+
+Use a simple export format compatible with later Prometheus query results.
+
+```json
+{
+  "window": {
+    "start": "2026-06-21T09:30:00Z",
+    "end": "2026-06-21T10:30:00Z"
   },
-  "evidence_ranking": [
+  "series": [
     {
-      "rank": 1,
-      "evidence_id": "metric-001",
-      "reason": "Metric anomaly aligns with first critical fault."
+      "metric": "container_memory_working_set_bytes",
+      "labels": {
+        "pod": "checkout-api-7c9d",
+        "namespace": "checkout"
+      },
+      "values": [
+        ["2026-06-21T09:30:00Z", 512000000],
+        ["2026-06-21T10:00:00Z", 950000000]
+      ]
     }
-  ],
-  "excluded_evidence": [
-    {
-      "source": "logs",
-      "reason": "Repeated heartbeat logs had high volume but low correlation with faults or anomalies."
-    }
-  ],
-  "next_steps": [
-    "Check pods with repeated timeout log pattern.",
-    "Verify OpenSearch indexing delay before assuming logs are complete.",
-    "Compare error-rate anomaly with recent deployment/config changes if available."
-  ],
-  "limitations": [
-    "This capsule does not claim final root cause.",
-    "Some logs may be delayed due to indexing lag."
   ]
 }
 ```
 
-### 4.2 Human-readable capsule report
+### 5.5 `opensearch_logs.json`
 
-The system should also generate Markdown:
+Example:
+
+```json
+{
+  "hits": [
+    {
+      "@timestamp": "2026-06-21T10:01:22Z",
+      "level": "ERROR",
+      "message": "Failed to connect to 10.0.0.3 after 3 retries",
+      "service": "checkout-service",
+      "namespace": "checkout",
+      "pod": "checkout-api-7c9d",
+      "cluster": "prod-cluster-a",
+      "cncc_uuid": "cncc-12345"
+    }
+  ]
+}
+```
+
+---
+
+## 6. CLI Requirements
+
+### 6.1 Main command
+
+Implement:
+
+```bash
+fcapsule investigate --case ./cases/case_001 --out ./outputs/case_001
+```
+
+Expected behavior:
+
+1. Load the case.
+2. Validate schemas.
+3. Resolve entities.
+4. Reduce logs.
+5. Analyze metrics.
+6. Build alert timeline.
+7. Score and select evidence.
+8. Generate hypotheses.
+9. Verify hypotheses.
+10. Write capsule and evaluation outputs.
+11. Create a zip archive.
+
+### 6.2 Evaluation command
+
+Implement:
+
+```bash
+fcapsule evaluate --case ./cases/case_001 --output ./outputs/case_001
+```
+
+This should compute or recompute objective evaluation metrics and baseline comparisons.
+
+### 6.3 Optional debug command
+
+Implement if easy:
+
+```bash
+fcapsule inspect --case ./cases/case_001
+```
+
+This should print case metadata, entity matches, log counts, metric counts, and alert info.
+
+---
+
+## 7. Core Pipeline Design
+
+### 7.1 Case Loader
+
+Responsibilities:
+
+- read all case files;
+- validate required fields;
+- parse timestamps;
+- normalize field names;
+- return a structured `CaseBundle` object.
+
+Failure behavior:
+
+- if required files are missing, return a clear error;
+- if optional files are missing, continue with warnings;
+- if timestamps are invalid, fail with explanation.
+
+### 7.2 Entity Resolver
+
+Responsibilities:
+
+- identify primary service, cluster, namespace, pod, and CNCC UUID;
+- align entities across alert, logs, and metrics;
+- detect mismatches;
+- generate entity coverage summary.
+
+Output example:
+
+```json
+{
+  "primary_entity": "checkout-service",
+  "matched_labels": {
+    "cncc_uuid": "cncc-12345",
+    "namespace": "checkout",
+    "cluster": "prod-cluster-a"
+  },
+  "coverage": {
+    "logs_found": true,
+    "metrics_found": true,
+    "alert_found": true
+  },
+  "warnings": []
+}
+```
+
+### 7.3 Anonymizer
+
+Even if P1 uses prepared data, include anonymization utilities.
+
+Mask:
+
+- IP addresses;
+- UUIDs;
+- long IDs;
+- tokens;
+- secrets;
+- emails;
+- hostnames if needed;
+- customer identifiers.
+
+Output must preserve structure while removing sensitive values.
+
+Example:
+
+```text
+Failed to connect to 10.0.0.3 after 3 retries
+```
+
+becomes:
+
+```text
+Failed to connect to <IP> after <NUM> retries
+```
+
+### 7.4 Log Reducer
+
+Responsibilities:
+
+- normalize log messages;
+- group logs into templates;
+- count frequency;
+- compute severity distribution;
+- compute first seen and last seen;
+- compute temporal proximity to alert;
+- select representative lines;
+- identify high-volume low-value templates;
+- identify rare or high-severity templates.
+
+For P1, use a simple Drain-inspired approach:
+
+1. mask variable tokens;
+2. tokenize message;
+3. group by normalized template string;
+4. calculate statistics;
+5. select top templates based on evidence score.
+
+Output fields:
+
+```json
+{
+  "template_id": "log_template_007",
+  "template": "Failed to connect to <IP> after <NUM> retries",
+  "count": 18342,
+  "volume_percentage": 31.2,
+  "levels": {"ERROR": 18342},
+  "first_seen": "2026-06-21T09:58:12Z",
+  "last_seen": "2026-06-21T10:28:33Z",
+  "representative_lines": [
+    "2026-06-21T10:01:22Z Failed to connect to <IP> after <NUM> retries"
+  ]
+}
+```
+
+### 7.5 Metrics Analyzer
+
+Responsibilities:
+
+- parse metric series;
+- calculate baseline statistics;
+- detect spikes or drops;
+- rank anomalous metrics;
+- link metrics to entities;
+- summarize metric changes.
+
+Use explainable methods for P1:
+
+- z-score;
+- robust z-score;
+- percentage change;
+- moving average comparison;
+- alert-window proximity.
+
+Output example:
+
+```json
+{
+  "metric_id": "metric_003",
+  "metric": "container_memory_working_set_bytes",
+  "entity": "checkout-api-7c9d",
+  "anomaly_score": 0.87,
+  "reason": "Memory increased 85% near alert time compared with previous baseline."
+}
+```
+
+### 7.6 Alert Timeline Builder
+
+Responsibilities:
+
+- parse alert time;
+- include alert severity and labels;
+- build chronological timeline;
+- support multiple future alerts;
+- connect alert labels with resolved entities.
+
+Output example:
 
 ```markdown
-# FCAPSule Evidence Capsule: checkout-service / prod-a
-
-## Summary
-Between 10:03 and 10:32 UTC, checkout-service showed elevated error rate, timeout logs, and critical faults.
-
-## Strongest Evidence
-1. Error rate increased 8x above baseline.
-2. Timeout log template increased 12.4x.
-3. Critical fault began one minute after metric anomaly.
-4. OpenSearch delay increased, so evidence completeness is reduced.
-
-## Next Investigation Steps
-- Inspect affected pods.
-- Check upstream dependency latency.
-- Verify whether logs after 10:30 arrived late.
+09:57 — Warning: OpenSearch indexing delay increased
+10:00 — Warning: HighLogVolume fired for checkout-service
+10:05 — Error log spike detected
 ```
 
----
+### 7.7 Evidence Attention Engine
 
-## 5. Development Scope
+This is the core of P1.
 
-### 5.1 MVP scope
+Responsibilities:
 
-The MVP must be small but complete.
+- combine log templates, metric anomalies, alerts, and metadata;
+- score evidence items;
+- rank evidence;
+- select top evidence for the capsule;
+- explain why evidence was selected;
+- summarize discarded evidence.
 
-MVP features:
-
-1. Ingest a fixed incident window.
-2. Load logs from CSV/JSON/OpenSearch export.
-3. Load metrics from Prometheus query export or CSV.
-4. Load faults from CSV/JSON.
-5. Extract log templates and top patterns.
-6. Detect metric anomalies.
-7. Build a fault timeline.
-8. Rank evidence using an LLM.
-9. Generate Markdown + JSON evidence capsule.
-10. Evaluate compression ratio and signal preservation.
-
-### 5.2 Strong final scope
-
-Add:
-
-1. Adapters for OpenSearch, Prometheus, and fault JSON.
-2. Kafka/OpenSearch delay analysis.
-3. Kubernetes metadata mapping.
-4. Model comparison runner.
-5. Human evaluation form.
-6. Dashboard or Streamlit UI.
-7. Evidence citations inside generated capsule.
-8. Optional Grafana screenshot interpretation.
-9. Optional vector store for previous capsules.
-10. Optional synthetic demo dataset for public GitHub.
-
-### 5.3 Out of scope
-
-Do not attempt:
-
-- Full auto-remediation.
-- Guaranteed root-cause prediction.
-- Direct production changes.
-- Reading every raw log with an LLM.
-- Training a large model from scratch.
-- Building a full observability vendor platform.
-
-### 5.4 Stretch goals
-
-If time remains:
-
-- Capsule similarity search: “find past evidence capsules similar to this one.”
-- Capsule diff: compare two incident windows.
-- Agent mode: multiple agents debate evidence inclusion.
-- Grafana panel generator for the capsule.
-- Automatic postmortem draft.
-- OpenTelemetry Collector policy recommendation.
-
----
-
-## 6. Proposed Architecture
+Suggested scoring formula:
 
 ```text
-                ┌─────────────────────────────┐
-                │ Incident Trigger             │
-                │ app / cluster / time window  │
-                └──────────────┬──────────────┘
-                               ↓
-┌────────────────────────────────────────────────────────────┐
-│ Data Adapters                                               │
-│ - OpenSearch logs                                           │
-│ - Prometheus metrics                                        │
-│ - Fault/alert stream                                        │
-│ - Kafka/OpenSearch delay metadata                           │
-│ - Kubernetes metadata                                       │
-└──────────────────────┬─────────────────────────────────────┘
-                       ↓
-┌────────────────────────────────────────────────────────────┐
-│ Preprocessing Layer                                         │
-│ - normalize timestamps                                      │
-│ - map app/service/pod/cluster                               │
-│ - deduplicate events                                        │
-│ - compute baseline windows                                  │
-└──────────────────────┬─────────────────────────────────────┘
-                       ↓
-┌────────────────────────────────────────────────────────────┐
-│ Model Layer                                                 │
-│ - Log Template Model                                        │
-│ - Metric Anomaly Model                                      │
-│ - Fault Timeline Classifier                                 │
-│ - Embedding Retrieval                                       │
-│ - LLM Evidence Ranker / Explainer                           │
-└──────────────────────┬─────────────────────────────────────┘
-                       ↓
-┌────────────────────────────────────────────────────────────┐
-│ Evidence Attention Layer                                    │
-│ - score evidence                                            │
-│ - select evidence                                           │
-│ - explain inclusion/exclusion                               │
-│ - cite source IDs                                           │
-└──────────────────────┬─────────────────────────────────────┘
-                       ↓
-┌────────────────────────────────────────────────────────────┐
-│ Capsule Generator                                           │
-│ - JSON capsule                                              │
-│ - Markdown report                                           │
-│ - optional UI                                               │
-└────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 7. Recommended Tech Stack
-
-### 7.1 Language and backend
-
-- Python 3.11+
-- FastAPI for API mode
-- Typer or Click for CLI mode
-- Pydantic for schemas
-- Pandas / Polars for data processing
-- NumPy / SciPy / scikit-learn for metrics/anomaly utilities
-
-### 7.2 Data sources
-
-- OpenSearch client for logs
-- Prometheus HTTP API for metrics
-- CSV/JSON fallback loaders for development
-- Kafka metadata from exported topic/consumer data if direct access is not safe
-- Kubernetes metadata via exported JSON or API if available
-
-### 7.3 Models
-
-Possible choices:
-
-**Log processing**
-
-- Drain3-style log template parser.
-- SentenceTransformers / BGE / E5 embeddings for semantic grouping.
-- Optional LLM for semantic classification of log patterns.
-
-**Metrics**
-
-- Statistical baseline: z-score, rolling median/MAD.
-- Isolation Forest for anomaly detection.
-- Prophet / Chronos / TimesFM / other time-series model if feasible.
-
-**LLM reasoning**
-
-- DeepSeek, Qwen, GPT, Claude, Llama, or local model.
-- Must compare at least two if possible.
-
-**Optional VLM**
-
-- Qwen-VL, LLaVA, GPT vision, or similar for screenshots.
-
-### 7.4 Storage
-
-- Local filesystem for MVP.
-- SQLite/Postgres for metadata.
-- Qdrant/Chroma for vector retrieval if implementing capsule memory.
-
-### 7.5 UI
-
-- CLI first.
-- Streamlit for fast demo.
-- Optional React/FastAPI later.
-
----
-
-## 8. Repository Structure
-
-```text
-fcapsule-ai/
-├── README.md
-├── pyproject.toml
-├── .env.example
-├── configs/
-│   ├── sample_app.yaml
-│   ├── model_config.yaml
-│   └── scoring_config.yaml
-├── data/
-│   ├── sample/
-│   │   ├── logs.jsonl
-│   │   ├── metrics.csv
-│   │   ├── faults.json
-│   │   └── k8s_metadata.json
-│   └── README.md
-├── fcapsule/
-│   ├── __init__.py
-│   ├── cli.py
-│   ├── api.py
-│   ├── schemas/
-│   │   ├── capsule.py
-│   │   ├── telemetry.py
-│   │   └── evidence.py
-│   ├── adapters/
-│   │   ├── base.py
-│   │   ├── opensearch_adapter.py
-│   │   ├── prometheus_adapter.py
-│   │   ├── fault_adapter.py
-│   │   ├── kafka_adapter.py
-│   │   └── k8s_adapter.py
-│   ├── preprocessors/
-│   │   ├── timestamps.py
-│   │   ├── normalizer.py
-│   │   └── entity_mapper.py
-│   ├── models/
-│   │   ├── log_template_extractor.py
-│   │   ├── metric_anomaly_detector.py
-│   │   ├── fault_timeline_builder.py
-│   │   ├── embedding_retriever.py
-│   │   └── llm_evidence_ranker.py
-│   ├── attention/
-│   │   ├── evidence_scoring.py
-│   │   ├── selector.py
-│   │   └── exclusion_explainer.py
-│   ├── generation/
-│   │   ├── capsule_json.py
-│   │   ├── capsule_markdown.py
-│   │   └── prompt_templates.py
-│   ├── evaluation/
-│   │   ├── compression.py
-│   │   ├── signal_preservation.py
-│   │   ├── hallucination_check.py
-│   │   ├── human_eval.py
-│   │   └── model_comparison.py
-│   └── utils/
-│       ├── logging.py
-│       └── time_windows.py
-├── tests/
-│   ├── test_log_templates.py
-│   ├── test_metric_anomalies.py
-│   ├── test_capsule_generation.py
-│   └── test_evaluation.py
-├── notebooks/
-│   ├── exploratory_log_analysis.ipynb
-│   └── evaluation_results.ipynb
-├── reports/
-│   ├── sample_capsule.md
-│   └── evaluation_summary.md
-└── docs/
-    ├── architecture.md
-    ├── literature_review_notes.md
-    └── university_template_checklist.md
-```
-
----
-
-## 9. Data Model
-
-### 9.1 Log event
-
-```python
-class LogEvent(BaseModel):
-    timestamp: datetime
-    indexed_at: datetime | None = None
-    app: str | None = None
-    cluster: str | None = None
-    namespace: str | None = None
-    pod: str | None = None
-    container: str | None = None
-    severity: str | None = None
-    message: str
-    raw: dict = {}
-```
-
-### 9.2 Metric point
-
-```python
-class MetricPoint(BaseModel):
-    timestamp: datetime
-    metric_name: str
-    value: float
-    labels: dict[str, str] = {}
-```
-
-### 9.3 Fault event
-
-```python
-class FaultEvent(BaseModel):
-    timestamp: datetime
-    fault_name: str
-    severity: str
-    app: str | None = None
-    cluster: str | None = None
-    namespace: str | None = None
-    pod: str | None = None
-    description: str | None = None
-    raw: dict = {}
-```
-
-### 9.4 Evidence item
-
-```python
-class EvidenceItem(BaseModel):
-    evidence_id: str
-    evidence_type: Literal["log", "metric", "fault", "topology", "telemetry_health"]
-    source: str
-    title: str
-    description: str
-    timestamp_range: tuple[datetime, datetime] | None = None
-    score: float
-    confidence: float
-    raw_refs: list[str]
-    reason_for_inclusion: str
-```
-
----
-
-## 10. Evidence Scoring
-
-A simple scoring function is enough for MVP. It must be explainable.
-
-### 10.1 Log pattern usefulness score
-
-```text
-log_usefulness =
+attention_score =
   severity_weight
-+ anomaly_window_overlap
-+ fault_window_overlap
++ anomaly_score
++ temporal_proximity
++ entity_match_score
 + rarity_score
-+ change_vs_baseline
-+ semantic_debug_value
++ semantic_relevance
 - repetition_penalty
-- known_noise_penalty
 ```
 
-### 10.2 Metric usefulness score
+Do not make this a black box in P1. Store intermediate scores in `evidence.json`.
 
-```text
-metric_usefulness =
-  anomaly_score
-+ service_relevance
-+ fault_temporal_overlap
-+ known_sli_weight
-+ change_vs_baseline
+Evidence item example:
+
+```json
+{
+  "evidence_id": "ev_log_007",
+  "type": "log_template",
+  "source_id": "log_template_007",
+  "score": 0.91,
+  "why_selected": "High-frequency ERROR pattern near the alert window for the affected pod.",
+  "linked_entities": ["checkout-service", "checkout-api-7c9d"],
+  "time_range": {
+    "start": "2026-06-21T09:58:12Z",
+    "end": "2026-06-21T10:28:33Z"
+  }
+}
 ```
 
-### 10.3 Fault usefulness score
+### 7.8 Hypothesis Generator
 
-```text
-fault_usefulness =
-  severity_weight
-+ first_occurrence_weight
-+ affected_entity_count
-+ duration_weight
-+ correlation_with_logs_metrics
-```
-
-### 10.4 Telemetry health score
-
-Track if evidence might be incomplete:
-
-- Log generated_at vs indexed_at delay.
-- Kafka lag / topic growth.
-- Missing logs from pods.
-- Prometheus scrape gaps.
-- Fault timestamp ordering issues.
-
-This is important because the capsule should not pretend evidence is complete when the pipeline itself was delayed.
-
----
-
-## 11. LLM Prompting Strategy
-
-### 11.1 Key principle
-
-The LLM should not inspect raw logs directly except for small representative examples. It should receive structured evidence candidates from other models.
-
-### 11.2 Evidence ranking prompt
-
-```text
-You are an observability evidence ranking assistant.
-Your task is NOT to determine a final root cause.
-Your task is to rank evidence items by usefulness for incident investigation.
+Use an LLM only after evidence has been selected.
 
 Input:
-- incident metadata
-- candidate log patterns
-- candidate metric anomalies
-- fault timeline
-- telemetry health notes
 
-Rules:
-1. Every claim must reference evidence IDs.
-2. Do not invent missing data.
-3. If telemetry is delayed or incomplete, mention it as a limitation.
-4. Prefer evidence that overlaps across multiple domains.
-5. Explain why high-volume evidence may be excluded if it is repetitive or weakly correlated.
+- alert context;
+- selected evidence;
+- metric anomalies;
+- log summaries;
+- missing evidence notes.
 
 Output:
-- ranked evidence list
-- capsule summary
-- excluded evidence explanation
-- next investigation steps
-- limitations
+
+```json
+[
+  {
+    "hypothesis_id": "hyp_001",
+    "hypothesis": "A log volume spike may have contributed to indexing delay.",
+    "confidence": 0.74,
+    "supporting_evidence": ["ev_log_007", "ev_metric_003", "ev_alert_001"],
+    "contradicting_evidence": [],
+    "missing_evidence": ["Kafka consumer lag", "OpenSearch indexing queue metrics"],
+    "next_checks": [
+      "Check Kafka consumer lag for the affected topic.",
+      "Check OpenSearch indexing queue metrics during the alert window."
+    ]
+  }
+]
 ```
 
-### 11.3 Capsule summary prompt
+Important: hypotheses must be phrased as plausible investigation paths, not absolute conclusions.
 
-```text
-Generate a concise incident evidence capsule for an engineer.
-Do not claim final root cause.
-Use only the supplied evidence items.
-Cite evidence IDs after each important statement.
-Separate strong evidence from weak evidence.
-Include telemetry completeness warnings.
+### 7.9 Hypothesis Verifier
+
+Responsibilities:
+
+- check that every hypothesis cites evidence IDs;
+- check that cited evidence IDs exist;
+- identify unsupported claims;
+- adjust confidence if necessary;
+- add warnings for weak reasoning.
+
+Output example:
+
+```json
+{
+  "hypothesis_id": "hyp_001",
+  "verdict": "plausible",
+  "adjusted_confidence": 0.70,
+  "verification_notes": [
+    "All cited evidence IDs exist.",
+    "The hypothesis is plausible but Kafka lag evidence is missing."
+  ]
+}
 ```
 
----
+### 7.10 Capsule Writer
 
-## 12. Evaluation Plan
-
-### 12.1 Baselines
-
-Compare FCAPSule AI against:
-
-1. **Raw sample baseline**: randomly sample logs and ask LLM to summarize.
-2. **Top-volume baseline**: choose highest-volume log patterns and top alerts.
-3. **Single-LLM baseline**: feed a limited raw telemetry sample to one LLM.
-4. **FCAPSule pipeline**: log templates + metric anomalies + faults + evidence ranking.
-
-### 12.2 Metrics
-
-#### Compression ratio
-
-```text
-compression_ratio = raw_input_size / capsule_size
-```
-
-Examples:
-
-- 2,000,000 logs → 30 log patterns.
-- 500 MB raw logs → 15 KB capsule.
-
-#### Signal preservation
-
-Define known signal windows:
-
-- Fault windows.
-- Metric anomaly windows.
-- Critical log severity windows.
-- Kafka/OpenSearch delay windows.
-- Pod restart windows.
-
-Measure how many appear in the capsule.
-
-#### Evidence diversity
-
-Check whether the capsule includes at least:
-
-- One log evidence item.
-- One metric evidence item.
-- One fault evidence item.
-- One telemetry health/context item.
-
-#### Faithfulness
-
-Manual or automated check:
-
-- Every major claim must cite evidence IDs.
-- Penalize unsupported statements.
-
-#### Human usefulness
-
-Ask reviewers to rate 1–5:
-
-- Clarity.
-- Completeness.
-- Usefulness for investigation.
-- Trustworthiness.
-- Missing important evidence.
-
-#### Token and cost reduction
-
-Estimate:
-
-- Tokens required for raw/sampled telemetry.
-- Tokens required for capsule generation.
-- API cost per investigation.
-
-#### Latency
-
-Measure:
-
-- Adapter loading time.
-- Model processing time.
-- LLM generation time.
-- Total capsule generation time.
-
-### 12.3 Expected result format
+Generate `capsule.md` with this structure:
 
 ```markdown
-## Evaluation Summary
+# FCAPSule AI Evidence Capsule
 
-Dataset: 10 incident windows across 5 applications
+## 1. Case Summary
 
-| Method | Compression | Signal Preservation | Human Usefulness | Avg Tokens | Avg Latency |
-|---|---:|---:|---:|---:|---:|
-| Random sample + LLM | 20x | 52% | 2.8/5 | 18k | 35s |
-| Top-volume baseline | 35x | 61% | 3.1/5 | 12k | 22s |
-| FCAPSule AI | 120x | 88% | 4.2/5 | 4k | 28s |
+## 2. Alert Context
+
+## 3. Telemetry Window
+
+## 4. Incident Timeline
+
+## 5. Selected Evidence
+
+## 6. Log Compression Summary
+
+## 7. Metric Anomalies
+
+## 8. Ranked Investigation Hypotheses
+
+## 9. Missing Evidence
+
+## 10. Suggested Next Steps
+
+## 11. Retention Note
+
+## 12. Evaluation Summary
 ```
 
-The exact numbers above are illustrative. Do not include fake results in the final report; replace them with measured results.
+The Retention Note is important. It should answer:
+
+> If raw telemetry expires, what useful evidence has this capsule preserved?
 
 ---
 
-## 13. Development Milestones
+## 8. Evaluation Design
 
-### Week 1–2: Project foundation
+Evaluation is central to the project. P1 should be evaluated during development, not only at the end.
 
-- Create repo and architecture docs.
-- Build sample data format.
-- Implement schemas.
-- Create CLI skeleton.
-- Implement local JSON/CSV loaders.
-- Generate first empty capsule template.
+### 8.1 Main evaluation question
 
-Deliverable:
+> Can FCAPSule AI reduce noisy incident telemetry into compact evidence capsules while preserving useful investigation signal?
 
-```bash
-fcapsule investigate --sample data/sample
+### 8.2 Baselines
+
+Implement or manually compare against:
+
+1. **Raw telemetry baseline**
+   - User receives raw logs, metrics, and alert data.
+
+2. **Keyword filter baseline**
+   - Select logs using simple filters: `ERROR`, `WARN`, pod name, service name, alert name.
+
+3. **Time-window sample baseline**
+   - Select fixed number of logs around the alert timestamp.
+
+4. **Single LLM baseline**
+   - Send a naive sampled telemetry subset to an LLM without structured evidence selection.
+
+### 8.3 Objective metrics
+
+Generate `evaluation.json` with:
+
+```json
+{
+  "raw_log_lines": 100000,
+  "selected_log_lines": 120,
+  "log_compression_ratio": 0.9988,
+  "raw_log_bytes": 50000000,
+  "capsule_bytes": 120000,
+  "token_reduction_percentage": 0.992,
+  "important_signal_preservation": 0.91,
+  "hypothesis_grounding_score": 0.86,
+  "runtime_seconds": 94,
+  "retention_survivability_score": 0.88
+}
 ```
 
-### Week 3–4: Log pipeline
+Metric definitions:
 
-- Implement log normalization.
-- Implement log template extraction.
-- Compute top templates by volume.
-- Compute severity counts.
-- Compute change vs baseline if baseline window exists.
-- Add representative examples.
+- **Log compression ratio:** reduction from raw lines/bytes to selected evidence.
+- **Template reduction ratio:** raw messages vs grouped templates.
+- **Token reduction:** estimated raw input tokens vs final evidence tokens.
+- **Signal preservation:** percentage of important evidence items preserved.
+- **Metric anomaly preservation:** whether anomalous metrics are included.
+- **Hypothesis grounding score:** percentage of LLM claims linked to evidence IDs.
+- **Runtime:** total processing time.
+- **Retention survivability score:** whether the capsule contains enough sections to remain useful after raw data expires.
 
-Deliverable:
+### 8.4 Signal preservation method
 
-- Log evidence section in capsule.
+Since ground-truth RCA may not be available, define “important signal” operationally.
 
-### Week 5–6: Metrics pipeline
+Important signal can include:
 
-- Implement Prometheus export loader.
-- Implement anomaly detection baseline.
-- Rank metric anomalies.
-- Add metric evidence section.
+- high-severity alert;
+- ERROR or WARN templates;
+- rare templates;
+- templates that spike near alert time;
+- metrics with anomaly scores above threshold;
+- affected service/pod/cluster labels;
+- known suspicious keywords;
+- notes from `expected_notes.md`.
 
-Deliverable:
+`expected_notes.md` can be used as a lightweight manual reference for each case.
 
-- Metric evidence section in capsule.
+### 8.5 Subjective evaluation
 
-### Week 7–8: Fault timeline pipeline
+Create a manual review form in `docs/p1_evaluation.md`.
 
-- Implement fault loader.
-- Build timeline.
-- Rank faults by severity/time/entity.
-- Correlate faults with log/metric windows.
+Ask reviewers to compare baseline output and FCAPSule output.
 
-Deliverable:
+Use 1–5 Likert scores:
 
-- Fault timeline in capsule.
+| Question | Scale |
+|---|---|
+| How clear is the capsule? | 1–5 |
+| How useful is it for starting investigation? | 1–5 |
+| How trustworthy are the hypotheses? | 1–5 |
+| Does it miss important evidence? | 1–5 |
+| Are the suggested next steps actionable? | 1–5 |
+| Would this save time compared with raw logs? | 1–5 |
 
-### Week 9–10: LLM evidence ranking
+Include free-text questions:
 
-- Implement model abstraction.
-- Add DeepSeek/Qwen/local/GPT-compatible providers.
-- Build prompt templates.
-- Generate capsule summary and next steps.
-- Enforce evidence citations.
+- What was most useful?
+- What was confusing?
+- What evidence seemed missing?
+- Would you use this during an investigation?
+- What should be improved in the next iteration?
 
-Deliverable:
+### 8.6 Development testing
 
-- Full Markdown and JSON capsule.
+Add tests for:
 
-### Week 11–12: Evaluation framework
+- input schema validation;
+- timestamp parsing;
+- log anonymization;
+- template grouping;
+- metric anomaly scoring;
+- evidence score calculation;
+- evidence ID integrity;
+- capsule file creation;
+- evaluation metrics.
 
-- Implement compression metrics.
-- Implement signal preservation metrics.
-- Implement human evaluation form.
-- Compare baselines.
-
-Deliverable:
-
-- Evaluation report.
-
-### Week 13–14: Polish and demo
-
-- Add Streamlit UI or polished CLI output.
-- Add anonymized sample dataset.
-- Add diagrams.
-- Add README.
-- Prepare final video and report figures.
+Add regression tests using the same sample case so that changes do not break previous behavior.
 
 ---
 
-## 14. API / CLI Design
+## 9. Documentation Requirements
 
-### 14.1 CLI commands
+Codex/developer should create or rewrite the following docs.
 
-```bash
-fcapsule investigate --config configs/sample_app.yaml
-```
+### 9.1 `README.md`
 
-```bash
-fcapsule evaluate --dataset data/eval --methods random_sample top_volume fcapsule
-```
+Must include:
 
-```bash
-fcapsule compare-models --config configs/model_config.yaml
-```
+- project description;
+- what problem it solves;
+- quickstart;
+- example command;
+- example output;
+- P1 limitations;
+- roadmap.
 
-```bash
-fcapsule render --capsule reports/capsule.json --format markdown
-```
+### 9.2 `PROJECT_DESIGN.md`
 
-### 14.2 API endpoints
+Must include:
 
-```http
-POST /investigate
-GET /capsules/{capsule_id}
-POST /evaluate
-GET /health
-```
+- project overview;
+- template alignment;
+- domain and users;
+- architecture;
+- components;
+- design rationale;
+- P1 scope;
+- roadmap.
 
-### 14.3 Config file example
+### 9.3 `DATA_SCHEMA.md`
 
-```yaml
-app: checkout-service
-cluster: prod-a
-namespace: checkout
-window:
-  from: "2026-05-01T10:00:00Z"
-  to: "2026-05-01T11:00:00Z"
-data_sources:
-  logs:
-    type: jsonl
-    path: data/sample/logs.jsonl
-  metrics:
-    type: csv
-    path: data/sample/metrics.csv
-  faults:
-    type: json
-    path: data/sample/faults.json
-  k8s:
-    type: json
-    path: data/sample/k8s_metadata.json
-models:
-  log_embeddings: sentence-transformers/all-MiniLM-L6-v2
-  llm_provider: deepseek
-  metric_anomaly: rolling_mad
-output:
-  json: reports/sample_capsule.json
-  markdown: reports/sample_capsule.md
-```
+Must document:
 
----
+- case folder structure;
+- `metadata.yaml`;
+- `alert.json`;
+- `prometheus_metrics.json`;
+- `opensearch_logs.json`;
+- output schemas.
 
-## 15. Security and Privacy Considerations
+### 9.4 `EVALUATION_PLAN.md`
 
-Because production telemetry may contain sensitive information:
+Must document:
 
-- Never commit real company data.
-- Use anonymized samples.
-- Redact secrets, tokens, phone numbers, customer identifiers, IPs if needed.
-- Keep adapters configurable but use synthetic data in public repo.
-- Store only evidence IDs or redacted snippets in generated capsules.
-- Avoid sending sensitive raw logs to external APIs unless approved.
-- Prefer local models for sensitive experiments when possible.
+- main evaluation question;
+- baselines;
+- objective metrics;
+- subjective review method;
+- scoring rubric;
+- limitations.
 
-Add a privacy section to the report.
+### 9.5 `PROMPTS.md`
 
----
+Must include:
 
-## 16. Literature Review Notes
+- hypothesis generation prompt;
+- verification prompt;
+- capsule writing prompt;
+- constraints requiring evidence IDs;
+- no unsupported RCA claims.
 
-Use these as starting references.
+### 9.6 `ROADMAP.md`
 
-### 16.1 RCACopilot
+Must show:
 
-**Paper:** *Automatic Root Cause Analysis via Large Language Models for Cloud Incidents*  
-**URL:** https://arxiv.org/abs/2305.15778
+- P1 implementation;
+- P2 live adapters;
+- P3 Alertmanager trigger;
+- P4 better scoring;
+- P5 UI;
+- P6 retention-aware store;
+- P7 final evaluation.
 
-Relevance:
+### 9.7 `docs/data_privacy.md`
 
-- Shows that LLMs can help with root cause analysis for cloud incidents.
-- Evaluated on real Microsoft incident data.
-- Demonstrates value of aggregating diagnostic information.
+Must explain:
 
-Gap:
-
-- Focuses on root cause prediction.
-- FCAPSule AI focuses on evidence selection before root cause reasoning.
-
-### 16.2 AIOpsLab
-
-**Paper:** *AIOpsLab: A Holistic Framework to Evaluate AI Agents for Enabling Autonomous Clouds*  
-**URL:** https://arxiv.org/abs/2501.06706
-
-Relevance:
-
-- Shows the direction of AIOps research toward autonomous agents and evaluation frameworks.
-- Uses microservice environments, fault injection, telemetry export, and agent interfaces.
-
-Gap:
-
-- Focuses on controlled benchmark environments.
-- FCAPSule AI focuses on evidence capsules from large-scale telemetry where reproduction may not be possible.
-
-### 16.3 LLM4Log
-
-**Paper:** *LLM4Log: A Systematic Review of Large Language Model-based Log Analysis*  
-**URL:** https://arxiv.org/abs/2604.16359
-
-Relevance:
-
-- Surveys LLM usage across log parsing, anomaly detection, failure prediction, RCA, summarization.
-- Highlights real deployment challenges: context limits, latency, cost, privacy, hallucinations, drift, grounding.
-
-Gap:
-
-- FCAPSule AI directly addresses the context/grounding bottleneck by selecting compact evidence before LLM reasoning.
-
-### 16.4 LogCleaner
-
-**Paper:** *Reducing Events to Augment Log-based Anomaly Detection Models: An Empirical Study*  
-**URL:** https://arxiv.org/abs/2409.04834
-
-Relevance:
-
-- Demonstrates that reducing noisy/redundant log events can improve anomaly detection efficiency.
-- Provides support for telemetry reduction and signal preservation as a valid research direction.
-
-Gap:
-
-- Focuses mainly on logs and anomaly detection.
-- FCAPSule AI extends the idea to logs + metrics + faults + telemetry health.
-
-### 16.5 AdaptiveLog
-
-**Paper:** *AdaptiveLog: An Adaptive Log Analysis Framework with the Collaboration of Large and Small Language Model*  
-**URL:** https://arxiv.org/abs/2501.11031
-
-Relevance:
-
-- Shows cost-aware collaboration between smaller and larger language models.
-- Useful pattern for FCAPSule AI: cheap models filter, expensive models explain.
-
-Gap:
-
-- Primarily log-analysis focused.
-- FCAPSule AI uses multimodal telemetry attention.
-
-### 16.6 FCAPS background
-
-**Topic:** FCAPS network management model  
-**Reference starting point:** https://en.wikipedia.org/wiki/FCAPS
-
-Relevance:
-
-- Provides conceptual grounding for Fault, Configuration, Accounting/Administration, Performance, Security.
-- The project name and domain framing come from this model.
+- anonymization;
+- no secrets;
+- no customer identifiers;
+- safe sample data;
+- how to use synthetic cases.
 
 ---
 
-## 17. Presentation / Marketing Narrative
+## 10. LLM Prompting Requirements
 
-### 17.1 University pitch
+Prompts must enforce grounding.
 
-> FCAPSule AI is a system that orchestrates pre-trained AI models across logs, metrics, fault alerts, and infrastructure metadata to generate compact incident evidence capsules. The project investigates whether multi-model telemetry attention can reduce the amount of data engineers need to inspect while preserving important diagnostic signal.
+### 10.1 Hypothesis generation rules
 
-### 17.2 LinkedIn pitch
+The LLM must:
 
-> I built FCAPSule AI — a flight recorder for cloud incidents.  
-> It uses multiple AI models to compress logs, Prometheus metrics, fault alerts and infrastructure context into a compact evidence capsule.  
-> The goal is simple: help humans and AI agents stop drowning in telemetry.
+- only use provided evidence;
+- cite evidence IDs;
+- avoid absolute root cause claims;
+- state missing evidence;
+- generate ranked hypotheses;
+- include next checks;
+- include confidence with explanation.
 
-### 17.3 Manager pitch
+The LLM must not:
 
-> FCAPSule AI can reduce the time engineers spend collecting and organizing observability evidence. Instead of manually checking logs, metrics, faults and telemetry delays across different systems, it produces a structured investigation package that can be shared with application teams.
+- invent metrics;
+- invent logs;
+- invent services;
+- claim root cause without evidence;
+- ignore missing data.
 
-### 17.4 Report thesis
+### 10.2 Hypothesis verifier rules
 
-> The main bottleneck in AI-assisted operations is not only reasoning over telemetry, but selecting trustworthy evidence from massive, noisy, multimodal telemetry streams.
+The verifier must:
+
+- check evidence IDs exist;
+- identify unsupported claims;
+- reduce confidence for weak evidence;
+- flag missing evidence;
+- produce verification notes.
+
+### 10.3 Capsule writing rules
+
+The capsule writer must:
+
+- be concise but complete;
+- include evidence IDs;
+- clearly separate observed facts from hypotheses;
+- include missing evidence;
+- include retention note;
+- include evaluation summary.
 
 ---
 
-## 18. Success Criteria
+## 11. Success Criteria for P1
 
-The project is successful if:
+P1 is successful if it can:
 
-- It processes at least three telemetry domains.
-- It uses at least three pre-trained models or model-like components.
-- It generates useful JSON and Markdown evidence capsules.
-- It reduces raw telemetry into a compact evidence package.
-- It preserves important fault/anomaly signals.
-- It cites evidence IDs for generated claims.
-- It compares against baselines.
-- It includes a clear literature review.
-- It includes a clear evaluation methodology.
-- It is explainable enough for a 3–5 minute video pitch.
+1. load a prepared case folder;
+2. parse alert, log, metric, and metadata files;
+3. align telemetry by entity and time window;
+4. reduce logs into templates and representative evidence;
+5. detect relevant metric anomalies;
+6. rank evidence across logs, metrics, and alerts;
+7. generate evidence-grounded hypotheses;
+8. verify hypotheses;
+9. produce a structured capsule;
+10. produce objective evaluation metrics;
+11. compare against at least one baseline;
+12. preserve enough information to support later investigation under retention constraints.
 
 ---
 
-## 19. Codex / AI Coding Assistant Prompt
+## 12. Contingency Plans
 
-Use this as the starting prompt for Codex or another coding assistant:
+| Risk | Contingency |
+|---|---|
+| Real data cannot be used | Use anonymized or synthetic sample cases |
+| Metrics are incomplete | Focus P1 on logs + alerts first |
+| LLM API is unavailable | Use local model or stub output for pipeline testing |
+| LLM output hallucinates | Enforce evidence IDs and verifier step |
+| Log parsing is weak | Improve masking, use stricter templates, manually inspect templates |
+| Project takes too long | Prioritize loader, reducer, attention engine, capsule writer, evaluation |
+| No reviewers available | Use structured self-review and peer feedback |
+| Live integrations are difficult | Keep adapters stubbed until P2/P3 |
+
+---
+
+## 13. Implementation Priorities
+
+Build in this order:
+
+1. Repository structure and docs.
+2. Case schemas.
+3. Case Loader.
+4. Entity Resolver.
+5. Log Reducer.
+6. Metrics Analyzer.
+7. Alert Timeline Builder.
+8. Evidence Attention Engine.
+9. Capsule Writer without LLM.
+10. Evaluation metrics.
+11. Hypothesis Generator.
+12. Hypothesis Verifier.
+13. Baselines.
+14. Zip archive output.
+15. Documentation polish.
+
+This order ensures that the project works even before the LLM reasoning is added.
+
+---
+
+## 14. Example Final CLI Output
 
 ```text
-We are building FCAPSule AI, a Python project for a university final project.
+$ fcapsule investigate --case ./cases/case_001 --out ./outputs/case_001
 
-Goal:
-Create a multimodal telemetry attention engine that generates compact incident evidence capsules from logs, metrics, faults, and infrastructure metadata.
+FCAPSule AI — Investigation started
+Case: case_001
+Service: checkout-service
+Window: 2026-06-21T09:30:00Z → 2026-06-21T10:30:00Z
 
-Core requirements:
-1. Provide a CLI called `fcapsule`.
-2. Load sample telemetry from local JSON/CSV/JSONL files.
-3. Normalize logs, metrics, faults, and Kubernetes metadata into Pydantic models.
-4. Extract log templates and rank top log patterns.
-5. Detect metric anomalies using a simple baseline method first, such as rolling median/MAD or z-score.
-6. Build a fault timeline from fault events.
-7. Score and select evidence items across logs, metrics, faults, and telemetry health.
-8. Use an LLM provider abstraction to generate a Markdown capsule summary from structured evidence.
-9. Ensure generated claims cite evidence IDs.
-10. Output both JSON and Markdown capsules.
-11. Include evaluation utilities for compression ratio, signal preservation, token estimate, and human review template.
-12. Include tests for core modules.
+Loaded:
+- Alerts: 1
+- Log lines: 100000
+- Metric series: 18
 
-Do not build production integrations first. Start with local file adapters and clean architecture. Add OpenSearch/Prometheus adapters later behind interfaces.
+Results:
+- Log templates generated: 245
+- Selected evidence items: 32
+- Hypotheses generated: 4
+- Hypotheses verified: 4
 
-Please create the initial repository structure, Pydantic schemas, CLI skeleton, sample data format, and a minimal working pipeline that reads local sample data and generates a basic evidence capsule.
+Evaluation:
+- Log compression ratio: 99.88%
+- Token reduction: 99.2%
+- Signal preservation: 91.0%
+- Grounded claims: 86.0%
+- Retention survivability: 88.0%
+
+Output written to: ./outputs/case_001/fcapsule_case_001.zip
 ```
 
 ---
 
-## 20. Final Recommended MVP Definition
+## 15. Final Notes for Codex / AI Coding Agent
 
-For the first working version, build exactly this:
+When implementing this project:
 
-1. `fcapsule investigate --config configs/sample_app.yaml`
-2. Reads:
-   - `logs.jsonl`
-   - `metrics.csv`
-   - `faults.json`
-   - `k8s_metadata.json`
-3. Produces:
-   - `reports/sample_capsule.json`
-   - `reports/sample_capsule.md`
-4. Includes:
-   - top 10 log templates;
-   - top 10 metric anomalies;
-   - fault timeline;
-   - telemetry delay notes if available;
-   - ranked evidence;
-   - next investigation steps;
-   - limitations;
-   - compression metrics.
-5. Compares:
-   - random sample baseline;
-   - top-volume baseline;
-   - FCAPSule AI pipeline.
+- prioritize clarity over cleverness;
+- keep P1 simple and reproducible;
+- avoid overengineering live integrations;
+- document every assumption;
+- keep outputs human-readable and machine-readable;
+- ensure every generated hypothesis links to evidence IDs;
+- keep raw data and final capsule separate;
+- include anonymization utilities from the start;
+- write tests for each module;
+- update documentation whenever implementation choices change;
+- do not claim final root cause unless the evidence supports it;
+- preserve the roadmap so this P1 can evolve into the final version.
 
-This is enough for a strong prototype and can be expanded safely.
+The core idea is:
 
----
-
-## 21. Final Memory Aid
-
-Do not forget the core thesis:
-
-> **FCAPSule AI is not another AI SRE chatbot. It is an AI evidence selection system for cloud incidents.**
-
-Do not overclaim:
-
-- It does not guarantee root cause.
-- It does not auto-fix production.
-- It does not replace engineers.
-
-Do claim:
-
-- It compresses telemetry.
-- It preserves important signals.
-- It makes evidence usable.
-- It orchestrates multiple AI models.
-- It is measurable.
-- It is aligned with FCAPS/AIOps/observability.
+> FCAPSule AI is not trying to store everything or solve everything. It is trying to preserve the evidence that matters before raw telemetry disappears.
 
