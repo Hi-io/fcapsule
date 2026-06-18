@@ -63,7 +63,7 @@ def generate_hypotheses(selected: list[dict[str, Any]]) -> list[dict[str, Any]]:
         hypotheses.append(
             {
                 "hypothesis_id": f"hyp_{len(hypotheses) + 1:03d}",
-                "hypothesis": "Telemetry volume or delivery pressure may reduce the completeness of retained incident logs.",
+                "hypothesis": "Higher application log production may add ingestion pressure, but an effect on telemetry completeness is not established.",
                 "confidence": round(sum(next(item["score"] for item in selected if item["evidence_id"] == value) for value in support) / len(support) * 0.8, 3),
                 "supporting_evidence": support,
                 "contradicting_evidence": [],

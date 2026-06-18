@@ -1,0 +1,18 @@
+{
+  "alertname": "CheckoutHighErrorRate",
+  "status": "firing",
+  "severity": "warning",
+  "startsAt": "2026-06-21T16:34:02.269600Z",
+  "endsAt": null,
+  "labels": {
+    "service": "checkout-service",
+    "namespace": "checkout",
+    "cluster": "demo-cluster",
+    "pod": "checkout-api-7c9d",
+    "cncc_uuid": "cncc-demo-12345"
+  },
+  "annotations": {
+    "summary": "Checkout request error rate exceeded 25 percent",
+    "description": "The synthetic payment dependency failure caused checkout requests to return HTTP 503."
+  }
+}
