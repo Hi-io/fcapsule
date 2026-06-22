@@ -1,5 +1,7 @@
 # FCAPSule AI - Concept Guide
 
+> **Historical document:** This concept draft is retained for project history. `FCAPSule_AI_Project_Guide.md` is the reviewed source of truth for the current design and Prototype 1 requirements.
+
 **Project subtitle:** A Multimodal Telemetry Attention Engine for Cloud Incident Evidence
 
 **Public tagline:** *A flight recorder for cloud incidents.*

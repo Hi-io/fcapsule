@@ -1,5 +1,7 @@
 # FCAPSule AI - Implementation Proposal
 
+> **Historical document:** This early proposal is retained for design history. The implemented P1 architecture is documented in `PROJECT_DESIGN.md`, and `FCAPSule_AI_Project_Guide.md` is the current requirements source of truth.
+
 **Document status:** Draft implementation proposal. This file describes one possible way to build FCAPSule AI. Architecture, schemas, model choices, scoring functions, prompts, repository layout and API/CLI design are intentionally allowed to change as the project evolves.
 
 For the stable project concept, goals, evaluation intent and academic framing, see `FCAPSule_AI_Concept.md`.

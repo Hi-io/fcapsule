@@ -10,3 +10,4 @@ build/
 outputs/*
 !outputs/.gitkeep
 demo/runtime/
+*:Zone.Identifier
