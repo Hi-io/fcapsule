@@ -25,29 +25,36 @@ def render_capsule(payload: dict[str, Any]) -> str:
         lines.extend([f"- **{alert['alertname']}** is `{alert['status']}` with `{alert['severity']}` severity.", f"- Started at `{alert['startsAt']}`.", f"- {alert.get('annotations', {}).get('description', 'No description supplied.')}", ""])
     else:
         lines.extend(["No alert was supplied.", ""])
-    lines.extend(["## 3. Telemetry Window", "", f"`{metadata['window']['start']}` to `{metadata['window']['end']}` ({metadata.get('timezone', 'UTC')}).", "", "## 4. Incident Timeline", ""])
+    lines.extend(["## 3. Telemetry Window", "", f"`{metadata['window']['start']}` to `{metadata['window']['end']}` ({metadata.get('timezone', 'UTC')}).", "", "## 4. Multidomain Telemetry Map", "", "In FCAPSule P1, a domain is a telemetry signal family with its own data shape and analysis method. It is similar to how text, audio, and images are different AI modalities, but here the domains are operational telemetry: fault events, log text, time-series metrics, topology metadata, and LLM reasoning.", ""])
+    for domain_id, domain in payload.get("domain_summary", {}).items():
+        lines.append(
+            f"- **{domain['label']}** (`{domain_id}`): {domain['signal_family']}; "
+            f"selected evidence `{domain['selected_evidence_items']}`; P1 role: {domain['p1_role']}"
+        )
+    lines.extend(["", "## 5. Incident Timeline", ""])
     for item in payload["timeline"]:
         lines.append(f"- `{item['timestamp']}` **{item['type']}**: {item['title']} - {item['description']}")
-    lines.extend(["", "## 5. Selected Evidence", ""])
+    lines.extend(["", "## 6. Selected Evidence", ""])
     for rank, item in enumerate(payload["selected_evidence"], start=1):
-        lines.append(f"{rank}. **{item['title']}** (`{item['evidence_id']}`, score `{item['score']:.3f}`): {item['summary']}")
-    lines.extend(["", "## 6. Log Compression Summary", "", f"- Raw lines: `{payload['log_summary']['raw_lines']}`", f"- Grouped templates: `{payload['log_summary']['template_count']}`", f"- Selected representative lines: `{payload['log_summary']['selected_lines']}`", ""])
+        domain = item.get("domain", "unknown")
+        lines.append(f"{rank}. **{item['title']}** (`{item['evidence_id']}`, `{domain}`, score `{item['score']:.3f}`): {item['summary']}")
+    lines.extend(["", "## 7. Log Compression Summary", "", f"- Raw lines: `{payload['log_summary']['raw_lines']}`", f"- Grouped templates: `{payload['log_summary']['template_count']}`", f"- Selected representative lines: `{payload['log_summary']['selected_lines']}`", ""])
     for template in payload["log_templates"][:10]:
         lines.append(f"- `{template['template_id']}`: {template['template']} - {template['count']} lines, levels {template['levels']}")
-    lines.extend(["", "## 7. Metric Anomalies", ""])
+    lines.extend(["", "## 8. Metric Anomalies", ""])
     for metric in payload["metric_anomalies"]:
         lines.append(f"- `{metric['metric_id']}` **{metric['metric']}** (score `{metric['anomaly_score']:.3f}`): {metric['reason']}")
-    lines.extend(["", "## 8. Ranked Investigation Hypotheses", ""])
+    lines.extend(["", "## 9. Ranked Investigation Hypotheses", ""])
     for hypothesis in payload["hypotheses"]:
         evidence = ", ".join(f"`{value}`" for value in hypothesis["supporting_evidence"])
         lines.extend([f"### {hypothesis['hypothesis_id']}: {hypothesis['hypothesis']}", "", f"- Verdict: `{hypothesis['verdict']}`; adjusted confidence: `{hypothesis['adjusted_confidence']:.3f}`.", f"- Supporting evidence: {evidence}.", f"- Verification: {' '.join(hypothesis['verification_notes'])}", ""])
-    lines.extend(["## 9. Missing Evidence", ""])
+    lines.extend(["## 10. Missing Evidence", ""])
     for item in payload["missing_evidence"]:
         lines.append(f"- {item}")
-    lines.extend(["", "## 10. Suggested Next Steps", ""])
+    lines.extend(["", "## 11. Suggested Next Steps", ""])
     for item in payload["next_steps"]:
         lines.append(f"- {item}")
-    lines.extend(["", "## 11. Retention Note", "", "If raw telemetry expires, this capsule preserves the alert context, affected entities, event timing, anonymized representative log patterns, metric changes, evidence scores, grounded hypotheses, missing-data warnings, and next checks. Raw logs are intentionally not copied into the capsule archive.", "", "## 12. Evaluation Summary", ""])
+    lines.extend(["", "## 12. Retention Note", "", "If raw telemetry expires, this capsule preserves the alert context, affected entities, event timing, anonymized representative log patterns, metric changes, evidence scores, grounded hypotheses, missing-data warnings, and next checks. Raw logs are intentionally not copied into the capsule archive.", "", "## 13. Evaluation Summary", ""])
     evaluation = payload.get("evaluation", {})
     if evaluation:
         lines.extend([f"- Log compression: `{evaluation['log_compression_ratio']:.1%}`", f"- Template reduction: `{evaluation['template_reduction_ratio']:.1%}`", f"- Signal preservation: `{evaluation['important_signal_preservation']:.1%}`", f"- Grounded hypothesis citations: `{evaluation['hypothesis_grounding_score']:.1%}`", f"- Retention survivability: `{evaluation['retention_survivability_score']:.1%}`"])

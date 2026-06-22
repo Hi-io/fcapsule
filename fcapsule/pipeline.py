@@ -8,6 +8,7 @@ from typing import Any
 
 from fcapsule.attention.evidence_scorer import score_evidence
 from fcapsule.attention.evidence_selector import select_evidence
+from fcapsule.domains import build_domain_summary
 from fcapsule.evaluation.baselines import build_baselines
 from fcapsule.evaluation.metrics import calculate_metrics
 from fcapsule.io.archive_writer import create_archive
@@ -51,6 +52,7 @@ def investigate_case(case_dir: str | Path, output_dir: str | Path) -> dict[str, 
         "next_steps": next_steps,
         "warnings": entities["warnings"],
     }
+    payload["domain_summary"] = build_domain_summary(payload, candidates)
     baselines = build_baselines(bundle)
     output = Path(output_dir).resolve()
     write_outputs(output, payload, candidates, baselines)

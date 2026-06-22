@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from fcapsule.domains import domain_for_evidence_type
 from fcapsule.models.schemas import CaseBundle
 
 ALERT_SEVERITY = {"critical": 1.0, "error": 0.85, "warning": 0.65, "warn": 0.65, "info": 0.25}
@@ -48,6 +49,7 @@ def score_evidence(
             {
                 "evidence_id": f"ev_alert_{index:03d}",
                 "type": "alert",
+                "domain": domain_for_evidence_type("alert"),
                 "source_id": f"alert_{index:03d}",
                 "title": str(alert["alertname"]),
                 "summary": alert.get("annotations", {}).get("description", "Alert fired"),
@@ -81,6 +83,7 @@ def score_evidence(
             {
                 "evidence_id": f"ev_{template['template_id']}",
                 "type": "log_template",
+                "domain": domain_for_evidence_type("log_template"),
                 "source_id": template["template_id"],
                 "title": template["template"],
                 "summary": f"{template['count']} matching logs ({template['volume_percentage']:.1f}% of the case).",
@@ -114,6 +117,7 @@ def score_evidence(
             {
                 "evidence_id": f"ev_{metric['metric_id']}",
                 "type": "metric_anomaly",
+                "domain": domain_for_evidence_type("metric_anomaly"),
                 "source_id": metric["metric_id"],
                 "title": metric["metric"],
                 "summary": metric["reason"],
