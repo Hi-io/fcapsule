@@ -14,6 +14,7 @@ from fcapsule.pipeline import investigate_case
 from fcapsule.processing.entity_resolver import resolve_entities
 from fcapsule.reasoning.llm_client import LLMUnavailableError
 from fcapsule.reasoning.model_comparator import DEFAULT_MODELS, compare_models
+from fcapsule.ui.dashboard import render_dashboard
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -31,6 +32,8 @@ def _parser() -> argparse.ArgumentParser:
     evaluate = subparsers.add_parser("evaluate", help="Recompute objective evaluation metrics")
     evaluate.add_argument("--case", required=True)
     evaluate.add_argument("--output", required=True)
+    dashboard = subparsers.add_parser("dashboard", help="Render the static HTML review dashboard")
+    dashboard.add_argument("--output", required=True, help="Directory containing capsule and evaluation outputs")
     inspect = subparsers.add_parser("inspect", help="Validate and summarize a case")
     inspect.add_argument("--case", required=True)
     return parser
@@ -93,6 +96,8 @@ def main(argv: list[str] | None = None) -> int:
                 "entity_resolution": resolve_entities(bundle),
             }
             print(json.dumps(summary, indent=2))
+        elif args.command == "dashboard":
+            print(render_dashboard(args.output))
         return 0
     except CaseValidationError as exc:
         print(f"Case validation failed: {exc}", file=sys.stderr)

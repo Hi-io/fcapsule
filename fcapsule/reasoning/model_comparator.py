@@ -234,6 +234,9 @@ def compare_models(
     }
     write_json(output / "llm_comparison.json", comparison)
     write_json(output / "llm_prompt.json", {"messages": prompt})
+    from fcapsule.ui.dashboard import render_dashboard
+
+    render_dashboard(output)
     return comparison
 
 
