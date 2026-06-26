@@ -24,6 +24,34 @@ python3 -m fcapsule.cli evaluate --case cases/case_001 --output outputs/case_001
 
 Evaluation reruns the deterministic pipeline so metrics remain synchronized with implementation changes.
 
+## Compare DeepSeek Models
+
+Set the API key only in the shell environment. Do not place it in committed files.
+
+```bash
+export DEEPSEEK_API_KEY=...
+python3 -m fcapsule.cli compare-llms \
+  --capsule outputs/case_001/capsule.json \
+  --out outputs/case_001 \
+  --models deepseek-v4-flash deepseek-v4-pro
+```
+
+The command sends the same capsule to both models and writes:
+
+- `llm_comparison.json`;
+- `llm_prompt.json`;
+- `dashboard.html`.
+
+The comparison records model output, usage, latency, citation validity, domain coverage, expected signal coverage, actionability, winner, and score delta. It does not write the API key.
+
+## Open the Dashboard
+
+```bash
+python3 -m fcapsule.cli dashboard --output outputs/case_001
+```
+
+Open `outputs/case_001/dashboard.html` in a browser to inspect the multidomain evidence map, objective metrics, and model comparison.
+
 ## Recreate the Reference Incident
 
 ```bash
@@ -48,3 +76,4 @@ The script:
 - Missing PyYAML: install `requirements.txt` in a Python environment.
 - No alert during capture: verify the failure request count is sufficient to exceed 25% error rate.
 - Unexpected anomaly results: confirm counter metrics end in `_total` and timestamps cover both baseline and incident periods.
+- Empty DeepSeek content: increase `--max-tokens`; these models may spend some completion tokens on reasoning before final content.

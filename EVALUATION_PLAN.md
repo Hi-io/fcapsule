@@ -18,9 +18,9 @@ Select logs containing `ERROR`, `WARN`, the primary service, or alert name. This
 
 Select the 20 logs nearest to the first alert. This tests whether structured reduction is better than a bounded chronological sample.
 
-### Single-LLM protocol
+### DeepSeek same-input comparison
 
-Provide the same bounded raw sample to one LLM without template grouping or evidence scoring. Record provider/model, prompt, token count, latency, cost, unsupported claims, and reviewer scores. This baseline is not run by default because P1 must remain reproducible without credentials.
+Send the same generated `capsule.json` to `deepseek-v4-flash` and `deepseek-v4-pro`. Record provider/model, prompt, token count, latency, parse status, evidence citations, unsupported claims, domain coverage, expected signal coverage, and reviewer notes. This comparison is optional because P1 must still work without credentials, but it is part of the current P1 evaluation when a DeepSeek API key is configured.
 
 ## Objective Metrics
 
@@ -34,6 +34,9 @@ Provide the same bounded raw sample to one LLM without template grouping or evid
 | Hypothesis grounding | Valid cited evidence IDs / all cited evidence IDs |
 | Runtime | End-to-end wall-clock pipeline time |
 | Retention survivability | Present required capsule sections / eight required sections |
+| LLM domain coverage | Operational telemetry domains explicitly used by the model / four source domains |
+| LLM expected signal coverage | Expected incident signal groups mentioned / expected signal groups |
+| LLM citation validity | Valid cited evidence IDs / cited evidence IDs |
 
 P1 token estimates use serialized character count divided by four. They are comparative estimates, not provider billing counts.
 
@@ -63,6 +66,7 @@ Reviewers compare the capsule with raw and baseline outputs using the form in `d
 - hypothesis grounding exactly 100%;
 - every hypothesis has missing evidence or next checks;
 - archive excludes raw telemetry;
+- optional LLM comparison stores prompt, responses, scores, usage, and dashboard output without storing credentials;
 - all automated tests pass.
 
 ## Limitations and Threats to Validity

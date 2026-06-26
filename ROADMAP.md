@@ -9,7 +9,8 @@
 - alert timeline;
 - explainable evidence ranking;
 - grounded hypothesis generation and verification;
-- Markdown/JSON capsule, evaluation, baselines, and archive;
+- optional DeepSeek same-input comparison;
+- Markdown/JSON capsule, evaluation, baselines, static dashboard, and archive;
 - synthetic incident capture and regression tests.
 
 ## P2: Live Read Adapters
@@ -33,11 +34,12 @@
 - cross-case similarity;
 - more explicit contradiction handling.
 
-## P5: Review UI
+## P5: Rich Review UI
 
 - local case browser;
 - evidence inclusion/exclusion controls;
 - side-by-side baseline comparison;
+- model comparison history;
 - reviewer feedback capture.
 
 ## P6: Retention-Aware Capsule Store

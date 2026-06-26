@@ -10,7 +10,11 @@ The execution environment does not include Pydantic or pip. P1 therefore perform
 
 ## Deterministic Reasoning by Default
 
-External LLM availability, privacy approval, and output stability cannot be assumed. A deterministic evidence-only generator proves orchestration and verification now; `LLMClient` defines the future replacement boundary.
+External LLM availability, privacy approval, and output stability cannot be assumed. A deterministic evidence-only generator proves orchestration and verification now. The optional DeepSeek comparison uses the same capsule input for `deepseek-v4-flash` and `deepseek-v4-pro`, then scores outputs through a fixed rubric without making the rest of P1 depend on credentials.
+
+## Domains Are Operational Signal Families
+
+P1 uses "domain" to mean fault events, log text, time-series metrics, topology metadata, and LLM reasoning. This is intentionally clearer than saying only "multimodal", because reviewers may otherwise assume media modalities such as text, audio, and image. FCAPSule does not need image generation for P1; the important point is that each telemetry family has a different structure and analysis method.
 
 ## Counter Deltas
 
@@ -23,3 +27,7 @@ P1 records severity, anomaly, time proximity, entity match, rarity, relevance, a
 ## Derived-Only Archive
 
 The archive exists to preserve useful evidence under retention constraints, not to duplicate all telemetry. Raw source files remain outside the ZIP.
+
+## Static Dashboard Before Full UI
+
+P1 includes a generated `dashboard.html` so the model comparison and domain map are easy to inspect. It is not a production UI, does not require a server, and can be replaced by a richer P5 review interface.

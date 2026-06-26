@@ -19,7 +19,7 @@ Prototype 1 should **not** attempt to be a production-ready system. P1 should pr
 
 > Given a prepared incident case containing alert, log, metric, and metadata files, can FCAPSule AI reduce noisy telemetry into a compact evidence capsule while preserving important investigation signal?
 
-The first implementation should use a CLI and file-based inputs. Live Prometheus, OpenSearch, Kafka, and Alertmanager integrations are part of the roadmap, not mandatory for P1.
+The first implementation should use a CLI and file-based inputs. Live Prometheus, OpenSearch, Kafka, and Alertmanager integrations are part of the roadmap, not mandatory for P1. A simple static dashboard and optional DeepSeek model comparison may be included in P1 because they make the evaluation easier to inspect without changing the local-first architecture.
 
 ---
 
@@ -27,7 +27,15 @@ The first implementation should use a CLI and file-based inputs. Live Prometheus
 
 ### 1.1 What FCAPSule AI is
 
-FCAPSule AI is a **multimodal telemetry attention engine**. It consumes multiple telemetry sources and produces a compact evidence capsule.
+FCAPSule AI is a **multidomain telemetry attention engine**. It consumes multiple telemetry sources and produces a compact evidence capsule.
+
+In this project, a domain means an operational telemetry signal family. It is analogous to how text, audio, and image are different AI modalities, but FCAPSule P1 does not require image generation. The P1 domains are:
+
+- **Fault events:** alert and incident event streams.
+- **Log text:** semi-structured application logs.
+- **Time-series metrics:** numeric measurements over time.
+- **Topology metadata:** service, namespace, pod, cluster, CNCC UUID, and related entity labels.
+- **LLM reasoning:** generated, evidence-grounded interpretation and next-check suggestions.
 
 It should:
 
@@ -40,7 +48,9 @@ It should:
 - generate grounded investigation hypotheses;
 - verify whether the hypotheses are supported by actual evidence;
 - generate a final capsule in Markdown and structured machine-readable formats;
-- produce evaluation metrics to compare against simple baselines.
+- produce evaluation metrics to compare against simple baselines;
+- optionally compare `deepseek-v4-flash` and `deepseek-v4-pro` on the same capsule input;
+- render a local dashboard for review.
 
 ### 1.2 What FCAPSule AI is not, especially in P1
 
@@ -91,7 +101,7 @@ The goal is:
 
 The project should include at least three distinct domains. P1 should implement at least three of the following:
 
-1. **Logs / text telemetry**
+1. **Logs / text telemetry domain**
    - log masking;
    - template extraction;
    - severity detection;
@@ -99,7 +109,7 @@ The project should include at least three distinct domains. P1 should implement 
    - representative log selection;
    - optional embeddings or LLM semantic scoring.
 
-2. **Performance metrics / time-series telemetry**
+2. **Performance metrics / time-series telemetry domain**
    - z-score;
    - robust z-score;
    - moving average;
@@ -107,18 +117,18 @@ The project should include at least three distinct domains. P1 should implement 
    - percentage change;
    - anomaly window detection.
 
-3. **Fault alerts / event stream**
+3. **Fault alerts / event-stream domain**
    - alert parsing;
    - severity ranking;
    - timeline construction;
    - entity matching with logs and metrics.
 
-4. **Infrastructure / topology context**
+4. **Infrastructure / topology context domain**
    - service, namespace, pod, cluster mapping;
    - CNCC UUID or equivalent label resolution;
    - matching evidence across telemetry sources.
 
-5. **LLM-based reasoning**
+5. **LLM-based reasoning domain**
    - hypothesis generation;
    - explanation;
    - missing evidence identification;
@@ -172,6 +182,8 @@ Implement:
 - capsule generation;
 - objective evaluation metrics;
 - baseline comparison;
+- optional DeepSeek same-input comparison;
+- static local dashboard;
 - documentation.
 
 ### 3.3 Excluded from P1
@@ -184,7 +196,7 @@ Do not implement unless everything else is complete:
 - real OpenSearch adapter;
 - production deployment;
 - authentication;
-- web UI;
+- production web UI;
 - Grafana dashboard generation;
 - parallel agent execution;
 - automatic remediation.
@@ -198,7 +210,7 @@ The repository should be designed so that future versions can add:
 | P2 | Real Prometheus and OpenSearch adapters |
 | P3 | Alertmanager webhook trigger |
 | P4 | More advanced evidence attention scoring |
-| P5 | Local web UI for case review |
+| P5 | Richer web UI for case review |
 | P6 | Retention-aware capsule store |
 | P7 | More case studies and user feedback |
 | P8 | Optional integration with Grafana dashboards |
@@ -1131,4 +1143,3 @@ When implementing this project:
 The core idea is:
 
 > FCAPSule AI is not trying to store everything or solve everything. It is trying to preserve the evidence that matters before raw telemetry disappears.
-

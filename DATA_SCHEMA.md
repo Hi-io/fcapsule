@@ -99,6 +99,7 @@ Contains:
 
 - `schema_version`;
 - case metadata and alerts;
+- `domain_summary` describing the P1 operational telemetry domains;
 - entity resolution and warnings;
 - timeline;
 - selected evidence and selection summary;
@@ -112,7 +113,7 @@ Contains:
 Contains every candidate evidence item, including candidates not selected. Each item records:
 
 - stable `evidence_id` and source ID;
-- domain type;
+- explicit telemetry `domain` and evidence `type`;
 - title and summary;
 - total score;
 - every intermediate score component;
@@ -126,8 +127,16 @@ Contains objective metrics and inline definitions. Ratios use values from `0.0` 
 
 ### `baselines.json`
 
-Contains raw, keyword-filter, time-window sample, and single-LLM baseline protocols/results. The offline P1 records the single-LLM baseline as not run unless an approved provider is configured.
+Contains raw, keyword-filter, time-window sample, and LLM comparison protocol data. The deterministic P1 records LLM comparison outputs only when an approved provider is configured and `compare-llms` is run.
+
+### `llm_comparison.json`
+
+Created by `compare-llms`. It contains the exact prompt, compared model names, parsed responses when available, raw assistant content, token usage, latency, citation validity, domain coverage, expected signal coverage, actionability score, winner, and score delta. API keys are never written to this file.
+
+### `dashboard.html`
+
+Static local review UI generated from `capsule.json`, `evaluation.json`, and optional `llm_comparison.json`. It is a derived artifact and can be regenerated.
 
 ### Archive
 
-`fcapsule_<case_id>.zip` contains the five derived output files. It excludes raw telemetry by design.
+`fcapsule_<case_id>.zip` contains derived output files. It excludes raw telemetry and credentials by design.

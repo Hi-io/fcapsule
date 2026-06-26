@@ -1,8 +1,10 @@
 # FCAPSule AI
 
-FCAPSule AI is a multimodal telemetry attention engine for cloud incident evidence. It reduces a prepared bundle of alerts, logs, metrics, and infrastructure metadata into a compact, grounded evidence capsule that remains useful after raw telemetry expires.
+FCAPSule AI is a multidomain telemetry attention engine for cloud incident evidence. It reduces a prepared bundle of alerts, logs, metrics, and infrastructure metadata into a compact, grounded evidence capsule that remains useful after raw telemetry expires.
 
 Prototype 1 (P1) is deliberately local and reproducible. It proves the evidence-selection workflow using files and a CLI before live Prometheus, OpenSearch, Kafka, or Alertmanager integrations are introduced.
+
+In P1, "multimodal" means multiple operational telemetry domains, not media generation. The handled domains are fault events, log text, time-series metrics, topology metadata, and optional LLM reasoning.
 
 ## What P1 Does
 
@@ -16,7 +18,8 @@ P1:
 - builds an alert-centered timeline;
 - scores and selects cross-domain evidence;
 - generates and verifies evidence-grounded investigation hypotheses;
-- writes Markdown and JSON capsules, evaluation results, baselines, and a ZIP archive.
+- optionally compares DeepSeek LLM outputs on the same capsule input;
+- writes Markdown and JSON capsules, evaluation results, baselines, a static dashboard, and a ZIP archive.
 
 It does not claim a final root cause, modify production systems, or replace an observability platform.
 
@@ -38,6 +41,22 @@ Recompute evaluation results:
 
 ```bash
 python3 -m fcapsule.cli evaluate --case ./cases/case_001 --output ./outputs/case_001
+```
+
+Compare the same capsule with DeepSeek models:
+
+```bash
+export DEEPSEEK_API_KEY=...
+python3 -m fcapsule.cli compare-llms \
+  --capsule ./outputs/case_001/capsule.json \
+  --out ./outputs/case_001 \
+  --models deepseek-v4-flash deepseek-v4-pro
+```
+
+Open the local visual review page:
+
+```bash
+python3 -m fcapsule.cli dashboard --output ./outputs/case_001
 ```
 
 Run the full test suite:
@@ -67,6 +86,9 @@ outputs/case_001/
   evidence.json
   evaluation.json
   baselines.json
+  llm_comparison.json      # only after compare-llms
+  llm_prompt.json          # only after compare-llms
+  dashboard.html
   fcapsule_case_001.zip
 ```
 
@@ -75,7 +97,7 @@ outputs/case_001/
 - Inputs are prepared files, not live observability APIs.
 - Log parsing is Drain-inspired masking and exact template grouping.
 - Metric analysis uses explainable statistical methods rather than a trained forecasting model.
-- The default hypothesis generator is deterministic so P1 works without an API key.
+- The default hypothesis generator is deterministic so P1 works without an API key; DeepSeek comparison is an optional P1 evaluation mode.
 - The sample incident is synthetic and does not establish production RCA accuracy.
 
 ## Documentation
@@ -85,6 +107,7 @@ outputs/case_001/
 - `DATA_SCHEMA.md`: case and output contracts.
 - `EVALUATION_PLAN.md`: baselines, metrics, and review rubric.
 - `PROMPTS.md`: grounded reasoning constraints.
+- `docs/llm_comparison.md`: DeepSeek comparison workflow and rubric.
 - `ROADMAP.md`: evolution beyond P1.
 - `docs/p1_usage.md`: detailed operating guide.
 - `docs/design_decisions.md`: important P1 trade-offs.

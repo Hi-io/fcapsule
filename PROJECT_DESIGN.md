@@ -2,13 +2,13 @@
 
 ## Overview
 
-FCAPSule AI preserves the evidence that matters before raw telemetry disappears. It accepts a bounded incident case and orchestrates text reduction, time-series analysis, alert processing, entity resolution, evidence attention, grounded reasoning, verification, and evaluation.
+FCAPSule AI preserves the evidence that matters before raw telemetry disappears. It accepts a bounded incident case and orchestrates log-text reduction, time-series analysis, fault-event processing, topology/entity resolution, evidence attention, grounded reasoning, optional LLM comparison, verification, and evaluation.
 
 The primary P1 user is an engineer who needs a compact starting point for investigation. The academic goal is to demonstrate Template 4.1, orchestration of AI models and analysis methods toward a shared goal, rather than a single chatbot over sampled logs.
 
 ## P1 Scope
 
-P1 is a local CLI with file-based inputs. It implements the complete logical workflow and stable extension interfaces while excluding live integrations, authentication, remediation, and a web UI.
+P1 is a local CLI with file-based inputs. It implements the complete logical workflow and stable extension interfaces while excluding live integrations, authentication, remediation, and production deployment. A static local dashboard is included to make evaluation and model comparison easier to inspect.
 
 ## Architecture
 
@@ -29,7 +29,22 @@ schema validation -> entity resolution -> anonymization
                                                       |
                                                       v
                                    capsule + evaluation + archive
+                                                     |
+                                                     v
+                                   optional DeepSeek comparison + dashboard
 ```
+
+## Telemetry Domains
+
+"Domain" is explicit in P1. It means a different operational signal family with its own data shape and analysis method. This is analogous to how text, audio, and images are different AI modalities, but FCAPSule P1 does not need image generation. Its domains are:
+
+| Domain | Data shape | P1 method | Output role |
+|---|---|---|---|
+| Fault events | Alert/event records | severity ranking, timeline construction | incident trigger and window |
+| Log text | Semi-structured textual logs | masking, template extraction, severity/frequency analysis | compact behavioral evidence |
+| Time-series metrics | Numeric timestamped samples | counter deltas, robust change scoring | measurable degradation evidence |
+| Topology metadata | service/pod/namespace/cluster/CNCC labels | entity resolution and coverage checks | cross-domain alignment |
+| LLM reasoning | generated structured analysis | prompted comparison and citation scoring | optional evaluation of model-assisted interpretation |
 
 ## Components
 
@@ -57,13 +72,15 @@ Normalizes one or more alerts and combines them with selected log and metric eve
 
 Normalizes cross-domain features and records every scoring component. P1 prioritizes severity, anomaly, temporal proximity, entity match, rarity, and relevance while penalizing repetitive low-value logs.
 
-### Reasoning and verification
+### Reasoning, LLM comparison, and verification
 
-The default deterministic reasoner produces cautious investigation paths from selected evidence. The verifier rejects nonexistent evidence IDs and reduces confidence when support is weak or required telemetry is missing. An optional LLM client boundary can replace generation later without changing upstream processing.
+The default deterministic reasoner produces cautious investigation paths from selected evidence. The verifier rejects nonexistent evidence IDs and reduces confidence when support is weak or required telemetry is missing.
 
-### Evaluation
+The optional DeepSeek comparison sends the same `capsule.json` to `deepseek-v4-flash` and `deepseek-v4-pro`, stores each response, records token usage and latency, validates evidence citations, and scores the outputs against a fixed rubric. This supports the project question of whether a stronger model produces a better grounded investigation note under the same process.
 
-The evaluator compares the selected capsule against keyword and time-window baselines. It reports compression, template reduction, token reduction, signal preservation, anomaly preservation, grounding, runtime, and retention survivability.
+### Evaluation and dashboard
+
+The evaluator compares the selected capsule against keyword and time-window baselines. It reports compression, template reduction, token reduction, signal preservation, anomaly preservation, grounding, runtime, retention survivability, and optional LLM comparison results. The dashboard renders these outputs in a local HTML page for quick review.
 
 ## Design Rationale
 
@@ -82,7 +99,7 @@ P1 orchestrates distinct domains:
 2. metric/time-series anomaly analysis;
 3. fault/alert event processing;
 4. infrastructure entity resolution;
-5. grounded hypothesis generation and verification.
+5. LLM-assisted reasoning comparison and deterministic verification.
 
 Each stage changes or enriches the shared evidence representation, and downstream stages depend on earlier outputs. This is an orchestrated pipeline, not unrelated parallel calls.
 

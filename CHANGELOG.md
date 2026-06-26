@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.0 - 2026-06-28
+
+### Added
+
+- Explicit operational telemetry domain model across P1 evidence and capsules.
+- Optional DeepSeek same-input comparison for `deepseek-v4-flash` and `deepseek-v4-pro`.
+- Static local dashboard for multidomain evidence, evaluation metrics, and LLM comparison.
+
+### Changed
+
+- Documentation now distinguishes telemetry domains from media modalities such as text, audio, and images.
+- P1 evaluation now records model-specific output quality, citation validity, domain coverage, usage, and latency when LLM comparison is enabled.
+
 ## 0.1.0 - 2026-06-22
 
 ### Added

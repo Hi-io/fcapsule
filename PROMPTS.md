@@ -1,6 +1,6 @@
 # FCAPSule AI Grounded Reasoning Prompts
 
-P1 uses deterministic reasoning by default. These prompts define the contract for a future approved LLM implementation and the constraints already enforced by the verifier.
+P1 uses deterministic reasoning by default and can optionally compare DeepSeek model outputs. These prompts define the grounding contract enforced by the verifier and the comparison rubric.
 
 ## Hypothesis Generation
 
@@ -49,6 +49,20 @@ Write a concise but complete evidence capsule for an engineer.
 - Include measured evaluation results only; never fabricate results.
 ```
 
+## DeepSeek Same-Input Comparison
+
+```text
+You are FCAPSule AI's incident investigation model. Analyze only the supplied evidence.
+Do not invent telemetry, do not assert final root cause, and cite evidence IDs exactly.
+Return valid JSON only.
+
+Explain the operational telemetry domains separately:
+- fault_events: alert/event stream evidence;
+- log_text: semi-structured log template evidence;
+- time_series_metrics: numeric metric evidence;
+- topology_metadata: service, pod, namespace, cluster, and CNCC alignment.
+```
+
 ## Mechanical Enforcement
 
-Regardless of model output, P1 verifies cited IDs against selected evidence, bounds confidence to `[0, 1]`, marks unknown IDs unsupported, and reduces confidence for weak or incomplete support.
+Regardless of model output, P1 verifies cited IDs against selected evidence, bounds confidence to `[0, 1]`, marks unknown IDs unsupported, and reduces confidence for weak or incomplete support. The DeepSeek comparison additionally scores JSON validity, citation validity, domain coverage, expected signal coverage, actionability, and cautious RCA language.
