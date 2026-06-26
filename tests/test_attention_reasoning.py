@@ -24,8 +24,10 @@ class AttentionReasoningTests(unittest.TestCase):
             self.assertIn("entity_match_score", item["score_components"])
 
     def test_selection_preserves_each_domain(self):
-        domains = {item["type"] for item in self.selected}
-        self.assertTrue({"alert", "log_template", "metric_anomaly"}.issubset(domains))
+        types = {item["type"] for item in self.selected}
+        domains = {item["domain"] for item in self.selected}
+        self.assertTrue({"alert", "log_template", "metric_anomaly"}.issubset(types))
+        self.assertTrue({"fault_events", "log_text", "time_series_metrics"}.issubset(domains))
 
     def test_generated_hypotheses_are_fully_grounded(self):
         hypotheses = generate_hypotheses(self.selected)
