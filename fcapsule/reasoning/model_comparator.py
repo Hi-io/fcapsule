@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from fcapsule.io.archive_writer import create_archive
 from fcapsule.io.output_writer import write_json
 from fcapsule.reasoning.llm_client import ChatRequest, DeepSeekChatClient, LLMUnavailableError
 
@@ -237,6 +238,7 @@ def compare_models(
     from fcapsule.ui.dashboard import render_dashboard
 
     render_dashboard(output)
+    create_archive(output, capsule["case"]["case_id"])
     return comparison
 
 
