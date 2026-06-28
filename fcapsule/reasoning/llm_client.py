@@ -26,7 +26,7 @@ class ChatRequest:
     model: str
     messages: list[dict[str, str]]
     max_tokens: int = 2400
-    temperature: float = 0.2
+    temperature: float = 0.0
 
 
 class DeepSeekChatClient:

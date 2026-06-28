@@ -45,7 +45,7 @@ The command sends the same capsule to both models and writes:
 - `llm_prompt.json`;
 - `dashboard.html`.
 
-The comparison records model output, usage, latency, citation validity, domain coverage, expected signal coverage, actionability, winner, and score delta. It does not write the API key.
+The comparison records model output, usage, latency, citation validity, domain coverage, expected signal coverage, evidence breadth, actionability, winner, and score delta. It does not write the API key.
 
 ## Open the Dashboard
 
@@ -67,8 +67,8 @@ The command starts a local server at `http://127.0.0.1:8765/`. The UI is optiona
 - a first button that starts the local checkout app, enables failure mode, captures raw logs/metrics, and shows when `CheckoutHighErrorRate` fires;
 - a second button that runs FCAPSule evidence reduction and then compares DeepSeek Flash/Pro using the same capsule input;
 - live phase cards that update while each stage is running;
-- cards for compression, signal preservation, grounded claims, and the model winner;
-- model cards that explain overall quality, signal coverage, citations, and domain coverage;
+- cards for FCAPSule log reduction, evidence signal kept, hypothesis grounding, and the model winner;
+- model cards that explain overall quality, signal coverage, evidence breadth, citations, and domain coverage;
 - telemetry domain cards;
 - a live progress log.
 

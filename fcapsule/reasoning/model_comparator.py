@@ -130,6 +130,8 @@ def _expected_signal_terms(capsule: dict[str, Any]) -> dict[str, list[str]]:
         "case_identity": [case.get("service", ""), case.get("namespace", ""), case.get("pod", "")],
         "fault_event": alert_names,
         "metric_signal": ["error rate", "request_error_rate", "checkout_errors_total", *metric_names[:4]],
+        "baseline_context": ["request rate", "traffic spike", "baseline", "ev_metric_001", "flat"],
+        "fault_injection_context": ["failure mode", "ev_log_template_004", "synthetic", "injection", "configuration"],
         "log_signal": ["checkout failed", "dependency", "503", "failed", *selected_titles[:4]],
         "uncertainty": ["not a final root cause", "missing", "trace", "dependency health"],
     }
@@ -157,15 +159,22 @@ def _score_response(parsed: dict[str, Any] | None, raw_text: str, capsule: dict[
 
     next_checks = parsed.get("next_checks", []) if isinstance(parsed, dict) else []
     actionability = min(1.0, len(next_checks) / 3) if isinstance(next_checks, list) else 0.0
+    primary = parsed.get("primary_hypothesis", {}) if isinstance(parsed, dict) else {}
+    primary_support = primary.get("supporting_evidence_ids", []) if isinstance(primary, dict) else []
+    valid_primary_support = []
+    if isinstance(primary_support, list):
+        valid_primary_support = [item for item in dict.fromkeys(primary_support) if item in valid_ids]
+    evidence_depth = min(1.0, len(valid_primary_support) / 8)
     final_root_cause_penalty = 0.15 if "root cause is" in text or "definitive root cause" in text else 0.0
     json_score = 1.0 if parsed is not None else 0.0
 
     total = (
-        json_score * 0.15
-        + citation_score * 0.2
-        + domain_score * 0.2
-        + signal_score * 0.25
-        + actionability * 0.15
+        json_score * 0.1
+        + citation_score * 0.17
+        + domain_score * 0.15
+        + signal_score * 0.38
+        + actionability * 0.1
+        + evidence_depth * 0.05
         + (1.0 - final_root_cause_penalty) * 0.05
     )
     return {
@@ -175,15 +184,18 @@ def _score_response(parsed: dict[str, Any] | None, raw_text: str, capsule: dict[
         "domain_score": round(domain_score, 4),
         "expected_signal_score": round(signal_score, 4),
         "actionability_score": round(actionability, 4),
+        "evidence_depth_score": round(evidence_depth, 4),
         "final_root_cause_penalty": final_root_cause_penalty,
         "cited_evidence_ids": cited_ids,
         "valid_cited_evidence_ids": valid_citations,
+        "valid_primary_supporting_evidence_ids": valid_primary_support,
         "mentioned_domains": mentioned_domains,
         "matched_expected_signal_terms": matched_groups,
         "definitions": {
-            "total_score": "Weighted score over JSON validity, citation validity, domain coverage, expected signal coverage, actionability, and RCA caution.",
+            "total_score": "Weighted score over JSON validity, citation validity, domain coverage, expected signal coverage, actionability, evidence depth, and RCA caution.",
             "domain_score": "Fraction of P1 operational domains explicitly used by the model.",
             "expected_signal_score": "Fraction of expected incident signal groups mentioned by the model.",
+            "evidence_depth_score": "Breadth of valid evidence IDs used in the primary hypothesis, capped at eight supporting items.",
         },
     }
 
@@ -241,6 +253,8 @@ def compare_models(
             total_tokens=raw["usage"].get("total_tokens"),
         )
     ranked = sorted(results, key=lambda item: (-item["score"]["total_score"], item["model"]))
+    score_delta = round(ranked[0]["score"]["total_score"] - ranked[1]["score"]["total_score"], 4) if len(ranked) > 1 else 0
+    winner = ranked[0]["model"] if ranked and score_delta > 0 else None
     comparison = {
         "schema_version": "p1-llm-comparison-1.0",
         "case_id": capsule["case"]["case_id"],
@@ -249,8 +263,8 @@ def compare_models(
         "same_input_for_all_models": True,
         "prompt": prompt,
         "results": results,
-        "winner": ranked[0]["model"] if ranked else None,
-        "score_delta": round(ranked[0]["score"]["total_score"] - ranked[1]["score"]["total_score"], 4) if len(ranked) > 1 else 0,
+        "winner": winner,
+        "score_delta": score_delta,
         "interpretation": _interpret_comparison(ranked),
     }
     write_json(output / "llm_comparison.json", comparison)

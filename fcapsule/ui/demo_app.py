@@ -191,6 +191,7 @@ def build_demo_summary(case_dir: str | Path, output_dir: str | Path) -> dict[str
                 "domain_score": score.get("domain_score"),
                 "expected_signal_score": score.get("expected_signal_score"),
                 "citation_score": score.get("citation_score"),
+                "evidence_depth_score": score.get("evidence_depth_score"),
                 "latency_seconds": item.get("latency_seconds"),
                 "total_tokens": item.get("usage", {}).get("total_tokens"),
                 "finish_reason": item.get("finish_reason"),
@@ -302,20 +303,25 @@ def _domain_cards(summary: dict[str, Any]) -> str:
         "topology_metadata": "Service, pod, namespace, cluster, and CNCC labels that connect evidence.",
         "llm_reasoning": "Model-written interpretation grounded in selected evidence.",
     }
+    active_domains = {"fault_events", "log_text", "time_series_metrics"}
     for domain_id, domain in summary.get("domains", {}).items():
+        if domain_id not in active_domains:
+            continue
+        if not any(domain.get(key) for key in ("raw_items", "candidate_evidence_items", "selected_evidence_items")):
+            continue
         cards.append(
             "<section class='card domain'>"
             f"<span>{html.escape(domain_id)}</span>"
             f"<h3>{html.escape(str(domain.get('label', domain_id)))}</h3>"
             f"<p>{html.escape(explanations.get(domain_id, str(domain.get('signal_family', ''))))}</p>"
             "<dl>"
-            f"<div><dt>Selected</dt><dd>{domain.get('selected_evidence_items', 0)}</dd></div>"
-            f"<div><dt>Candidates</dt><dd>{domain.get('candidate_evidence_items', 0)}</dd></div>"
-            f"<div><dt>Raw</dt><dd>{domain.get('raw_items', 0)}</dd></div>"
+            f"<div><dt>Raw loaded</dt><dd>{domain.get('raw_items', 0)}</dd></div>"
+            f"<div><dt>Scored</dt><dd>{domain.get('candidate_evidence_items', 0)}</dd></div>"
+            f"<div><dt>Kept</dt><dd>{domain.get('selected_evidence_items', 0)}</dd></div>"
             "</dl>"
             "</section>"
         )
-    return "\n".join(cards) or "<p class='muted'>Run P1 to build the domain map.</p>"
+    return "\n".join(cards) or "<p class='muted'>Run P1 to populate the active telemetry source domains.</p>"
 
 
 def _score_bar(value: Any, label: str) -> str:
@@ -344,6 +350,7 @@ def _model_cards(summary: dict[str, Any]) -> str:
             "</div>"
             f"{_score_bar(item.get('total_score'), 'Overall quality')}"
             f"{_score_bar(item.get('expected_signal_score'), 'Incident signal coverage')}"
+            f"{_score_bar(item.get('evidence_depth_score'), 'Evidence breadth')}"
             f"{_score_bar(item.get('citation_score'), 'Valid evidence citations')}"
             f"{_score_bar(item.get('domain_score'), 'Telemetry domain coverage')}"
             "<dl>"
@@ -378,7 +385,7 @@ def _comparison_takeaway(summary: dict[str, Any]) -> str:
     models = summary["models"]
     winner = models.get("winner")
     if not winner:
-        return "Run the DeepSeek comparison to see whether the smarter model produces a better grounded incident note."
+        return "No measurable model winner has been recorded yet, or the compared outputs tied under the current rubric."
     delta = models.get("score_delta")
     return (
         f"{winner} performed best on the same capsule input. The observed score delta is {delta}, "
@@ -403,6 +410,37 @@ def _pipeline_ui_result(output_dir: Path, result: dict[str, Any]) -> dict[str, A
     enriched = dict(result)
     enriched["domain_summary"] = capsule.get("domain_summary", {})
     return enriched
+
+
+def _comparison_ui_result(comparison: dict[str, Any]) -> dict[str, Any]:
+    compact_results = []
+    for item in comparison.get("results", []):
+        score = item.get("score", {})
+        compact_results.append(
+            {
+                "model": item.get("model"),
+                "status": item.get("status"),
+                "latency_seconds": item.get("latency_seconds"),
+                "finish_reason": item.get("finish_reason"),
+                "usage": {"total_tokens": item.get("usage", {}).get("total_tokens")},
+                "score": {
+                    "total_score": score.get("total_score"),
+                    "expected_signal_score": score.get("expected_signal_score"),
+                    "citation_score": score.get("citation_score"),
+                    "domain_score": score.get("domain_score"),
+                    "actionability_score": score.get("actionability_score"),
+                    "evidence_depth_score": score.get("evidence_depth_score"),
+                    "matched_expected_signal_terms": score.get("matched_expected_signal_terms", {}),
+                },
+            }
+        )
+    return {
+        "case_id": comparison.get("case_id"),
+        "winner": comparison.get("winner"),
+        "score_delta": comparison.get("score_delta"),
+        "interpretation": comparison.get("interpretation"),
+        "results": compact_results,
+    }
 
 
 def _html_page_live() -> str:
@@ -443,10 +481,11 @@ def _html_page_live() -> str:
     .done .badge { background:var(--accent-soft); color:#15583f; border-color:#b7dccd; }
     .error .badge { background:#f8e8ee; color:#832a45; border-color:#e5b8c8; }
     .phase-card p { margin:8px 0 10px; color:var(--muted); }
+    .section-kicker { color:var(--muted); font-size:13px; margin-top:-4px; }
     .facts, .metrics { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; }
     .fact, .metric { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px; }
     .fact span, .metric span { display:block; color:var(--muted); font-size:12px; }
-    .fact strong, .metric strong { display:block; margin-top:5px; font-size:24px; }
+    .fact strong, .metric strong { display:block; margin-top:5px; font-size:24px; overflow-wrap:anywhere; }
     .metric small { color:var(--muted); display:block; margin-top:6px; line-height:1.35; }
     .model-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
     .model-card.done { border-color:var(--accent); }
@@ -457,7 +496,7 @@ def _html_page_live() -> str:
     .score-row strong { text-align:right; font-size:13px; }
     .score-track { height:10px; background:#e5ebf1; border-radius:999px; overflow:hidden; }
     .score-track i { display:block; height:100%; width:0%; background:var(--accent); transition:width .25s ease; }
-    .domain-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(230px, 1fr)); gap:12px; }
+    .domain-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:12px; }
     .domain span { display:inline-block; color:#fff; background:#56616d; border-radius:4px; padding:2px 6px; font-size:12px; margin-bottom:10px; }
     dl { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin:12px 0 0; }
     dt { color:var(--muted); font-size:12px; }
@@ -499,20 +538,24 @@ def _html_page_live() -> str:
       <p class="muted">This fills after the first button starts the demo app, enables the failure, triggers the alert, and writes the case files.</p>
       <div class="facts" id="raw-facts"></div>
     </section>
-    <section class="metrics">
-      <div class="metric"><span>Log compression</span><strong id="metric-compression">pending</strong><small>Raw log volume removed while keeping representatives.</small></div>
-      <div class="metric"><span>Signal preserved</span><strong id="metric-signal">pending</strong><small>Important alerts, logs, and metrics kept in the capsule.</small></div>
-      <div class="metric"><span>Grounded claims</span><strong id="metric-grounding">pending</strong><small>Hypothesis citations that point to real evidence IDs.</small></div>
-      <div class="metric"><span>Model winner</span><strong id="metric-winner">pending</strong><small>Best result using the same capsule and prompt.</small></div>
+    <section class="panel">
+      <h2>FCAPSule Capsule Metrics</h2>
+      <p class="section-kicker">The first three cards measure the evidence capsule, not either DeepSeek model. The winner card comes from the separate same-input model comparison.</p>
+      <div class="metrics">
+        <div class="metric"><span>FCAPSule log reduction</span><strong id="metric-compression">pending</strong><small>Raw logs compressed into representative templates.</small></div>
+        <div class="metric"><span>Evidence signal kept</span><strong id="metric-signal">pending</strong><small>Important alert, log, and metric signals preserved.</small></div>
+        <div class="metric"><span>Hypothesis grounding</span><strong id="metric-grounding">pending</strong><small>Hypothesis citations point to real evidence IDs.</small></div>
+        <div class="metric"><span>Model comparison winner</span><strong id="metric-winner">pending</strong><small>Best model answer using the same capsule input.</small></div>
+      </div>
     </section>
     <section class="panel">
       <h2>DeepSeek Same-Input Comparison</h2>
-      <p id="comparison-text" class="muted">Both model cards start empty. When step 2 reaches the model phase, Flash and Pro are filled with score, signal coverage, valid citations, latency, and token usage.</p>
+      <p id="comparison-text" class="muted">Both models receive the same capsule. The clearest demo signal is expected incident coverage: did the model mention the important alert, service identity, metrics, logs, and missing evidence?</p>
       <div class="model-grid" id="model-grid"></div>
     </section>
     <section class="panel">
       <h2>Telemetry Domains</h2>
-      <p class="muted">These are observability signal families, not media types. FCAPSule aligns them into one evidence view.</p>
+      <p class="muted">Only active source domains are shown here. The counts mean: raw items were loaded, candidates were scored, and kept items made it into the capsule.</p>
       <div class="domain-grid" id="domain-grid"></div>
     </section>
     <section class="panel">
@@ -541,6 +584,7 @@ def _html_page_live() -> str:
     const resetButton = document.querySelector('#reset-button');
     const pct = (value) => typeof value === 'number' ? (value * 100).toFixed(1) + '%' : 'pending';
     const show = (value, fallback='pending') => value === null || value === undefined ? fallback : String(value);
+    const seconds = (value) => typeof value === 'number' ? value.toFixed(2) + 's' : 'pending';
     const scoreBar = (label, value) => {
       const number = Number(value);
       const safe = Number.isFinite(number) ? Math.max(0, Math.min(1, number)) : 0;
@@ -557,7 +601,25 @@ def _html_page_live() -> str:
       document.querySelector('#phase-flow').innerHTML = Object.entries(phaseDefinitions).map(([key, title]) => {
         const phase = state.phases[key] || { status: 'waiting', message: 'Waiting', details: {} };
         const details = phase.details || {};
-        const detailText = Object.entries(details).slice(0, 3).map(([k, v]) => `${k}: ${v}`).join(' · ');
+        const detailLabels = {
+          case_id: 'case',
+          healthy_requests: 'healthy',
+          failing_requests: 'failing',
+          captured_logs: 'logs',
+          metric_series: 'metrics',
+          alert_status: 'alert status',
+          selected_evidence: 'kept evidence',
+          total_score: 'score',
+          expected_signal_score: 'signal score',
+          latency_seconds: 'latency',
+          total_tokens: 'tokens'
+        };
+        const hiddenDetails = new Set(['service_port', 'output_dir', 'archive']);
+        const detailText = Object.entries(details)
+          .filter(([k]) => !hiddenDetails.has(k))
+          .slice(0, 3)
+          .map(([k, v]) => `${detailLabels[k] || k}: ${v}`)
+          .join(' - ');
         return `<section class="phase-card card ${phaseClass(phase.status)}"><div class="phase-head"><h3>${title}</h3><span class="badge">${phase.status}</span></div><p>${phase.message}</p><small class="muted">${detailText || 'No data yet.'}</small></section>`;
       }).join('');
     }
@@ -565,10 +627,10 @@ def _html_page_live() -> str:
       const result = state.capture_result;
       const facts = result ? [
         ['Healthy requests', result.healthy_requests], ['Failing requests', result.failing_requests], ['Captured logs', result.captured_logs],
-        ['Metric series', result.metric_series], ['Alert', result.alert], ['Alert status', result.alert_status], ['Final error rate', result.final_error_rate], ['Service port', result.service_port]
+        ['Metric series', result.metric_series], ['Alert', result.alert], ['Alert status', result.alert_status], ['Error rate', typeof result.final_error_rate === 'number' ? (result.final_error_rate * 100).toFixed(1) + '%' : result.final_error_rate], ['Case', result.case_id]
       ] : [
         ['Healthy requests', 'pending'], ['Failing requests', 'pending'], ['Captured logs', 'pending'], ['Metric series', 'pending'],
-        ['Alert', 'pending'], ['Alert status', 'pending'], ['Final error rate', 'pending'], ['Service port', 'pending']
+        ['Alert', 'pending'], ['Alert status', 'pending'], ['Error rate', 'pending'], ['Case', 'pending']
       ];
       document.querySelector('#raw-facts').innerHTML = facts.map(([label, value]) => `<div class="fact"><span>${label}</span><strong>${show(value)}</strong></div>`).join('');
     }
@@ -577,7 +639,7 @@ def _html_page_live() -> str:
       document.querySelector('#metric-compression').textContent = pct(evaluation.log_compression_ratio);
       document.querySelector('#metric-signal').textContent = pct(evaluation.important_signal_preservation);
       document.querySelector('#metric-grounding').textContent = pct(evaluation.hypothesis_grounding_score);
-      document.querySelector('#metric-winner').textContent = state.comparison_result?.winner || 'pending';
+      document.querySelector('#metric-winner').textContent = state.comparison_result ? (state.comparison_result.winner || 'No measurable winner') : 'pending';
     }
     function renderModels(state) {
       const comparison = state.comparison_result;
@@ -588,23 +650,34 @@ def _html_page_live() -> str:
         const phase = state.phases[model] || { status: 'waiting', message: 'Waiting' };
         const score = item?.score || {};
         const isWinner = comparison?.winner === model;
-        return `<section class="model-card card ${phaseClass(phase.status)} ${isWinner ? 'winner' : ''}"><div class="model-title"><h3>${model}</h3><span class="badge">${isWinner ? 'winner' : phase.status}</span></div><p class="muted">${phase.message}</p>${scoreBar('Overall quality', score.total_score)}${scoreBar('Signal coverage', score.expected_signal_score)}${scoreBar('Citation validity', score.citation_score)}${scoreBar('Domain coverage', score.domain_score)}<dl><div><dt>Latency</dt><dd>${show(item?.latency_seconds)}s</dd></div><div><dt>Tokens</dt><dd>${show(item?.usage?.total_tokens)}</dd></div><div><dt>Finish</dt><dd>${show(item?.finish_reason)}</dd></div></dl></section>`;
+        const groups = score.matched_expected_signal_terms || {};
+        const groupCount = Object.values(groups).filter((terms) => Array.isArray(terms) && terms.length > 0).length;
+        const totalGroups = Object.keys(groups).length || 5;
+        return `<section class="model-card card ${phaseClass(phase.status)} ${isWinner ? 'winner' : ''}"><div class="model-title"><h3>${model}</h3><span class="badge">${isWinner ? 'winner' : phase.status}</span></div><p class="muted">${phase.message}</p><div class="fact"><span>Expected signals found</span><strong>${item ? groupCount + '/' + totalGroups : 'pending'}</strong></div>${scoreBar('Overall quality', score.total_score)}${scoreBar('Signal coverage', score.expected_signal_score)}${scoreBar('Evidence breadth', score.evidence_depth_score)}${scoreBar('Citation validity', score.citation_score)}<dl><div><dt>Latency</dt><dd>${seconds(item?.latency_seconds)}</dd></div><div><dt>Tokens</dt><dd>${show(item?.usage?.total_tokens)}</dd></div><div><dt>Finish</dt><dd>${show(item?.finish_reason)}</dd></div></dl></section>`;
       }).join('');
-      document.querySelector('#comparison-text').textContent = comparison
-        ? `${comparison.winner} performed best on the same capsule input. Score delta: ${comparison.score_delta}.`
-        : 'Both model cards start empty. When step 2 reaches the model phase, Flash and Pro are filled with score, signal coverage, valid citations, latency, and token usage.';
+      const signalCounts = results.map((item) => {
+        const groups = item.score?.matched_expected_signal_terms || {};
+        const found = Object.values(groups).filter((terms) => Array.isArray(terms) && terms.length > 0).length;
+        const total = Object.keys(groups).length || 5;
+        return `${item.model}: ${found}/${total}`;
+      }).join(' | ');
+      if (comparison?.winner) {
+        document.querySelector('#comparison-text').textContent = `${comparison.winner} performed best on the same capsule input. Expected signal coverage: ${signalCounts}. FCAPSule metrics above are pipeline metrics, not model scores.`;
+      } else if (comparison) {
+        document.querySelector('#comparison-text').textContent = `No measurable winner under the current rubric. Expected signal coverage: ${signalCounts}. FCAPSule metrics above are pipeline metrics, not model scores.`;
+      } else {
+        document.querySelector('#comparison-text').textContent = 'Both models receive the same capsule. The clearest demo signal is expected incident coverage: did the model mention the important alert, service identity, metrics, logs, and missing evidence?';
+      }
     }
     function renderDomains(state) {
       const domains = state.pipeline_result?.domain_summary || {};
       const explanations = {
         fault_events: 'The alert/event stream that confirms an incident happened.',
-        log_text: 'Repeated application log messages compressed into templates.',
-        time_series_metrics: 'Numeric behavior before and during the incident.',
-        topology_metadata: 'Labels that connect service, pod, namespace, cluster, and CNCC identity.',
-        llm_reasoning: 'Model-written interpretation grounded in selected evidence.'
+        log_text: 'Application logs reduced into repeated templates.',
+        time_series_metrics: 'Numeric metric series analyzed for incident-window changes.'
       };
-      const entries = Object.entries(domains);
-      document.querySelector('#domain-grid').innerHTML = entries.length ? entries.map(([key, domain]) => `<section class="card domain"><span>${key}</span><h3>${domain.label}</h3><p>${explanations[key] || domain.signal_family}</p><dl><div><dt>Selected</dt><dd>${domain.selected_evidence_items}</dd></div><div><dt>Candidates</dt><dd>${domain.candidate_evidence_items}</dd></div><div><dt>Raw</dt><dd>${domain.raw_items}</dd></div></dl></section>`).join('') : '<p class="muted">Run FCAPSule to populate the telemetry domain map.</p>';
+      const entries = Object.entries(domains).filter(([key, domain]) => ['fault_events', 'log_text', 'time_series_metrics'].includes(key) && (domain.raw_items || domain.candidate_evidence_items || domain.selected_evidence_items));
+      document.querySelector('#domain-grid').innerHTML = entries.length ? entries.map(([key, domain]) => `<section class="card domain"><span>${key}</span><h3>${domain.label}</h3><p>${explanations[key] || domain.signal_family}</p><dl><div><dt>Raw loaded</dt><dd>${domain.raw_items}</dd></div><div><dt>Scored</dt><dd>${domain.candidate_evidence_items}</dd></div><div><dt>Kept</dt><dd>${domain.selected_evidence_items}</dd></div></dl></section>`).join('') : '<p class="muted">Run FCAPSule to populate the active telemetry source domains.</p>';
     }
     function renderEvents(state) {
       const events = state.events || [];
@@ -620,7 +693,10 @@ def _html_page_live() -> str:
       let text = 'Nothing has run in this UI session yet. Start by generating a local checkout failure; then run FCAPSule to reduce the raw telemetry and compare the two DeepSeek outputs.';
       if (capture && !pipeline) text = `The demo app failed successfully: ${capture.captured_logs} logs and ${capture.metric_series} metric series were captured, and ${capture.alert} is ${capture.alert_status}. Now run FCAPSule.`;
       if (pipeline && !comparison) text = `FCAPSule reduced ${pipeline.logs} logs into ${pipeline.templates} templates and selected ${pipeline.selected_evidence} evidence items. DeepSeek comparison is running or ready to start.`;
-      if (pipeline && comparison) text = `Complete: FCAPSule preserved ${(pipeline.evaluation.important_signal_preservation * 100).toFixed(1)}% of important signal with ${(pipeline.evaluation.log_compression_ratio * 100).toFixed(1)}% log compression. ${comparison.winner} won the same-input model comparison.`;
+      if (pipeline && comparison) {
+        const winnerText = comparison.winner ? `${comparison.winner} won the same-input model comparison.` : 'The model comparison finished without a measurable winner.';
+        text = `Complete: FCAPSule preserved ${(pipeline.evaluation.important_signal_preservation * 100).toFixed(1)}% of important signal with ${(pipeline.evaluation.log_compression_ratio * 100).toFixed(1)}% log compression. ${winnerText}`;
+      }
       document.querySelector('#main-takeaway').textContent = text;
     }
     function renderState(state) {
@@ -748,10 +824,10 @@ def _html_page(summary: dict[str, Any], printout: str) -> str:
       {_workflow_steps(summary)}
     </section>
     <section class="metrics">
-      <div class="card metric">Log compression<strong>{_pct(evaluation.get('log_compression_ratio'))}</strong><small>How much raw log volume was removed while keeping representatives.</small></div>
-      <div class="card metric">Signal preserved<strong>{_pct(evaluation.get('important_signal_preservation'))}</strong><small>Important alerts, logs, and metrics kept in the capsule.</small></div>
-      <div class="card metric">Grounded claims<strong>{_pct(evaluation.get('hypothesis_grounding_score'))}</strong><small>Hypothesis citations that point to real selected evidence IDs.</small></div>
-      <div class="card metric">Model winner<strong class="winner">{html.escape(str(models.get('winner', 'pending')))}</strong><small>Best output using the same capsule input and scoring rubric.</small></div>
+      <div class="card metric">FCAPSule log reduction<strong>{_pct(evaluation.get('log_compression_ratio'))}</strong><small>Pipeline metric: raw logs compressed into templates.</small></div>
+      <div class="card metric">Evidence signal kept<strong>{_pct(evaluation.get('important_signal_preservation'))}</strong><small>Pipeline metric: important alert/log/metric signals preserved.</small></div>
+      <div class="card metric">Hypothesis grounding<strong>{_pct(evaluation.get('hypothesis_grounding_score'))}</strong><small>Pipeline metric: citations point to real selected evidence IDs.</small></div>
+      <div class="card metric">Model winner<strong class="winner">{html.escape(str(models.get('winner') or 'No measurable winner'))}</strong><small>Best output using the same capsule input and scoring rubric.</small></div>
     </section>
     <section class="panel">
       <h2>Model Comparison, In Plain English</h2>
@@ -944,7 +1020,7 @@ class DemoRequestHandler(BaseHTTPRequestHandler):
                 self.server.models,
                 progress=model_progress,
             )
-            self.server.state.set_comparison_result(comparison)
+            self.server.state.set_comparison_result(_comparison_ui_result(comparison))
             for item in comparison.get("results", []):
                 score = item.get("score", {})
                 self.server.state.emit(

@@ -20,10 +20,13 @@ The rubric is deterministic:
 - valid evidence citations;
 - explicit coverage of fault events, log text, time-series metrics, and topology metadata;
 - expected incident signal coverage;
+- evidence breadth in the primary hypothesis;
 - concrete next checks;
 - caution against claiming a final root cause.
 
-The score is evidence-useful rather than aesthetic. A longer answer does not automatically score higher.
+The score is evidence-useful rather than aesthetic. Expected incident signal coverage is weighted most heavily because a response that misses an important operational signal is less useful even if it cites many evidence IDs. Evidence breadth is still recorded, but it is secondary once citations are valid.
+
+If the top two scores tie, P1 records no measurable winner instead of choosing a model by list order.
 
 ## Privacy
 

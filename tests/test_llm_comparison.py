@@ -39,6 +39,7 @@ class LLMComparisonTests(unittest.TestCase):
             self.assertGreaterEqual(score["total_score"], 0.85)
             self.assertEqual(score["domain_score"], 1.0)
             self.assertEqual(score["citation_score"], 1.0)
+            self.assertGreater(score["evidence_depth_score"], 0.0)
 
     def test_json_extraction_and_dashboard_rendering(self):
         parsed, error = _extract_json("```json\n{\"ok\": true}\n```")

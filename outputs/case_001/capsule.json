@@ -9,8 +9,8 @@
     "pod": "checkout-api-7c9d",
     "cncc_uuid": "cncc-demo-12345",
     "window": {
-      "start": "2026-06-28T13:43:37.545405Z",
-      "end": "2026-06-28T13:43:41.819841Z"
+      "start": "2026-06-28T14:49:48.013129Z",
+      "end": "2026-06-28T14:49:52.303642Z"
     },
     "timezone": "UTC",
     "telemetry_sources": {
@@ -37,7 +37,7 @@
       "alertname": "CheckoutHighErrorRate",
       "status": "firing",
       "severity": "warning",
-      "startsAt": "2026-06-28T13:43:39.605022Z",
+      "startsAt": "2026-06-28T14:49:50.090902Z",
       "endsAt": null,
       "labels": {
         "service": "checkout-service",
@@ -88,7 +88,7 @@
   "timeline": [
     {
       "timeline_id": "alert_event_001",
-      "timestamp": "2026-06-28T13:43:39.605022Z",
+      "timestamp": "2026-06-28T14:49:50.090902Z",
       "type": "alert",
       "severity": "warning",
       "title": "CheckoutHighErrorRate",
@@ -129,12 +129,12 @@
         "demo-cluster"
       ],
       "time_range": {
-        "start": "2026-06-28T13:43:38.856661Z",
-        "end": "2026-06-28T13:43:40.317337Z"
+        "start": "2026-06-28T14:49:49.331384Z",
+        "end": "2026-06-28T14:49:50.800375Z"
       },
       "representative_lines": [
-        "2026-06-28T13:43:38.856661Z Payment dependency <IP> unavailable after 3 retries request_id=<ID>",
-        "2026-06-28T13:43:38.893985Z Payment dependency <IP> unavailable after 3 retries request_id=<ID>"
+        "2026-06-28T14:49:49.331384Z Payment dependency <IP> unavailable after 3 retries request_id=<ID>",
+        "2026-06-28T14:49:49.368567Z Payment dependency <IP> unavailable after 3 retries request_id=<ID>"
       ]
     },
     {
@@ -163,8 +163,8 @@
         "cncc-demo-12345"
       ],
       "time_range": {
-        "start": "2026-06-28T13:43:39.605022Z",
-        "end": "2026-06-28T13:43:39.605022Z"
+        "start": "2026-06-28T14:49:50.090902Z",
+        "end": "2026-06-28T14:49:50.090902Z"
       }
     },
     {
@@ -193,8 +193,8 @@
         "cncc-demo-12345"
       ],
       "time_range": {
-        "start": "2026-06-28T13:43:40.318784Z",
-        "end": "2026-06-28T13:43:40.318784Z"
+        "start": "2026-06-28T14:49:50.801995Z",
+        "end": "2026-06-28T14:49:50.801995Z"
       }
     },
     {
@@ -203,7 +203,7 @@
       "domain": "time_series_metrics",
       "source_id": "metric_004",
       "title": "http_request_latency_p95_ms",
-      "summary": "http_request_latency_p95_ms value increased 1473.2% near the alert compared with the baseline median.",
+      "summary": "http_request_latency_p95_ms value increased 1523.0% near the alert compared with the baseline median.",
       "score": 0.925,
       "score_components": {
         "severity_weight": 0.5,
@@ -223,8 +223,8 @@
         "cncc-demo-12345"
       ],
       "time_range": {
-        "start": "2026-06-28T13:43:40.095123Z",
-        "end": "2026-06-28T13:43:40.095123Z"
+        "start": "2026-06-28T14:49:50.090902Z",
+        "end": "2026-06-28T14:49:50.090902Z"
       }
     },
     {
@@ -233,7 +233,7 @@
       "domain": "time_series_metrics",
       "source_id": "metric_005",
       "title": "http_request_latency_average_ms",
-      "summary": "http_request_latency_average_ms value increased 611.3% near the alert compared with the baseline median.",
+      "summary": "http_request_latency_average_ms value increased 617.8% near the alert compared with the baseline median.",
       "score": 0.925,
       "score_components": {
         "severity_weight": 0.5,
@@ -253,8 +253,8 @@
         "cncc-demo-12345"
       ],
       "time_range": {
-        "start": "2026-06-28T13:43:40.318784Z",
-        "end": "2026-06-28T13:43:40.318784Z"
+        "start": "2026-06-28T14:49:50.801995Z",
+        "end": "2026-06-28T14:49:50.801995Z"
       }
     },
     {
@@ -283,8 +283,8 @@
         "cncc-demo-12345"
       ],
       "time_range": {
-        "start": "2026-06-28T13:43:39.605022Z",
-        "end": "2026-06-28T13:43:39.605022Z"
+        "start": "2026-06-28T14:49:50.090902Z",
+        "end": "2026-06-28T14:49:50.090902Z"
       }
     },
     {
@@ -313,7 +313,7 @@
         "cncc-demo-12345"
       ],
       "time_range": {
-        "start": "2026-06-28T13:43:39.605022Z",
+        "start": "2026-06-28T14:49:50.090902Z",
         "end": null
       }
     },
@@ -343,12 +343,12 @@
         "demo-cluster"
       ],
       "time_range": {
-        "start": "2026-06-28T13:43:38.856837Z",
-        "end": "2026-06-28T13:43:40.317467Z"
+        "start": "2026-06-28T14:49:49.331516Z",
+        "end": "2026-06-28T14:49:50.800521Z"
       },
       "representative_lines": [
-        "2026-06-28T13:43:38.856837Z Checkout request failed status=503 duration_ms=35.14 request_id=<ID>",
-        "2026-06-28T13:43:38.894117Z Checkout request failed status=503 duration_ms=35.19 request_id=<ID>"
+        "2026-06-28T14:49:49.331516Z Checkout request failed status=503 duration_ms=35.16 request_id=<ID>",
+        "2026-06-28T14:49:49.368753Z Checkout request failed status=503 duration_ms=35.16 request_id=<ID>"
       ]
     },
     {
@@ -377,8 +377,8 @@
         "cncc-demo-12345"
       ],
       "time_range": {
-        "start": "2026-06-28T13:43:39.605022Z",
-        "end": "2026-06-28T13:43:39.605022Z"
+        "start": "2026-06-28T14:49:50.090902Z",
+        "end": "2026-06-28T14:49:50.090902Z"
       }
     },
     {
@@ -407,12 +407,12 @@
         "demo-cluster"
       ],
       "time_range": {
-        "start": "2026-06-28T13:43:38.573567Z",
-        "end": "2026-06-28T13:43:38.818427Z"
+        "start": "2026-06-28T14:49:49.045169Z",
+        "end": "2026-06-28T14:49:49.293154Z"
       },
       "representative_lines": [
-        "2026-06-28T13:43:38.573567Z Checkout request completed status=200 duration_ms=2.23 request_id=<ID>",
-        "2026-06-28T13:43:38.577713Z Checkout request completed status=200 duration_ms=2.26 request_id=<ID>"
+        "2026-06-28T14:49:49.045169Z Checkout request completed status=200 duration_ms=2.13 request_id=<ID>",
+        "2026-06-28T14:49:49.049352Z Checkout request completed status=200 duration_ms=2.14 request_id=<ID>"
       ]
     },
     {
@@ -441,11 +441,11 @@
         "demo-cluster"
       ],
       "time_range": {
-        "start": "2026-06-28T13:43:38.820323Z",
-        "end": "2026-06-28T13:43:38.820323Z"
+        "start": "2026-06-28T14:49:49.295306Z",
+        "end": "2026-06-28T14:49:49.295306Z"
       },
       "representative_lines": [
-        "2026-06-28T13:43:38.820323Z Failure mode changed enabled=true"
+        "2026-06-28T14:49:49.295306Z Failure mode changed enabled=true"
       ]
     },
     {
@@ -474,8 +474,8 @@
         "cncc-demo-12345"
       ],
       "time_range": {
-        "start": "2026-06-28T13:43:39.605022Z",
-        "end": "2026-06-28T13:43:39.605022Z"
+        "start": "2026-06-28T14:49:50.090902Z",
+        "end": "2026-06-28T14:49:50.090902Z"
       }
     }
   ],
@@ -505,11 +505,11 @@
       "levels": {
         "INFO": 60
       },
-      "first_seen": "2026-06-28T13:43:38.573567Z",
-      "last_seen": "2026-06-28T13:43:38.818427Z",
+      "first_seen": "2026-06-28T14:49:49.045169Z",
+      "last_seen": "2026-06-28T14:49:49.293154Z",
       "representative_lines": [
-        "2026-06-28T13:43:38.573567Z Checkout request completed status=200 duration_ms=2.23 request_id=<ID>",
-        "2026-06-28T13:43:38.577713Z Checkout request completed status=200 duration_ms=2.26 request_id=<ID>"
+        "2026-06-28T14:49:49.045169Z Checkout request completed status=200 duration_ms=2.13 request_id=<ID>",
+        "2026-06-28T14:49:49.049352Z Checkout request completed status=200 duration_ms=2.14 request_id=<ID>"
       ],
       "temporal_proximity": 0.9996,
       "severity_score": 0.15,
@@ -530,11 +530,11 @@
       "levels": {
         "WARN": 40
       },
-      "first_seen": "2026-06-28T13:43:38.856837Z",
-      "last_seen": "2026-06-28T13:43:40.317467Z",
+      "first_seen": "2026-06-28T14:49:49.331516Z",
+      "last_seen": "2026-06-28T14:49:50.800521Z",
       "representative_lines": [
-        "2026-06-28T13:43:38.856837Z Checkout request failed status=503 duration_ms=35.14 request_id=<ID>",
-        "2026-06-28T13:43:38.894117Z Checkout request failed status=503 duration_ms=35.19 request_id=<ID>"
+        "2026-06-28T14:49:49.331516Z Checkout request failed status=503 duration_ms=35.16 request_id=<ID>",
+        "2026-06-28T14:49:49.368753Z Checkout request failed status=503 duration_ms=35.16 request_id=<ID>"
       ],
       "temporal_proximity": 1.0,
       "severity_score": 0.55,
@@ -555,11 +555,11 @@
       "levels": {
         "ERROR": 40
       },
-      "first_seen": "2026-06-28T13:43:38.856661Z",
-      "last_seen": "2026-06-28T13:43:40.317337Z",
+      "first_seen": "2026-06-28T14:49:49.331384Z",
+      "last_seen": "2026-06-28T14:49:50.800375Z",
       "representative_lines": [
-        "2026-06-28T13:43:38.856661Z Payment dependency <IP> unavailable after 3 retries request_id=<ID>",
-        "2026-06-28T13:43:38.893985Z Payment dependency <IP> unavailable after 3 retries request_id=<ID>"
+        "2026-06-28T14:49:49.331384Z Payment dependency <IP> unavailable after 3 retries request_id=<ID>",
+        "2026-06-28T14:49:49.368567Z Payment dependency <IP> unavailable after 3 retries request_id=<ID>"
       ],
       "temporal_proximity": 1.0,
       "severity_score": 0.85,
@@ -580,10 +580,10 @@
       "levels": {
         "WARN": 1
       },
-      "first_seen": "2026-06-28T13:43:38.820323Z",
-      "last_seen": "2026-06-28T13:43:38.820323Z",
+      "first_seen": "2026-06-28T14:49:49.295306Z",
+      "last_seen": "2026-06-28T14:49:49.295306Z",
       "representative_lines": [
-        "2026-06-28T13:43:38.820323Z Failure mode changed enabled=true"
+        "2026-06-28T14:49:49.295306Z Failure mode changed enabled=true"
       ],
       "temporal_proximity": 0.9996,
       "severity_score": 0.55,
@@ -611,7 +611,7 @@
       },
       "baseline_median": 1.0,
       "incident_peak": 2.0,
-      "peak_timestamp": "2026-06-28T13:43:39.605022Z",
+      "peak_timestamp": "2026-06-28T14:49:50.090902Z",
       "robust_z_score": 20.0,
       "percentage_change": 100.0,
       "anomaly_score": 1.0,
@@ -631,7 +631,7 @@
       },
       "baseline_median": 0.0,
       "incident_peak": 1.0,
-      "peak_timestamp": "2026-06-28T13:43:39.605022Z",
+      "peak_timestamp": "2026-06-28T14:49:50.090902Z",
       "robust_z_score": 1000000000.0,
       "percentage_change": 1000.0,
       "anomaly_score": 1.0,
@@ -649,14 +649,14 @@
         "pod": "checkout-api-7c9d",
         "cncc_uuid": "cncc-demo-12345"
       },
-      "baseline_median": 2.1603974179292296,
-      "incident_peak": 15.36650171000474,
-      "peak_timestamp": "2026-06-28T13:43:40.318784Z",
-      "robust_z_score": 1149.8212,
-      "percentage_change": 611.281,
+      "baseline_median": 2.139523993963854,
+      "incident_peak": 15.35654284996781,
+      "peak_timestamp": "2026-06-28T14:49:50.801995Z",
+      "robust_z_score": 3220.2356,
+      "percentage_change": 617.755,
       "anomaly_score": 1.0,
       "analysis_mode": "gauge",
-      "reason": "http_request_latency_average_ms value increased 611.3% near the alert compared with the baseline median."
+      "reason": "http_request_latency_average_ms value increased 617.8% near the alert compared with the baseline median."
     },
     {
       "metric_id": "metric_004",
@@ -669,14 +669,14 @@
         "pod": "checkout-api-7c9d",
         "cncc_uuid": "cncc-demo-12345"
       },
-      "baseline_median": 2.239897999970708,
-      "incident_peak": 35.23846100051742,
-      "peak_timestamp": "2026-06-28T13:43:40.095123Z",
-      "robust_z_score": 2099.5402,
-      "percentage_change": 1473.217,
+      "baseline_median": 2.170202998968307,
+      "incident_peak": 35.22244400119234,
+      "peak_timestamp": "2026-06-28T14:49:50.090902Z",
+      "robust_z_score": 2622.4482,
+      "percentage_change": 1523.002,
       "anomaly_score": 1.0,
       "analysis_mode": "gauge",
-      "reason": "http_request_latency_p95_ms value increased 1473.2% near the alert compared with the baseline median."
+      "reason": "http_request_latency_p95_ms value increased 1523.0% near the alert compared with the baseline median."
     },
     {
       "metric_id": "metric_006",
@@ -691,7 +691,7 @@
       },
       "baseline_median": 0.0,
       "incident_peak": 1.0,
-      "peak_timestamp": "2026-06-28T13:43:39.605022Z",
+      "peak_timestamp": "2026-06-28T14:49:50.090902Z",
       "robust_z_score": 1000000000.0,
       "percentage_change": 1000.0,
       "anomaly_score": 1.0,
@@ -711,7 +711,7 @@
       },
       "baseline_median": 0.0,
       "incident_peak": 0.4,
-      "peak_timestamp": "2026-06-28T13:43:40.318784Z",
+      "peak_timestamp": "2026-06-28T14:49:50.801995Z",
       "robust_z_score": 400000000.0,
       "percentage_change": 1000.0,
       "anomaly_score": 1.0,
@@ -731,7 +731,7 @@
       },
       "baseline_median": 1.0,
       "incident_peak": 1.0,
-      "peak_timestamp": "2026-06-28T13:43:39.605022Z",
+      "peak_timestamp": "2026-06-28T14:49:50.090902Z",
       "robust_z_score": 0.0,
       "percentage_change": 0.0,
       "anomaly_score": 0.0,
@@ -922,19 +922,19 @@
     "raw_log_lines": 141,
     "selected_log_lines": 7,
     "log_compression_ratio": 0.9504,
-    "raw_log_bytes": 113536,
+    "raw_log_bytes": 113494,
     "capsule_bytes": 8175,
     "template_count": 4,
     "template_reduction_ratio": 0.9716,
-    "estimated_raw_tokens": 19527,
+    "estimated_raw_tokens": 19516,
     "estimated_capsule_tokens": 6059,
-    "token_reduction_percentage": 0.6897,
+    "token_reduction_percentage": 0.6895,
     "important_signal_count": 10,
     "preserved_signal_count": 10,
     "important_signal_preservation": 1.0,
     "metric_anomaly_preservation": 1.0,
     "hypothesis_grounding_score": 1.0,
-    "runtime_seconds": 0.013,
+    "runtime_seconds": 0.0145,
     "retention_survivability_score": 1.0,
     "definitions": {
       "log_compression_ratio": "1 - representative selected log lines / raw log lines",

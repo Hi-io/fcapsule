@@ -84,13 +84,14 @@ def main(argv: list[str] | None = None) -> int:
             print("FCAPSule AI - LLM comparison complete")
             print(f"Case: {comparison['case_id']}")
             print(f"Models: {', '.join(comparison['models'])}")
-            print(f"Winner: {comparison['winner']}")
+            print(f"Winner: {comparison['winner'] or 'No measurable winner'}")
             print(f"Score delta: {comparison['score_delta']:.3f}")
             for item in comparison["results"]:
                 score = item["score"]
                 print(
                     f"- {item['model']}: total={score['total_score']:.3f}, "
                     f"domains={score['domain_score']:.3f}, signals={score['expected_signal_score']:.3f}, "
+                    f"evidence={score.get('evidence_depth_score', 0):.3f}, "
                     f"citations={score['citation_score']:.3f}, latency={item['latency_seconds']:.2f}s"
                 )
             print(f"Output: {args.out}")

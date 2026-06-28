@@ -29,15 +29,20 @@ def _domain_cards(capsule: dict[str, Any]) -> str:
         "topology_metadata": "#6d6a26",
         "llm_reasoning": "#3c6f9f",
     }
+    active_domains = {"fault_events", "log_text", "time_series_metrics"}
     for domain_id, domain in capsule.get("domain_summary", {}).items():
+        if domain_id not in active_domains:
+            continue
+        if not any(domain.get(key) for key in ("raw_items", "candidate_evidence_items", "selected_evidence_items")):
+            continue
         color = palette.get(domain_id, "#57606a")
         cards.append(
             "<section class='domain-card' style='--accent:{color}'>"
             "<div class='domain-head'><h3>{label}</h3><code>{domain_id}</code></div>"
             "<p>{signal}</p>"
-            "<dl><div><dt>Selected</dt><dd>{selected}</dd></div>"
-            "<div><dt>Candidates</dt><dd>{candidates}</dd></div>"
-            "<div><dt>Raw items</dt><dd>{raw}</dd></div></dl>"
+            "<dl><div><dt>Raw loaded</dt><dd>{raw}</dd></div>"
+            "<div><dt>Scored</dt><dd>{candidates}</dd></div>"
+            "<div><dt>Kept</dt><dd>{selected}</dd></div></dl>"
             "<small>{role}</small>"
             "</section>".format(
                 color=color,
@@ -50,7 +55,7 @@ def _domain_cards(capsule: dict[str, Any]) -> str:
                 role=html.escape(str(domain.get("p1_role", ""))),
             )
         )
-    return "\n".join(cards)
+    return "\n".join(cards) or "<p class='muted'>No active telemetry source domains were selected.</p>"
 
 
 def _evidence_rows(capsule: dict[str, Any]) -> str:
@@ -81,6 +86,7 @@ def _model_cards(comparison: dict[str, Any]) -> str:
             "<p>Total score</p>{total}"
             "<p>Domain coverage</p>{domains}"
             "<p>Expected signal coverage</p>{signals}"
+            "<p>Evidence breadth</p>{evidence_depth}"
             "<p>Citation validity</p>{citations}"
             "<dl><div><dt>Latency</dt><dd>{latency:.2f}s</dd></div>"
             "<div><dt>Finish</dt><dd>{finish}</dd></div>"
@@ -92,6 +98,7 @@ def _model_cards(comparison: dict[str, Any]) -> str:
                 total=_bar(float(score.get("total_score", 0)), "total score"),
                 domains=_bar(float(score.get("domain_score", 0)), "domain coverage"),
                 signals=_bar(float(score.get("expected_signal_score", 0)), "signal coverage"),
+                evidence_depth=_bar(float(score.get("evidence_depth_score", 0)), "evidence breadth"),
                 citations=_bar(float(score.get("citation_score", 0)), "citation validity"),
                 latency=float(result.get("latency_seconds", 0)),
                 finish=html.escape(str(result.get("finish_reason", ""))),
@@ -108,6 +115,7 @@ def render_dashboard(output_dir: str | Path) -> Path:
     comparison = _load_json(output / "llm_comparison.json")
     case = capsule.get("case", {})
     title = f"{case.get('case_id', 'case')} FCAPSule P1 Dashboard"
+    winner_label = comparison.get("winner") or "No measurable winner"
     html_text = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -149,18 +157,18 @@ def render_dashboard(output_dir: str | Path) -> Path:
 <body>
   <header>
     <h1>{html.escape(str(case.get('case_title', title)))}</h1>
-    <p class="muted">Case <code>{html.escape(str(case.get('case_id', 'unknown')))}</code> · Service <code>{html.escape(str(case.get('service', 'unknown')))}</code> · generated from local P1 outputs.</p>
+    <p class="muted">Case <code>{html.escape(str(case.get('case_id', 'unknown')))}</code> - Service <code>{html.escape(str(case.get('service', 'unknown')))}</code> - generated from local P1 outputs.</p>
   </header>
   <main>
     <section class="summary">
-      <div class="stat">Log compression<strong>{float(evaluation.get('log_compression_ratio', 0))*100:.1f}%</strong></div>
-      <div class="stat">Signal preserved<strong>{float(evaluation.get('important_signal_preservation', 0))*100:.1f}%</strong></div>
-      <div class="stat">Grounded claims<strong>{float(evaluation.get('hypothesis_grounding_score', 0))*100:.1f}%</strong></div>
-      <div class="stat">LLM winner<strong>{html.escape(str(comparison.get('winner', 'pending')))}</strong></div>
+      <div class="stat">FCAPSule log reduction<strong>{float(evaluation.get('log_compression_ratio', 0))*100:.1f}%</strong></div>
+      <div class="stat">Evidence signal kept<strong>{float(evaluation.get('important_signal_preservation', 0))*100:.1f}%</strong></div>
+      <div class="stat">Hypothesis grounding<strong>{float(evaluation.get('hypothesis_grounding_score', 0))*100:.1f}%</strong></div>
+      <div class="stat">LLM winner<strong>{html.escape(str(winner_label))}</strong></div>
     </section>
     <section class="panel">
       <h2>Multidomain Telemetry Map</h2>
-      <p class="muted">These are operational domains: different signal families, data structures, and analysis methods. P1 does not generate images; it handles multiple telemetry modalities.</p>
+      <p class="muted">These are the active operational telemetry source domains: different signal families, data structures, and analysis methods.</p>
       <div class="domains">{_domain_cards(capsule)}</div>
     </section>
     <section class="panel">
