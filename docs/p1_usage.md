@@ -52,6 +52,23 @@ python3 -m fcapsule.cli dashboard --output outputs/case_001
 
 Open `outputs/case_001/dashboard.html` in a browser to inspect the multidomain evidence map, objective metrics, and model comparison.
 
+## Run the Optional Demo UI
+
+```bash
+python3 -m fcapsule.cli demo-ui --case cases/case_001 --out outputs/case_001
+```
+
+The command starts a local server at `http://127.0.0.1:8765/`. The UI is optional and only reads or writes local P1 files. It provides:
+
+- a one-screen run summary;
+- buttons to rerun P1 on the current case;
+- a button to capture a fresh synthetic failure and rerun P1;
+- a button to rerun the DeepSeek same-input comparison when `DEEPSEEK_API_KEY` is set;
+- cards for compression, signal preservation, grounded claims, and the model winner;
+- tables for telemetry domains and model comparison.
+
+Stop it with `Ctrl+C` in the terminal.
+
 ## Recreate the Reference Incident
 
 ```bash

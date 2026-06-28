@@ -10,7 +10,7 @@
 - explainable evidence ranking;
 - grounded hypothesis generation and verification;
 - optional DeepSeek same-input comparison;
-- Markdown/JSON capsule, evaluation, baselines, static dashboard, and archive;
+- Markdown/JSON capsule, evaluation, baselines, static dashboard, optional demo UI, and archive;
 - synthetic incident capture and regression tests.
 
 ## P2: Live Read Adapters

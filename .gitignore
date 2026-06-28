@@ -11,3 +11,4 @@ outputs/*
 !outputs/.gitkeep
 demo/runtime/
 *:Zone.Identifier
+local_reports/

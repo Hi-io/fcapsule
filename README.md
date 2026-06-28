@@ -59,6 +59,14 @@ Open the local visual review page:
 python3 -m fcapsule.cli dashboard --output ./outputs/case_001
 ```
 
+Run the optional demo UI:
+
+```bash
+python3 -m fcapsule.cli demo-ui --case ./cases/case_001 --out ./outputs/case_001
+```
+
+Then open `http://127.0.0.1:8765/`. The UI can rerun P1, capture a fresh synthetic failure, rerun the DeepSeek comparison when `DEEPSEEK_API_KEY` is set, and show the reductions and model comparison as demo-friendly cards and tables.
+
 Run the full test suite:
 
 ```bash
@@ -98,6 +106,7 @@ outputs/case_001/
 - Log parsing is Drain-inspired masking and exact template grouping.
 - Metric analysis uses explainable statistical methods rather than a trained forecasting model.
 - The default hypothesis generator is deterministic so P1 works without an API key; DeepSeek comparison is an optional P1 evaluation mode.
+- The demo UI is optional and local-only; the CLI remains the primary execution interface.
 - The sample incident is synthetic and does not establish production RCA accuracy.
 
 ## Documentation

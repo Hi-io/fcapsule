@@ -14,7 +14,7 @@
   "important_signal_preservation": 1.0,
   "metric_anomaly_preservation": 1.0,
   "hypothesis_grounding_score": 1.0,
-  "runtime_seconds": 0.0115,
+  "runtime_seconds": 0.011,
   "retention_survivability_score": 1.0,
   "definitions": {
     "log_compression_ratio": "1 - representative selected log lines / raw log lines",

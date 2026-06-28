@@ -15,6 +15,7 @@ from fcapsule.processing.entity_resolver import resolve_entities
 from fcapsule.reasoning.llm_client import LLMUnavailableError
 from fcapsule.reasoning.model_comparator import DEFAULT_MODELS, compare_models
 from fcapsule.ui.dashboard import render_dashboard
+from fcapsule.ui.demo_app import serve_demo_ui
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -34,6 +35,12 @@ def _parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--output", required=True)
     dashboard = subparsers.add_parser("dashboard", help="Render the static HTML review dashboard")
     dashboard.add_argument("--output", required=True, help="Directory containing capsule and evaluation outputs")
+    demo_ui = subparsers.add_parser("demo-ui", help="Run the optional local P1 demo UI")
+    demo_ui.add_argument("--case", default="cases/case_001")
+    demo_ui.add_argument("--out", default="outputs/case_001")
+    demo_ui.add_argument("--host", default="127.0.0.1")
+    demo_ui.add_argument("--port", type=int, default=8765)
+    demo_ui.add_argument("--models", nargs="+", default=list(DEFAULT_MODELS))
     inspect = subparsers.add_parser("inspect", help="Validate and summarize a case")
     inspect.add_argument("--case", required=True)
     return parser
@@ -98,6 +105,8 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(summary, indent=2))
         elif args.command == "dashboard":
             print(render_dashboard(args.output))
+        elif args.command == "demo-ui":
+            serve_demo_ui(args.case, args.out, args.host, args.port, tuple(args.models))
         return 0
     except CaseValidationError as exc:
         print(f"Case validation failed: {exc}", file=sys.stderr)

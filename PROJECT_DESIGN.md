@@ -78,9 +78,11 @@ The default deterministic reasoner produces cautious investigation paths from se
 
 The optional DeepSeek comparison sends the same `capsule.json` to `deepseek-v4-flash` and `deepseek-v4-pro`, stores each response, records token usage and latency, validates evidence citations, and scores the outputs against a fixed rubric. This supports the project question of whether a stronger model produces a better grounded investigation note under the same process.
 
-### Evaluation and dashboard
+### Evaluation, dashboard, and demo UI
 
 The evaluator compares the selected capsule against keyword and time-window baselines. It reports compression, template reduction, token reduction, signal preservation, anomaly preservation, grounding, runtime, retention survivability, and optional LLM comparison results. The dashboard renders these outputs in a local HTML page for quick review.
+
+The optional demo UI starts a local stdlib HTTP server over the same files. It is intended for presentation: it can trigger P1, capture a fresh synthetic failure, rerun model comparison, and display a readable printout of what happened without making the core project depend on a web framework.
 
 ## Design Rationale
 
