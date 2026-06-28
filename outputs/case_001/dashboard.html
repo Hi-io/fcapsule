@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>case_001 FCAPSule P1 Dashboard</title>
+  <style>
+    :root { color-scheme: light; --ink:#17202a; --muted:#5c6670; --line:#d7dde5; --panel:#f7f9fb; --paper:#ffffff; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:Arial, Helvetica, sans-serif; color:var(--ink); background:#eef2f6; }
+    header { padding:28px 32px 20px; background:#ffffff; border-bottom:1px solid var(--line); }
+    main { width:min(1180px, calc(100% - 32px)); margin:24px auto 42px; display:grid; gap:22px; }
+    h1 { margin:0 0 8px; font-size:28px; letter-spacing:0; }
+    h2 { margin:0 0 14px; font-size:20px; letter-spacing:0; }
+    h3 { margin:0; font-size:16px; letter-spacing:0; }
+    p { line-height:1.45; }
+    .muted { color:var(--muted); }
+    .summary { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; }
+    .stat, .domain-card, .model-card, .panel { background:var(--paper); border:1px solid var(--line); border-radius:8px; padding:16px; }
+    .stat strong { display:block; font-size:24px; margin-top:4px; }
+    .domains, .models { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px; }
+    .domain-card { border-top:5px solid var(--accent); }
+    .domain-head, .model-title { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    code { background:#eef2f6; padding:2px 5px; border-radius:4px; font-size:12px; }
+    dl { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin:14px 0 0; }
+    dt { color:var(--muted); font-size:12px; }
+    dd { margin:2px 0 0; font-weight:700; }
+    small { display:block; color:var(--muted); margin-top:12px; }
+    .bar { height:24px; background:#e5eaf0; border-radius:4px; overflow:hidden; position:relative; margin:6px 0 12px; }
+    .bar span { display:block; height:100%; background:#2f7d62; }
+    .bar strong { position:absolute; inset:4px 8px auto auto; font-size:12px; color:#111; }
+    .winner { border-color:#2f7d62; box-shadow:0 0 0 2px rgba(47,125,98,.12); }
+    table { width:100%; border-collapse:collapse; background:#fff; }
+    th, td { border-bottom:1px solid var(--line); padding:10px; text-align:left; vertical-align:top; }
+    th { color:var(--muted); font-size:12px; }
+    @media (max-width:760px) { header { padding:22px 18px; } .summary { grid-template-columns:1fr 1fr; } dl { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Checkout dependency failure and elevated error rate</h1>
+    <p class="muted">Case <code>case_001</code> · Service <code>checkout-service</code> · generated from local P1 outputs.</p>
+  </header>
+  <main>
+    <section class="summary">
+      <div class="stat">Log compression<strong>95.0%</strong></div>
+      <div class="stat">Signal preserved<strong>100.0%</strong></div>
+      <div class="stat">Grounded claims<strong>100.0%</strong></div>
+      <div class="stat">LLM winner<strong>deepseek-v4-pro</strong></div>
+    </section>
+    <section class="panel">
+      <h2>Multidomain Telemetry Map</h2>
+      <p class="muted">These are operational domains: different signal families, data structures, and analysis methods. P1 does not generate images; it handles multiple telemetry modalities.</p>
+      <div class="domains"><section class='domain-card' style='--accent:#a4385a'><div class='domain-head'><h3>Fault events</h3><code>fault_events</code></div><p>Discrete alert and incident event stream</p><dl><div><dt>Selected</dt><dd>1</dd></div><div><dt>Candidates</dt><dd>1</dd></div><div><dt>Raw items</dt><dd>1</dd></div></dl><small>Defines the incident trigger and the investigation window.</small></section>
+<section class='domain-card' style='--accent:#27746f'><div class='domain-head'><h3>Log text</h3><code>log_text</code></div><p>Semi-structured textual telemetry</p><dl><div><dt>Selected</dt><dd>4</dd></div><div><dt>Candidates</dt><dd>4</dd></div><div><dt>Raw items</dt><dd>141</dd></div></dl><small>Explains repeated application behavior without retaining every raw line.</small></section>
+<section class='domain-card' style='--accent:#6b5aa6'><div class='domain-head'><h3>Time-series metrics</h3><code>time_series_metrics</code></div><p>Numeric measurements over time</p><dl><div><dt>Selected</dt><dd>7</dd></div><div><dt>Candidates</dt><dd>7</dd></div><div><dt>Raw items</dt><dd>7</dd></div></dl><small>Shows whether numeric behavior changed during the alert window.</small></section>
+<section class='domain-card' style='--accent:#6d6a26'><div class='domain-head'><h3>Topology and metadata</h3><code>topology_metadata</code></div><p>Entity identity and relationship context</p><dl><div><dt>Selected</dt><dd>0</dd></div><div><dt>Candidates</dt><dd>0</dd></div><div><dt>Raw items</dt><dd>0</dd></div></dl><small>Connects evidence from different telemetry domains to the same system entity.</small></section>
+<section class='domain-card' style='--accent:#3c6f9f'><div class='domain-head'><h3>LLM reasoning</h3><code>llm_reasoning</code></div><p>Generated evidence-grounded interpretation</p><dl><div><dt>Selected</dt><dd>0</dd></div><div><dt>Candidates</dt><dd>0</dd></div><div><dt>Raw items</dt><dd>3</dd></div></dl><small>Turns selected evidence into structured investigation notes while preserving citations.</small></section></div>
+    </section>
+    <section class="panel">
+      <h2>DeepSeek Model Comparison</h2>
+      <p class="muted">deepseek-v4-pro scored higher by 0.050, mainly reflecting stronger grounded use of the same multidomain evidence input under the P1 rubric.</p>
+      <div class="models"><section class='model-card '><div class='model-title'><h3>deepseek-v4-flash</h3><span>Compared</span></div><p>Total score</p><div class='bar' aria-label='total score'><span style='width:95.0%'></span><strong>95.0%</strong></div><p>Domain coverage</p><div class='bar' aria-label='domain coverage'><span style='width:100.0%'></span><strong>100.0%</strong></div><p>Expected signal coverage</p><div class='bar' aria-label='signal coverage'><span style='width:80.0%'></span><strong>80.0%</strong></div><p>Citation validity</p><div class='bar' aria-label='citation validity'><span style='width:100.0%'></span><strong>100.0%</strong></div><dl><div><dt>Latency</dt><dd>18.84s</dd></div><div><dt>Finish</dt><dd>stop</dd></div><div><dt>Total tokens</dt><dd>8212</dd></div></dl></section>
+<section class='model-card winner'><div class='model-title'><h3>deepseek-v4-pro</h3><span>Best observed</span></div><p>Total score</p><div class='bar' aria-label='total score'><span style='width:100.0%'></span><strong>100.0%</strong></div><p>Domain coverage</p><div class='bar' aria-label='domain coverage'><span style='width:100.0%'></span><strong>100.0%</strong></div><p>Expected signal coverage</p><div class='bar' aria-label='signal coverage'><span style='width:100.0%'></span><strong>100.0%</strong></div><p>Citation validity</p><div class='bar' aria-label='citation validity'><span style='width:100.0%'></span><strong>100.0%</strong></div><dl><div><dt>Latency</dt><dd>37.63s</dd></div><div><dt>Finish</dt><dd>stop</dd></div><div><dt>Total tokens</dt><dd>9732</dd></div></dl></section></div>
+    </section>
+    <section class="panel">
+      <h2>Selected Evidence</h2>
+      <table>
+        <thead><tr><th>Evidence ID</th><th>Domain</th><th>Signal</th><th>Score</th></tr></thead>
+        <tbody><tr><td><code>ev_log_template_003</code></td><td>log_text</td><td>Payment dependency &lt;IP&gt; unavailable after &lt;NUM&gt; retries request_id=&lt;ID&gt;</td><td>0.934</td></tr>
+<tr><td><code>ev_metric_002</code></td><td>time_series_metrics</td><td>http_request_errors_total</td><td>0.925</td></tr>
+<tr><td><code>ev_metric_003</code></td><td>time_series_metrics</td><td>request_error_rate</td><td>0.925</td></tr>
+<tr><td><code>ev_metric_004</code></td><td>time_series_metrics</td><td>http_request_latency_p95_ms</td><td>0.925</td></tr>
+<tr><td><code>ev_metric_005</code></td><td>time_series_metrics</td><td>http_request_latency_average_ms</td><td>0.925</td></tr>
+<tr><td><code>ev_metric_007</code></td><td>time_series_metrics</td><td>application_log_events_total</td><td>0.925</td></tr>
+<tr><td><code>ev_alert_001</code></td><td>fault_events</td><td>CheckoutHighErrorRate</td><td>0.887</td></tr>
+<tr><td><code>ev_log_template_002</code></td><td>log_text</td><td>Checkout request failed status=&lt;NUM&gt; duration_ms=&lt;NUM&gt; request_id=&lt;ID&gt;</td><td>0.859</td></tr>
+<tr><td><code>ev_metric_006</code></td><td>time_series_metrics</td><td>payment_dependency_failures_total</td><td>0.835</td></tr>
+<tr><td><code>ev_log_template_001</code></td><td>log_text</td><td>Checkout request completed status=&lt;NUM&gt; duration_ms=&lt;NUM&gt; request_id=&lt;ID&gt;</td><td>0.625</td></tr>
+<tr><td><code>ev_log_template_004</code></td><td>log_text</td><td>Failure mode changed enabled=true</td><td>0.622</td></tr>
+<tr><td><code>ev_metric_001</code></td><td>time_series_metrics</td><td>http_requests_total</td><td>0.525</td></tr></tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>
