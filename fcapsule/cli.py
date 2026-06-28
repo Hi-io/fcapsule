@@ -7,6 +7,7 @@ import json
 import sys
 from pathlib import Path
 
+from fcapsule.env import load_env_file
 from fcapsule.evaluation.report import recompute_evaluation
 from fcapsule.io.case_loader import load_case
 from fcapsule.models.schemas import CaseValidationError
@@ -71,6 +72,7 @@ def _print_result(result: dict) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_env_file()
     args = _parser().parse_args(argv)
     try:
         if args.command == "investigate":

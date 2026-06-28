@@ -46,12 +46,13 @@ python3 -m fcapsule.cli evaluate --case ./cases/case_001 --output ./outputs/case
 Compare the same capsule with DeepSeek models:
 
 ```bash
-export DEEPSEEK_API_KEY=...
 python3 -m fcapsule.cli compare-llms \
   --capsule ./outputs/case_001/capsule.json \
   --out ./outputs/case_001 \
   --models deepseek-v4-flash deepseek-v4-pro
 ```
+
+The CLI automatically loads a local `.env` file when present. Keep `DEEPSEEK_API_KEY=...` in `.env`; that file is ignored by git.
 
 Open the local visual review page:
 

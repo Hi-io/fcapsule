@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from fcapsule.env import load_env_file
 from fcapsule.io.case_loader import load_case
 from fcapsule.pipeline import investigate_case
 from fcapsule.reasoning.llm_client import LLMUnavailableError
@@ -51,6 +52,7 @@ def _case_counts(case_dir: Path) -> dict[str, Any]:
 def build_demo_summary(case_dir: str | Path, output_dir: str | Path) -> dict[str, Any]:
     """Summarize the current demo state from case and output files."""
 
+    env_path = load_env_file()
     case = Path(case_dir).resolve()
     output = Path(output_dir).resolve()
     capsule = _load_json(output / "capsule.json")
@@ -111,6 +113,7 @@ def build_demo_summary(case_dir: str | Path, output_dir: str | Path) -> dict[str
             "results": model_results,
         },
         "api_key_available": bool(os.environ.get("DEEPSEEK_API_KEY")),
+        "env_loaded_from": str(env_path) if env_path else None,
     }
 
 
@@ -173,12 +176,19 @@ def render_printout(summary: dict[str, Any]) -> str:
 
 def _domain_cards(summary: dict[str, Any]) -> str:
     cards = []
+    explanations = {
+        "fault_events": "The alert that tells us an incident happened.",
+        "log_text": "Repeated application messages compressed into templates.",
+        "time_series_metrics": "Numeric behavior before and during the incident.",
+        "topology_metadata": "Service, pod, namespace, cluster, and CNCC labels that connect evidence.",
+        "llm_reasoning": "Model-written interpretation grounded in selected evidence.",
+    }
     for domain_id, domain in summary.get("domains", {}).items():
         cards.append(
             "<section class='card domain'>"
             f"<span>{html.escape(domain_id)}</span>"
             f"<h3>{html.escape(str(domain.get('label', domain_id)))}</h3>"
-            f"<p>{html.escape(str(domain.get('signal_family', '')))}</p>"
+            f"<p>{html.escape(explanations.get(domain_id, str(domain.get('signal_family', ''))))}</p>"
             "<dl>"
             f"<div><dt>Selected</dt><dd>{domain.get('selected_evidence_items', 0)}</dd></div>"
             f"<div><dt>Candidates</dt><dd>{domain.get('candidate_evidence_items', 0)}</dd></div>"
@@ -189,26 +199,91 @@ def _domain_cards(summary: dict[str, Any]) -> str:
     return "\n".join(cards) or "<p class='muted'>Run P1 to build the domain map.</p>"
 
 
-def _model_rows(summary: dict[str, Any]) -> str:
-    rows = []
+def _score_bar(value: Any, label: str) -> str:
+    try:
+        pct = max(0.0, min(1.0, float(value))) * 100
+        shown = f"{float(value):.3f}"
+    except (TypeError, ValueError):
+        pct = 0.0
+        shown = "pending"
+    return (
+        f"<div class='score-row'><span>{html.escape(label)}</span>"
+        f"<div class='score-track'><i style='width:{pct:.1f}%'></i></div><strong>{shown}</strong></div>"
+    )
+
+
+def _model_cards(summary: dict[str, Any]) -> str:
+    cards = []
+    winner = summary["models"].get("winner")
     for item in summary["models"].get("results", []):
-        rows.append(
-            "<tr>"
-            f"<td>{html.escape(str(item.get('model')))}</td>"
-            f"<td>{item.get('total_score')}</td>"
-            f"<td>{item.get('domain_score')}</td>"
-            f"<td>{item.get('expected_signal_score')}</td>"
-            f"<td>{item.get('citation_score')}</td>"
-            f"<td>{item.get('latency_seconds')}s</td>"
-            f"<td>{item.get('total_tokens')}</td>"
-            "</tr>"
+        is_winner = item.get("model") == winner
+        cards.append(
+            "<section class='model-card card {klass}'>"
+            "<div class='model-heading'>"
+            f"<h3>{html.escape(str(item.get('model')))}</h3>"
+            f"<span>{'Best observed' if is_winner else 'Compared'}</span>"
+            "</div>"
+            f"{_score_bar(item.get('total_score'), 'Overall quality')}"
+            f"{_score_bar(item.get('expected_signal_score'), 'Incident signal coverage')}"
+            f"{_score_bar(item.get('citation_score'), 'Valid evidence citations')}"
+            f"{_score_bar(item.get('domain_score'), 'Telemetry domain coverage')}"
+            "<dl>"
+            f"<div><dt>Latency</dt><dd>{item.get('latency_seconds')}s</dd></div>"
+            f"<div><dt>Tokens</dt><dd>{item.get('total_tokens')}</dd></div>"
+            f"<div><dt>Finish</dt><dd>{html.escape(str(item.get('finish_reason')))}</dd></div>"
+            "</dl>"
+            "</section>".format(klass="winner-card" if is_winner else "")
         )
-    return "\n".join(rows) or "<tr><td colspan='7'>Run DeepSeek comparison to populate this table.</td></tr>"
+    return "\n".join(cards) or "<p class='muted'>Run DeepSeek comparison to populate model cards.</p>"
+
+
+def _workflow_steps(summary: dict[str, Any]) -> str:
+    case = summary["case"]
+    pipeline = summary["pipeline"]
+    models = summary["models"]
+    steps = [
+        ("1", "Capture incident", f"{case.get('logs', 'pending')} logs, {case.get('metric_series', 'pending')} metric series, {case.get('alerts', 'pending')} alert."),
+        ("2", "Reduce telemetry", f"{pipeline.get('log_templates')} log templates and {pipeline.get('selected_evidence')} selected evidence items."),
+        ("3", "Ground hypotheses", f"{pipeline.get('verified_hypotheses')} plausible hypotheses with checked evidence IDs."),
+        ("4", "Compare models", f"Winner: {models.get('winner', 'pending')}; score delta: {models.get('score_delta', 'pending')}."),
+    ]
+    return "\n".join(
+        "<section class='step card'>"
+        f"<b>{number}</b><div><h3>{html.escape(title)}</h3><p>{html.escape(text)}</p></div>"
+        "</section>"
+        for number, title, text in steps
+    )
+
+
+def _comparison_takeaway(summary: dict[str, Any]) -> str:
+    models = summary["models"]
+    winner = models.get("winner")
+    if not winner:
+        return "Run the DeepSeek comparison to see whether the smarter model produces a better grounded incident note."
+    delta = models.get("score_delta")
+    return (
+        f"{winner} performed best on the same capsule input. The observed score delta is {delta}, "
+        "mainly measuring whether the model used the expected incident signals while keeping valid evidence citations."
+    )
+
+
+def _plain_result(summary: dict[str, Any]) -> str:
+    case = summary["case"]
+    evaluation = summary["evaluation"]
+    pipeline = summary["pipeline"]
+    return (
+        f"FCAPSule converted {case.get('logs', 'pending')} raw logs into "
+        f"{pipeline.get('log_templates')} templates and selected {pipeline.get('selected_evidence')} evidence items. "
+        f"The capsule preserved {_pct(evaluation.get('important_signal_preservation'))} of important signals "
+        f"with {_pct(evaluation.get('log_compression_ratio'))} log compression."
+    )
 
 
 def _html_page(summary: dict[str, Any], printout: str) -> str:
     evaluation = summary["evaluation"]
     models = summary["models"]
+    case = summary["case"]
+    pipeline = summary["pipeline"]
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -216,12 +291,12 @@ def _html_page(summary: dict[str, Any], printout: str) -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FCAPSule AI P1 Demo</title>
   <style>
-    :root {{ --ink:#17202a; --muted:#607080; --line:#d8e0e8; --paper:#fff; --bg:#edf2f7; --accent:#2f7d62; --warn:#a4385a; }}
+    :root {{ --ink:#16202a; --muted:#637181; --line:#d8e0e8; --paper:#fff; --bg:#edf2f7; --accent:#2f7d62; --accent-soft:#e6f3ee; --warn:#a4385a; --amber:#8a6a20; }}
     * {{ box-sizing:border-box; }}
     body {{ margin:0; font-family:Arial, Helvetica, sans-serif; color:var(--ink); background:var(--bg); }}
-    header {{ background:#ffffff; border-bottom:1px solid var(--line); padding:24px 30px; }}
+    header {{ background:#ffffff; border-bottom:1px solid var(--line); padding:26px 30px 18px; }}
     main {{ width:min(1240px, calc(100% - 28px)); margin:22px auto 44px; display:grid; gap:18px; }}
-    h1 {{ margin:0 0 6px; font-size:28px; letter-spacing:0; }}
+    h1 {{ margin:0 0 8px; font-size:30px; letter-spacing:0; }}
     h2 {{ margin:0 0 12px; font-size:20px; letter-spacing:0; }}
     h3 {{ margin:0 0 8px; font-size:16px; letter-spacing:0; }}
     p {{ line-height:1.45; }}
@@ -229,11 +304,21 @@ def _html_page(summary: dict[str, Any], printout: str) -> str:
     button.secondary, a.secondary {{ background:#ffffff; color:var(--ink); border-color:var(--line); }}
     button:disabled {{ opacity:.6; cursor:wait; }}
     .muted {{ color:var(--muted); }}
+    .hero {{ display:grid; grid-template-columns:minmax(0, 1.45fr) minmax(300px, .75fr); gap:16px; align-items:stretch; }}
+    .hero-card {{ background:#ffffff; border:1px solid var(--line); border-radius:8px; padding:18px; }}
+    .hero-card.primary {{ border-left:6px solid var(--accent); }}
+    .takeaway {{ font-size:18px; line-height:1.45; margin:0; }}
+    .mini-note {{ background:#f7f9fb; border:1px solid var(--line); border-radius:6px; padding:10px; margin-top:12px; }}
     .panel, .card {{ background:var(--paper); border:1px solid var(--line); border-radius:8px; padding:16px; }}
     .actions {{ display:flex; flex-wrap:wrap; gap:10px; }}
-    .metrics {{ display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:12px; }}
-    .metric strong {{ display:block; font-size:24px; margin-top:4px; }}
+    .metrics {{ display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; }}
+    .metric strong {{ display:block; font-size:25px; margin-top:5px; }}
+    .metric small {{ color:var(--muted); display:block; margin-top:6px; line-height:1.35; }}
     .grid {{ display:grid; grid-template-columns:repeat(auto-fit, minmax(230px, 1fr)); gap:12px; }}
+    .steps {{ display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; }}
+    .step {{ display:grid; grid-template-columns:38px minmax(0, 1fr); gap:10px; align-items:start; }}
+    .step b {{ display:grid; place-items:center; width:34px; height:34px; border-radius:50%; background:var(--accent-soft); color:#15583f; }}
+    .step p {{ margin:0; color:var(--muted); }}
     .domain span {{ display:inline-block; color:#ffffff; background:#56616d; border-radius:4px; padding:2px 6px; font-size:12px; margin-bottom:10px; }}
     dl {{ display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin:12px 0 0; }}
     dt {{ color:var(--muted); font-size:12px; }}
@@ -243,49 +328,81 @@ def _html_page(summary: dict[str, Any], printout: str) -> str:
     th {{ color:var(--muted); font-size:12px; }}
     pre {{ white-space:pre-wrap; overflow:auto; background:#101820; color:#eff6f4; border-radius:8px; padding:14px; margin:0; line-height:1.45; }}
     .winner {{ color:#0f6b4d; font-weight:700; }}
+    .comparison-grid {{ display:grid; grid-template-columns:repeat(auto-fit, minmax(310px, 1fr)); gap:12px; }}
+    .model-heading {{ display:flex; align-items:center; justify-content:space-between; gap:8px; }}
+    .model-heading span {{ border:1px solid var(--line); background:#f7f9fb; color:var(--muted); border-radius:999px; padding:3px 8px; font-size:12px; }}
+    .winner-card {{ border-color:#2f7d62; box-shadow:0 0 0 2px rgba(47,125,98,.13); }}
+    .winner-card .model-heading span {{ background:var(--accent-soft); border-color:#b7dccd; color:#15583f; }}
+    .score-row {{ display:grid; grid-template-columns:130px minmax(80px, 1fr) 58px; align-items:center; gap:8px; margin:9px 0; }}
+    .score-row span {{ color:var(--muted); font-size:13px; }}
+    .score-row strong {{ text-align:right; font-size:13px; }}
+    .score-track {{ height:10px; background:#e5ebf1; border-radius:999px; overflow:hidden; }}
+    .score-track i {{ display:block; height:100%; background:var(--accent); }}
+    details summary {{ cursor:pointer; font-weight:700; }}
     .status {{ min-height:22px; color:var(--muted); }}
-    @media (max-width:860px) {{ header {{ padding:20px 16px; }} .metrics {{ grid-template-columns:1fr 1fr; }} dl {{ grid-template-columns:1fr; }} }}
+    @media (max-width:920px) {{ header {{ padding:20px 16px; }} .hero {{ grid-template-columns:1fr; }} .steps, .metrics {{ grid-template-columns:1fr 1fr; }} dl {{ grid-template-columns:1fr; }} }}
+    @media (max-width:620px) {{ .steps, .metrics {{ grid-template-columns:1fr; }} .score-row {{ grid-template-columns:1fr; }} .score-row strong {{ text-align:left; }} }}
   </style>
 </head>
 <body>
   <header>
     <h1>FCAPSule AI P1 Demo</h1>
-    <p class="muted">Optional local UI for showing the failing service capture, evidence reduction, domain map, and DeepSeek comparison.</p>
+    <p class="muted">A guided local view of the incident capture, evidence reduction, domain map, and DeepSeek model comparison.</p>
   </header>
   <main>
-    <section class="panel">
-      <h2>Run Controls</h2>
-      <div class="actions">
-        <button data-action="run-p1">Run P1 on current case</button>
-        <button data-action="capture-p1">Capture fresh failure + run P1</button>
-        <button data-action="compare">Run DeepSeek comparison</button>
-        <a class="button secondary" href="/dashboard.html" target="_blank">Open dashboard</a>
-        <a class="button secondary" href="/outputs/capsule.md" target="_blank">Open capsule</a>
+    <section class="hero">
+      <div class="hero-card primary">
+        <h2>What is happening?</h2>
+        <p class="takeaway">{html.escape(_plain_result(summary))}</p>
+        <div class="mini-note">
+          <strong>How to read this:</strong> FCAPSule is not trying to declare a final root cause. It reduces noisy telemetry into a smaller evidence capsule, then checks whether model-written explanations stay grounded in that evidence.
+        </div>
       </div>
-      <p id="status" class="status">Ready. DeepSeek key available: {str(summary['api_key_available']).lower()}.</p>
+      <div class="hero-card">
+        <h2>Start Here</h2>
+        <p class="muted">Use these in order during a demo. The current page already shows the latest recorded result.</p>
+        <div class="actions">
+          <button data-action="capture-p1">1. Capture fresh failure</button>
+          <button data-action="run-p1">2. Run P1 reduction</button>
+          <button data-action="compare">3. Compare DeepSeek models</button>
+        </div>
+        <p id="status" class="status">Ready. DeepSeek key loaded: {str(summary['api_key_available']).lower()}. Env file: {html.escape(str(summary.get('env_loaded_from') or 'not found'))}.</p>
+      </div>
+    </section>
+    <section class="steps">
+      {_workflow_steps(summary)}
     </section>
     <section class="metrics">
-      <div class="card metric">Log compression<strong>{_pct(evaluation.get('log_compression_ratio'))}</strong></div>
-      <div class="card metric">Token reduction<strong>{_pct(evaluation.get('token_reduction_percentage'))}</strong></div>
-      <div class="card metric">Signal preserved<strong>{_pct(evaluation.get('important_signal_preservation'))}</strong></div>
-      <div class="card metric">Grounded claims<strong>{_pct(evaluation.get('hypothesis_grounding_score'))}</strong></div>
-      <div class="card metric">LLM winner<strong class="winner">{html.escape(str(models.get('winner', 'pending')))}</strong></div>
+      <div class="card metric">Log compression<strong>{_pct(evaluation.get('log_compression_ratio'))}</strong><small>How much raw log volume was removed while keeping representatives.</small></div>
+      <div class="card metric">Signal preserved<strong>{_pct(evaluation.get('important_signal_preservation'))}</strong><small>Important alerts, logs, and metrics kept in the capsule.</small></div>
+      <div class="card metric">Grounded claims<strong>{_pct(evaluation.get('hypothesis_grounding_score'))}</strong><small>Hypothesis citations that point to real selected evidence IDs.</small></div>
+      <div class="card metric">Model winner<strong class="winner">{html.escape(str(models.get('winner', 'pending')))}</strong><small>Best output using the same capsule input and scoring rubric.</small></div>
     </section>
     <section class="panel">
-      <h2>What Happened</h2>
-      <pre id="printout">{html.escape(printout)}</pre>
+      <h2>Model Comparison, In Plain English</h2>
+      <p>{html.escape(_comparison_takeaway(summary))}</p>
+      <p class="muted">The comparison is fair because both models receive the same capsule and the same prompt. Higher is better. A good answer should cover the incident signals, cite valid evidence IDs, and avoid pretending the final root cause is proven.</p>
+      <div class="comparison-grid">{_model_cards(summary)}</div>
     </section>
     <section class="panel">
-      <h2>Operational Telemetry Domains</h2>
+      <h2>Telemetry Domains Used by FCAPSule</h2>
+      <p class="muted">These are not media types like audio or images. They are observability signal families that require different handling before they can be compared together.</p>
       <div class="grid">{_domain_cards(summary)}</div>
     </section>
     <section class="panel">
-      <h2>DeepSeek Same-Input Comparison</h2>
-      <p class="muted">{html.escape(str(models.get('interpretation') or 'Run the comparison to record model-specific observations.'))}</p>
-      <table>
-        <thead><tr><th>Model</th><th>Total</th><th>Domains</th><th>Signals</th><th>Citations</th><th>Latency</th><th>Tokens</th></tr></thead>
-        <tbody>{_model_rows(summary)}</tbody>
-      </table>
+      <h2>Open Detailed Artifacts</h2>
+      <div class="actions">
+        <a class="button secondary" href="/dashboard.html" target="_blank">Open generated dashboard</a>
+        <a class="button secondary" href="/outputs/capsule.md" target="_blank">Open Markdown capsule</a>
+        <a class="button secondary" href="/api/summary" target="_blank">Open JSON summary</a>
+      </div>
+    </section>
+    <section class="panel">
+      <details>
+        <summary>Technical run log</summary>
+        <p class="muted">This is the compact printout useful for copying into notes or checking exact counts.</p>
+        <pre id="printout">{html.escape(printout)}</pre>
+      </details>
     </section>
   </main>
   <script>

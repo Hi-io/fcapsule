@@ -10,6 +10,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from fcapsule.env import load_env_file
+
 
 class LLMClient(Protocol):
     def generate_hypotheses(self, evidence: list[dict[str, Any]]) -> list[dict[str, Any]]: ...
@@ -37,6 +39,7 @@ class DeepSeekChatClient:
         base_url: str = "https://api.deepseek.com/chat/completions",
         timeout_seconds: int = 120,
     ) -> None:
+        load_env_file()
         self.api_key_env = api_key_env
         self.api_key = api_key or os.environ.get(api_key_env)
         self.base_url = base_url

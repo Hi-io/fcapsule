@@ -26,10 +26,13 @@ Evaluation reruns the deterministic pipeline so metrics remain synchronized with
 
 ## Compare DeepSeek Models
 
-Set the API key only in the shell environment. Do not place it in committed files.
+Set the API key in a local `.env` file. The CLI loads `.env` automatically and the file is ignored by git.
 
 ```bash
-export DEEPSEEK_API_KEY=...
+DEEPSEEK_API_KEY=...
+```
+
+```bash
 python3 -m fcapsule.cli compare-llms \
   --capsule outputs/case_001/capsule.json \
   --out outputs/case_001 \
@@ -60,12 +63,14 @@ python3 -m fcapsule.cli demo-ui --case cases/case_001 --out outputs/case_001
 
 The command starts a local server at `http://127.0.0.1:8765/`. The UI is optional and only reads or writes local P1 files. It provides:
 
-- a one-screen run summary;
+- a guided explanation of the incident, reduction, evidence grounding, and model comparison;
 - buttons to rerun P1 on the current case;
 - a button to capture a fresh synthetic failure and rerun P1;
 - a button to rerun the DeepSeek same-input comparison when `DEEPSEEK_API_KEY` is set;
 - cards for compression, signal preservation, grounded claims, and the model winner;
-- tables for telemetry domains and model comparison.
+- model cards that explain overall quality, signal coverage, citations, and domain coverage;
+- telemetry domain cards;
+- a collapsible technical run log.
 
 Stop it with `Ctrl+C` in the terminal.
 
