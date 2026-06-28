@@ -1,9 +1,9 @@
 {
   "hits": [
     {
-      "@timestamp": "2026-06-28T12:02:46.709755Z",
+      "@timestamp": "2026-06-28T13:43:38.573567Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.21 request_id=98187742b266474b80c0952480783149",
+      "message": "Checkout request completed status=200 duration_ms=2.23 request_id=38a22a7d238d41d4af750470918c6a36",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -11,9 +11,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.714546Z",
+      "@timestamp": "2026-06-28T13:43:38.577713Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.12 request_id=7252b60500d84d5a8648848d2fdf8bd3",
+      "message": "Checkout request completed status=200 duration_ms=2.26 request_id=62545dafb7cc4252a8b8e877a3c37f7a",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -21,9 +21,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.719500Z",
+      "@timestamp": "2026-06-28T13:43:38.581897Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.10 request_id=58188f0236574dad824b37b7e5c3c322",
+      "message": "Checkout request completed status=200 duration_ms=2.13 request_id=5c007d0f3eb34f5083ffaa050d528a8f",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -31,9 +31,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.724208Z",
+      "@timestamp": "2026-06-28T13:43:38.585861Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.16 request_id=c04f144a2f28423abe29f192593eafe5",
+      "message": "Checkout request completed status=200 duration_ms=2.11 request_id=3947e3d466f8430486a8fbabbc17abb6",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -41,9 +41,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.728865Z",
+      "@timestamp": "2026-06-28T13:43:38.589826Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.16 request_id=688b077b7fcd4f649da49cdba30213d7",
+      "message": "Checkout request completed status=200 duration_ms=2.12 request_id=adb97def4fea43899958537e2e42eb49",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -51,9 +51,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.732975Z",
+      "@timestamp": "2026-06-28T13:43:38.593733Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.17 request_id=dc2f2cf8812b456e9995bc89542bddd6",
+      "message": "Checkout request completed status=200 duration_ms=2.22 request_id=16d0e301512845468f45c29c26e8deb4",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -61,9 +61,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.737163Z",
+      "@timestamp": "2026-06-28T13:43:38.597833Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.16 request_id=33f478dc609e4156b97b74983005907f",
+      "message": "Checkout request completed status=200 duration_ms=2.13 request_id=2b4f778634894c0ab6eddfd343368f80",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -71,9 +71,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.742496Z",
+      "@timestamp": "2026-06-28T13:43:38.603858Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.17 request_id=1dc672a495ec47d6b35faea8e0c5c36f",
+      "message": "Checkout request completed status=200 duration_ms=2.19 request_id=cdd7074e6fd64f55a6a81c72cb4482fa",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -81,9 +81,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.747760Z",
+      "@timestamp": "2026-06-28T13:43:38.608290Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.13 request_id=be3a2dd0d6514e428cc251b0cf5be13b",
+      "message": "Checkout request completed status=200 duration_ms=2.18 request_id=858d809a0fa34e768552cc56efe07f79",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -91,9 +91,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.752756Z",
+      "@timestamp": "2026-06-28T13:43:38.612606Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.13 request_id=15d20d744a3c48d2993dcd40e260eb58",
+      "message": "Checkout request completed status=200 duration_ms=2.15 request_id=a4a2baff7489446782d199ebb795b18f",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -101,9 +101,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.757636Z",
+      "@timestamp": "2026-06-28T13:43:38.616729Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.16 request_id=5a9ac8880390486c8179e78e9e2bfa63",
+      "message": "Checkout request completed status=200 duration_ms=2.17 request_id=1e6359ea0293467f97afb9082620fc2c",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -111,9 +111,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.762484Z",
+      "@timestamp": "2026-06-28T13:43:38.620780Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.16 request_id=91b8a1b0b3904d37b261bac3e797cfb6",
+      "message": "Checkout request completed status=200 duration_ms=2.15 request_id=1a4f6202bf7c49d0a7b26cf8d8f217f7",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -121,9 +121,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.766874Z",
+      "@timestamp": "2026-06-28T13:43:38.624804Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.25 request_id=c7f84396bd2e41a691c7dccf7a704262",
+      "message": "Checkout request completed status=200 duration_ms=2.14 request_id=b5c07888a95f4cf0b31b53eb15052c9c",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -131,9 +131,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.771210Z",
+      "@timestamp": "2026-06-28T13:43:38.629114Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.18 request_id=ebd6ed5d27ae4f0289cfa6f998817e4d",
+      "message": "Checkout request completed status=200 duration_ms=2.20 request_id=5583af653341473cbfcc16e7f750e58f",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -141,9 +141,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.776059Z",
+      "@timestamp": "2026-06-28T13:43:38.632998Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.17 request_id=b7093e96ec2c4aaab5f160bb858cc638",
+      "message": "Checkout request completed status=200 duration_ms=2.16 request_id=96a3d1ea486141368697cb9bf8eecc19",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -151,9 +151,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.781114Z",
+      "@timestamp": "2026-06-28T13:43:38.637016Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.14 request_id=3a3a0c579bc44625b450e49d81684fc7",
+      "message": "Checkout request completed status=200 duration_ms=2.13 request_id=65c2062d7407410981cefcfc2a268b02",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -161,9 +161,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.786377Z",
+      "@timestamp": "2026-06-28T13:43:38.641012Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.13 request_id=bb158101b2194f538666c7a0a0908ae0",
+      "message": "Checkout request completed status=200 duration_ms=2.09 request_id=f9afd7703a9c4ef4bf2f83593b89bd5d",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -171,9 +171,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.791362Z",
+      "@timestamp": "2026-06-28T13:43:38.645092Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.12 request_id=73af26d5784d45dd873a440dbf0c75e7",
+      "message": "Checkout request completed status=200 duration_ms=2.14 request_id=6b15997ac7cb4fc087c5098d643494a5",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -181,9 +181,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.796267Z",
+      "@timestamp": "2026-06-28T13:43:38.649029Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.14 request_id=e354e822bcbf47f1962c94b2acc7fd88",
+      "message": "Checkout request completed status=200 duration_ms=2.15 request_id=cf7992c64cfb4537a66902ded7b34a98",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -191,9 +191,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.800570Z",
+      "@timestamp": "2026-06-28T13:43:38.653057Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.18 request_id=3c495f14cc054fb98c3f009cb396b304",
+      "message": "Checkout request completed status=200 duration_ms=2.11 request_id=cc51674fbc7e4be6ae1f153f0040efa9",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -201,9 +201,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.804732Z",
+      "@timestamp": "2026-06-28T13:43:38.657129Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.16 request_id=3e6cbe0a628346d4b03a2834796b2726",
+      "message": "Checkout request completed status=200 duration_ms=2.19 request_id=b7d0f69e4a4c4c6abc17b1062eb1d453",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -211,9 +211,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.809726Z",
+      "@timestamp": "2026-06-28T13:43:38.661073Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.17 request_id=fc615656c3584b95b664d9db0c4b3f82",
+      "message": "Checkout request completed status=200 duration_ms=2.15 request_id=7a22a4db984b4e21baff883b1ffeaca2",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -221,9 +221,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.814734Z",
+      "@timestamp": "2026-06-28T13:43:38.665076Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.15 request_id=2313ee353f7a4178a1ce2e7755f7b24b",
+      "message": "Checkout request completed status=200 duration_ms=2.21 request_id=442120b10f49490bbef9193cf2051762",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -231,9 +231,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.819874Z",
+      "@timestamp": "2026-06-28T13:43:38.668995Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.13 request_id=8a3e78ea950e489894259990d89e9e8d",
+      "message": "Checkout request completed status=200 duration_ms=2.17 request_id=9a92d4862e8c4fff8e1ba9df908cd3d5",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -241,9 +241,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.825473Z",
+      "@timestamp": "2026-06-28T13:43:38.672951Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.15 request_id=ffccc11745c54b8582c8b9a9300fc0c5",
+      "message": "Checkout request completed status=200 duration_ms=2.12 request_id=f4b0ed4694ce4898a9fd20798fa80394",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -251,9 +251,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.830706Z",
+      "@timestamp": "2026-06-28T13:43:38.676956Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.13 request_id=ed35e5a67deb4452a8993b4e85689477",
+      "message": "Checkout request completed status=200 duration_ms=2.17 request_id=ce17ca96056749259719da3b47feaacd",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -261,9 +261,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.835594Z",
+      "@timestamp": "2026-06-28T13:43:38.681391Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.13 request_id=1f4fb3a54ee14ab98c706ee0d823fcd7",
+      "message": "Checkout request completed status=200 duration_ms=2.21 request_id=0d23f7df55bd4a67aad2bc9b54e7c97e",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -271,9 +271,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.840339Z",
+      "@timestamp": "2026-06-28T13:43:38.685924Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.14 request_id=ed5afb7d74b0437b9bac8bf339ef933c",
+      "message": "Checkout request completed status=200 duration_ms=2.11 request_id=d667352cddbc4291918f1878ff0af5f6",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -281,9 +281,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.845283Z",
+      "@timestamp": "2026-06-28T13:43:38.690289Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.17 request_id=0cb9c94e22ed4017bb59d39d34313fc1",
+      "message": "Checkout request completed status=200 duration_ms=2.14 request_id=7706953f4f9240ceb4d357b68e6f35ad",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -291,9 +291,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.849470Z",
+      "@timestamp": "2026-06-28T13:43:38.694091Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.16 request_id=692ca1dc6acc40e8b327cba7adf238bf",
+      "message": "Checkout request completed status=200 duration_ms=2.13 request_id=514838e24dda4e6299c1b709d2c1652f",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -301,9 +301,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.854014Z",
+      "@timestamp": "2026-06-28T13:43:38.698059Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.15 request_id=b0e3c5d252954ffc9db8b4be1f427016",
+      "message": "Checkout request completed status=200 duration_ms=2.12 request_id=0be5c9570f7e4b56ae5f289e2f01685c",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -311,9 +311,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.858908Z",
+      "@timestamp": "2026-06-28T13:43:38.702015Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.13 request_id=150c875e9dba4c26a87b958d12f56849",
+      "message": "Checkout request completed status=200 duration_ms=2.11 request_id=69b5424844e0484198ee8415d9de960a",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -321,9 +321,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.863880Z",
+      "@timestamp": "2026-06-28T13:43:38.705796Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.15 request_id=2a9b6d5c495c4952966f30521527292b",
+      "message": "Checkout request completed status=200 duration_ms=2.07 request_id=3a8b2d34ea794f498354e6b4a9468e75",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -331,9 +331,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.868940Z",
+      "@timestamp": "2026-06-28T13:43:38.709764Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.15 request_id=db4fb4f3482d4a359c3d7d4d89a54afd",
+      "message": "Checkout request completed status=200 duration_ms=2.22 request_id=aaddd4b188374fc8a48394be3d4e6371",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -341,9 +341,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.873427Z",
+      "@timestamp": "2026-06-28T13:43:38.713961Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.16 request_id=cf3ff3222eb64ea185db9fa57034c345",
+      "message": "Checkout request completed status=200 duration_ms=2.11 request_id=658a46f519e44657a7565377cd887ef0",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -351,9 +351,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.877680Z",
+      "@timestamp": "2026-06-28T13:43:38.717792Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.17 request_id=894e9354c3b0457b826e4a8eee68eabe",
+      "message": "Checkout request completed status=200 duration_ms=2.11 request_id=f2623b5457374f5fa7440a42aa72d870",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -361,9 +361,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.881754Z",
+      "@timestamp": "2026-06-28T13:43:38.721593Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.10 request_id=957529e680a64da09d2b9698e79e2e63",
+      "message": "Checkout request completed status=200 duration_ms=2.17 request_id=bef3de047e1f4ecd84d4d6d6c6579e97",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -371,9 +371,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.886624Z",
+      "@timestamp": "2026-06-28T13:43:38.725742Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.13 request_id=869d4f18c1214de188f34a4ad152584c",
+      "message": "Checkout request completed status=200 duration_ms=2.11 request_id=88ebf3dcef7a45ecaef7dffd58e3d386",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -381,9 +381,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.891494Z",
+      "@timestamp": "2026-06-28T13:43:38.730228Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.12 request_id=e2488a5439c54f83be9fdb472bca2a59",
+      "message": "Checkout request completed status=200 duration_ms=2.19 request_id=a817b46cd3d140d3992192ee4e787047",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -391,9 +391,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.896273Z",
+      "@timestamp": "2026-06-28T13:43:38.734184Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.15 request_id=1aea7649135149d197acfcb7c08541e6",
+      "message": "Checkout request completed status=200 duration_ms=2.23 request_id=aa0af99e518e47bd8d6700fbd11ca03a",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -401,9 +401,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.900663Z",
+      "@timestamp": "2026-06-28T13:43:38.738085Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.16 request_id=30212968d91f429885c84ef2ec92bf15",
+      "message": "Checkout request completed status=200 duration_ms=2.11 request_id=ab07ee50b3c643eba30b212e4d9cb849",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -411,9 +411,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.904761Z",
+      "@timestamp": "2026-06-28T13:43:38.742324Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.19 request_id=0396422bd8a94066a25ba73132586fe8",
+      "message": "Checkout request completed status=200 duration_ms=2.13 request_id=45fdb22ac4e249a4b1a9c4aadae8932e",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -421,9 +421,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.909438Z",
+      "@timestamp": "2026-06-28T13:43:38.746495Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.18 request_id=552b9b38820142dea68faae4df5a3f8a",
+      "message": "Checkout request completed status=200 duration_ms=2.18 request_id=1a192c89033941e1b10366905f748a5f",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -431,9 +431,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.914304Z",
+      "@timestamp": "2026-06-28T13:43:38.750472Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.12 request_id=ae81430093f94f329cb94c74bc326d57",
+      "message": "Checkout request completed status=200 duration_ms=2.19 request_id=a840b30e6a0d44e7b2e7fdaed3867c82",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -441,9 +441,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.919298Z",
+      "@timestamp": "2026-06-28T13:43:38.754337Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.11 request_id=fa732dc288894102ad749aae08e1c3a7",
+      "message": "Checkout request completed status=200 duration_ms=2.12 request_id=d568082a66324606b332834a18c9cad7",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -451,9 +451,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.924077Z",
+      "@timestamp": "2026-06-28T13:43:38.758255Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.15 request_id=167f2a1b574c427ba829542aa1ccc98d",
+      "message": "Checkout request completed status=200 duration_ms=2.11 request_id=78f6c5caf214411ebc791d516a4446e7",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -461,9 +461,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.928639Z",
+      "@timestamp": "2026-06-28T13:43:38.762117Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.17 request_id=2f3b1c08efeb4fdc8582748123f0e448",
+      "message": "Checkout request completed status=200 duration_ms=2.14 request_id=5faac48b7f104e4d81c0dcc3eb5ed1c7",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -471,9 +471,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.932771Z",
+      "@timestamp": "2026-06-28T13:43:38.766019Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.15 request_id=3bf9812012574b539b8e4fd682d21d6d",
+      "message": "Checkout request completed status=200 duration_ms=2.16 request_id=17c6e2d9108d46ceba9d68e1a7ffd4eb",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -481,9 +481,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.937077Z",
+      "@timestamp": "2026-06-28T13:43:38.770455Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.15 request_id=5f8a3cb89a6e439783179b903d92a4e6",
+      "message": "Checkout request completed status=200 duration_ms=2.26 request_id=f76a7bc3ce674273a03218e93e0dfae9",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -491,9 +491,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.942098Z",
+      "@timestamp": "2026-06-28T13:43:38.774861Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.11 request_id=05d2515c992345a6a850d67cbe709a53",
+      "message": "Checkout request completed status=200 duration_ms=2.17 request_id=5cd0662d808c482183abaca9d400679d",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -501,9 +501,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.946763Z",
+      "@timestamp": "2026-06-28T13:43:38.778992Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.12 request_id=b0f1567932f94db6bde13b389abb94dc",
+      "message": "Checkout request completed status=200 duration_ms=2.14 request_id=929ee486e4a14786b170c542963fe44c",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -511,9 +511,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.951394Z",
+      "@timestamp": "2026-06-28T13:43:38.782762Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.15 request_id=517620dc4cc649c786fa94724342d11b",
+      "message": "Checkout request completed status=200 duration_ms=2.12 request_id=8eb0db98bdd8431890189a6bbe0ccbbc",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -521,9 +521,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.955611Z",
+      "@timestamp": "2026-06-28T13:43:38.786689Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.16 request_id=910de3d3ab484b2fb17f94af6bf02c8f",
+      "message": "Checkout request completed status=200 duration_ms=2.15 request_id=2dea2d8532744dc3a8bf63764ce69a18",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -531,9 +531,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.960063Z",
+      "@timestamp": "2026-06-28T13:43:38.792654Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.19 request_id=4de99badb799424da356bd9c1769549c",
+      "message": "Checkout request completed status=200 duration_ms=2.15 request_id=f336c77b0c644a58929e64e2b62d5995",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -541,9 +541,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.964504Z",
+      "@timestamp": "2026-06-28T13:43:38.796733Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.13 request_id=ecf32548ff884f689f241723d36b933e",
+      "message": "Checkout request completed status=200 duration_ms=2.14 request_id=7e480cf07b8a42e68267a1cd2fa90821",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -551,9 +551,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.969668Z",
+      "@timestamp": "2026-06-28T13:43:38.801054Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.11 request_id=5dc5a280cce740df923c0fc3f60cea93",
+      "message": "Checkout request completed status=200 duration_ms=2.13 request_id=bbf8302da9034410bf0bebfa1dd056dc",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -561,9 +561,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.974424Z",
+      "@timestamp": "2026-06-28T13:43:38.805516Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.12 request_id=cec46007c1174940889341fb5ff36a24",
+      "message": "Checkout request completed status=200 duration_ms=2.16 request_id=d1b5eca97021408299a70d93a658bda4",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -571,9 +571,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.978659Z",
+      "@timestamp": "2026-06-28T13:43:38.809747Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.13 request_id=ff9e3e550b4242e79dd3539673802180",
+      "message": "Checkout request completed status=200 duration_ms=2.24 request_id=5e4bba7da51f47cd96dad4a6d5a02680",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -581,9 +581,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.982779Z",
+      "@timestamp": "2026-06-28T13:43:38.814228Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.15 request_id=c79b637789664ff79072287d7a595821",
+      "message": "Checkout request completed status=200 duration_ms=2.13 request_id=1da37d6fb5cb4b63bfed728d2f1917ea",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -591,9 +591,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.986996Z",
+      "@timestamp": "2026-06-28T13:43:38.818427Z",
       "level": "INFO",
-      "message": "Checkout request completed status=200 duration_ms=2.15 request_id=f7b38b881a0f45e08c1c28adc1722974",
+      "message": "Checkout request completed status=200 duration_ms=2.13 request_id=f492ed9b07db4415aaf5678895361f6a",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -601,7 +601,7 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:46.989849Z",
+      "@timestamp": "2026-06-28T13:43:38.820323Z",
       "level": "WARN",
       "message": "Failure mode changed enabled=true",
       "service": "checkout-service",
@@ -611,9 +611,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.026063Z",
+      "@timestamp": "2026-06-28T13:43:38.856661Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=a7bd82b0581043f69f1f64ea0e3a8b68",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=8eb1d63a1ff2414fa7c23fa2e7344a21",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -621,9 +621,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.026280Z",
+      "@timestamp": "2026-06-28T13:43:38.856837Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.19 request_id=a7bd82b0581043f69f1f64ea0e3a8b68",
+      "message": "Checkout request failed status=503 duration_ms=35.14 request_id=8eb1d63a1ff2414fa7c23fa2e7344a21",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -631,9 +631,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.064247Z",
+      "@timestamp": "2026-06-28T13:43:38.893985Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=bf1ffed8d90049fbb47dd96436fe1642",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=9b009c8e160545e78bcbd09fb24a4ea4",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -641,9 +641,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.064400Z",
+      "@timestamp": "2026-06-28T13:43:38.894117Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.23 request_id=bf1ffed8d90049fbb47dd96436fe1642",
+      "message": "Checkout request failed status=503 duration_ms=35.19 request_id=9b009c8e160545e78bcbd09fb24a4ea4",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -651,9 +651,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.101969Z",
+      "@timestamp": "2026-06-28T13:43:38.931254Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=2b390bf4b64a40538feb1ded63cbb745",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=2653309ff1564bbbbf52dd539c99658f",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -661,9 +661,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.102101Z",
+      "@timestamp": "2026-06-28T13:43:38.931718Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.15 request_id=2b390bf4b64a40538feb1ded63cbb745",
+      "message": "Checkout request failed status=503 duration_ms=35.27 request_id=2653309ff1564bbbbf52dd539c99658f",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -671,9 +671,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.139498Z",
+      "@timestamp": "2026-06-28T13:43:38.969469Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=85fba7da7072402980a9735443d2cf6a",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=12beca26795d4606a30512f1a4e0247c",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -681,9 +681,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.139637Z",
+      "@timestamp": "2026-06-28T13:43:38.969622Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.22 request_id=85fba7da7072402980a9735443d2cf6a",
+      "message": "Checkout request failed status=503 duration_ms=35.14 request_id=12beca26795d4606a30512f1a4e0247c",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -691,9 +691,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.176564Z",
+      "@timestamp": "2026-06-28T13:43:39.006874Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=0f3415bacad8475580fa001e6a0bc579",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=f26df5b0c2294b44a6010fe56be67e61",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -701,9 +701,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.176732Z",
+      "@timestamp": "2026-06-28T13:43:39.007001Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.16 request_id=0f3415bacad8475580fa001e6a0bc579",
+      "message": "Checkout request failed status=503 duration_ms=35.16 request_id=f26df5b0c2294b44a6010fe56be67e61",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -711,9 +711,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.214049Z",
+      "@timestamp": "2026-06-28T13:43:39.044434Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=75b8cfb0caf542c58cfc548a8d5ec276",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=e28303aef5204e4e9e9d910932d10234",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -721,9 +721,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.214176Z",
+      "@timestamp": "2026-06-28T13:43:39.044565Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.22 request_id=75b8cfb0caf542c58cfc548a8d5ec276",
+      "message": "Checkout request failed status=503 duration_ms=35.24 request_id=e28303aef5204e4e9e9d910932d10234",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -731,9 +731,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.251503Z",
+      "@timestamp": "2026-06-28T13:43:39.081469Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=e63dd8f5c2ab43bf9a0cf02e3baf5d8f",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=8bdf7bbab7e9487684f2879fb1c50420",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -741,9 +741,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.251626Z",
+      "@timestamp": "2026-06-28T13:43:39.081610Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.17 request_id=e63dd8f5c2ab43bf9a0cf02e3baf5d8f",
+      "message": "Checkout request failed status=503 duration_ms=35.18 request_id=8bdf7bbab7e9487684f2879fb1c50420",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -751,9 +751,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.288547Z",
+      "@timestamp": "2026-06-28T13:43:39.118809Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=6b677318a653499aa25de60d7529bd44",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=ffb2c96ebe5247c6801c828d96fd4544",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -761,9 +761,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.288676Z",
+      "@timestamp": "2026-06-28T13:43:39.118935Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.15 request_id=6b677318a653499aa25de60d7529bd44",
+      "message": "Checkout request failed status=503 duration_ms=35.20 request_id=ffb2c96ebe5247c6801c828d96fd4544",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -771,9 +771,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.325727Z",
+      "@timestamp": "2026-06-28T13:43:39.156210Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=49b69e10f34b4d65b1c5d11dcc54c4fd",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=6ad108cbfcd34d61afd540113d4dc1c1",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -781,9 +781,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.325945Z",
+      "@timestamp": "2026-06-28T13:43:39.156350Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.22 request_id=49b69e10f34b4d65b1c5d11dcc54c4fd",
+      "message": "Checkout request failed status=503 duration_ms=35.21 request_id=6ad108cbfcd34d61afd540113d4dc1c1",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -791,9 +791,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.363374Z",
+      "@timestamp": "2026-06-28T13:43:39.193236Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=7034a38937874b8b893b81f9fdd44256",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=2be51183e8eb4dd89d5ca24182e74751",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -801,9 +801,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.363499Z",
+      "@timestamp": "2026-06-28T13:43:39.193382Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.13 request_id=7034a38937874b8b893b81f9fdd44256",
+      "message": "Checkout request failed status=503 duration_ms=35.19 request_id=2be51183e8eb4dd89d5ca24182e74751",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -811,9 +811,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.400946Z",
+      "@timestamp": "2026-06-28T13:43:39.230519Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=4055cc6bfa6a4f558232b6ca318656b5",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=0e18da138d81472a901d963ae970579f",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -821,9 +821,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.401074Z",
+      "@timestamp": "2026-06-28T13:43:39.230674Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.19 request_id=4055cc6bfa6a4f558232b6ca318656b5",
+      "message": "Checkout request failed status=503 duration_ms=35.14 request_id=0e18da138d81472a901d963ae970579f",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -831,9 +831,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.438156Z",
+      "@timestamp": "2026-06-28T13:43:39.267778Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=af35bb1ebb244155bb1d43ea8d5b6888",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=de27c006485f4b71b7c684e15598ed2f",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -841,9 +841,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.438303Z",
+      "@timestamp": "2026-06-28T13:43:39.267977Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.16 request_id=af35bb1ebb244155bb1d43ea8d5b6888",
+      "message": "Checkout request failed status=503 duration_ms=35.15 request_id=de27c006485f4b71b7c684e15598ed2f",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -851,9 +851,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.475348Z",
+      "@timestamp": "2026-06-28T13:43:39.305229Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=544efdc3d8854d429ed47ef44d7f664c",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=328afcfe9ef542bfbdc6a387d53331d5",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -861,9 +861,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.475480Z",
+      "@timestamp": "2026-06-28T13:43:39.305358Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.16 request_id=544efdc3d8854d429ed47ef44d7f664c",
+      "message": "Checkout request failed status=503 duration_ms=35.15 request_id=328afcfe9ef542bfbdc6a387d53331d5",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -871,9 +871,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.512986Z",
+      "@timestamp": "2026-06-28T13:43:39.342223Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=f97871c91e68498f878b02b0ad5f0ac7",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=5afe0e5e254a4835a652db6cfc21ab2b",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -881,9 +881,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.513115Z",
+      "@timestamp": "2026-06-28T13:43:39.342364Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.15 request_id=f97871c91e68498f878b02b0ad5f0ac7",
+      "message": "Checkout request failed status=503 duration_ms=35.18 request_id=5afe0e5e254a4835a652db6cfc21ab2b",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -891,9 +891,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.550374Z",
+      "@timestamp": "2026-06-28T13:43:39.379568Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=5f664fcde807464ea0fa5ff0afcdf83c",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=10153086d0284bef8921150631d59978",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -901,9 +901,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.550550Z",
+      "@timestamp": "2026-06-28T13:43:39.379694Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.18 request_id=5f664fcde807464ea0fa5ff0afcdf83c",
+      "message": "Checkout request failed status=503 duration_ms=35.17 request_id=10153086d0284bef8921150631d59978",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -911,9 +911,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.587507Z",
+      "@timestamp": "2026-06-28T13:43:39.417016Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=40ab95910e64464abe3226ddf3c2d50e",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=f1555d0d1813440b89f2e43824a26d86",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -921,9 +921,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.587677Z",
+      "@timestamp": "2026-06-28T13:43:39.417143Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.16 request_id=40ab95910e64464abe3226ddf3c2d50e",
+      "message": "Checkout request failed status=503 duration_ms=35.26 request_id=f1555d0d1813440b89f2e43824a26d86",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -931,9 +931,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.625029Z",
+      "@timestamp": "2026-06-28T13:43:39.454272Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=1ea7b05d2ffd455581e0abf2b70d8029",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=d17aa92f662841328f777758173412c3",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -941,9 +941,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.625226Z",
+      "@timestamp": "2026-06-28T13:43:39.454417Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.16 request_id=1ea7b05d2ffd455581e0abf2b70d8029",
+      "message": "Checkout request failed status=503 duration_ms=35.17 request_id=d17aa92f662841328f777758173412c3",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -951,9 +951,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.662918Z",
+      "@timestamp": "2026-06-28T13:43:39.491527Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=6bd128804061483b9c62e086a45fb247",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=fb94e0a905364f48b0633e41bc4caabe",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -961,9 +961,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.663051Z",
+      "@timestamp": "2026-06-28T13:43:39.491679Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.18 request_id=6bd128804061483b9c62e086a45fb247",
+      "message": "Checkout request failed status=503 duration_ms=35.22 request_id=fb94e0a905364f48b0633e41bc4caabe",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -971,9 +971,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.700422Z",
+      "@timestamp": "2026-06-28T13:43:39.529011Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=003e254a6dcf4cbd8fdf7072a5befe97",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=4e7a4c35db784682a684b22fe8cf3c6f",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -981,9 +981,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.700540Z",
+      "@timestamp": "2026-06-28T13:43:39.529139Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.16 request_id=003e254a6dcf4cbd8fdf7072a5befe97",
+      "message": "Checkout request failed status=503 duration_ms=35.27 request_id=4e7a4c35db784682a684b22fe8cf3c6f",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -991,9 +991,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.737534Z",
+      "@timestamp": "2026-06-28T13:43:39.566296Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=ac8349f7c7d146049a28675141db7111",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=497cdf9a97e64565962bddcb38a01055",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1001,9 +1001,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.737792Z",
+      "@timestamp": "2026-06-28T13:43:39.566420Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.17 request_id=ac8349f7c7d146049a28675141db7111",
+      "message": "Checkout request failed status=503 duration_ms=35.15 request_id=497cdf9a97e64565962bddcb38a01055",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1011,9 +1011,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.775532Z",
+      "@timestamp": "2026-06-28T13:43:39.603261Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=295b1ea33ae64d4ea1f550af9e33b009",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=130b1fbb5a0b49a18d9992fa3681b9ed",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1021,9 +1021,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.775732Z",
+      "@timestamp": "2026-06-28T13:43:39.603405Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.28 request_id=295b1ea33ae64d4ea1f550af9e33b009",
+      "message": "Checkout request failed status=503 duration_ms=35.14 request_id=130b1fbb5a0b49a18d9992fa3681b9ed",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1031,9 +1031,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.813319Z",
+      "@timestamp": "2026-06-28T13:43:39.640695Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=44c7594865394dc2b497564ec4c1a4b9",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=d03cee14d11e48b2b381bf47e5d80cd1",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1041,9 +1041,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.813446Z",
+      "@timestamp": "2026-06-28T13:43:39.640829Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.18 request_id=44c7594865394dc2b497564ec4c1a4b9",
+      "message": "Checkout request failed status=503 duration_ms=35.19 request_id=d03cee14d11e48b2b381bf47e5d80cd1",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1051,9 +1051,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.851090Z",
+      "@timestamp": "2026-06-28T13:43:39.678499Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=c91e5956dfa248b1be5b3f8695b548c3",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=6fa25511fa134235a9b4a9f17bc2df46",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1061,9 +1061,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.851277Z",
+      "@timestamp": "2026-06-28T13:43:39.678618Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.17 request_id=c91e5956dfa248b1be5b3f8695b548c3",
+      "message": "Checkout request failed status=503 duration_ms=35.13 request_id=6fa25511fa134235a9b4a9f17bc2df46",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1071,9 +1071,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.888457Z",
+      "@timestamp": "2026-06-28T13:43:39.715709Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=c739d9d4eb004f87adc30bd9252b33ae",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=2510887d956043aeb87e6d115ff1db5a",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1081,9 +1081,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.888614Z",
+      "@timestamp": "2026-06-28T13:43:39.715862Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.16 request_id=c739d9d4eb004f87adc30bd9252b33ae",
+      "message": "Checkout request failed status=503 duration_ms=35.18 request_id=2510887d956043aeb87e6d115ff1db5a",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1091,9 +1091,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.925563Z",
+      "@timestamp": "2026-06-28T13:43:39.752972Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=de4b01ae1c234fb693d2011fee2fba02",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=148bd056a9354bcda828db0ada0fb825",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1101,9 +1101,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.925789Z",
+      "@timestamp": "2026-06-28T13:43:39.753129Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.20 request_id=de4b01ae1c234fb693d2011fee2fba02",
+      "message": "Checkout request failed status=503 duration_ms=35.15 request_id=148bd056a9354bcda828db0ada0fb825",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1111,9 +1111,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.963235Z",
+      "@timestamp": "2026-06-28T13:43:39.790341Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=7e25f9e7047f413caaedb3cdfd4a1694",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=a8ea642b19dd4321a9c8dee2fa66f64d",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1121,9 +1121,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:47.963364Z",
+      "@timestamp": "2026-06-28T13:43:39.790480Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.18 request_id=7e25f9e7047f413caaedb3cdfd4a1694",
+      "message": "Checkout request failed status=503 duration_ms=35.13 request_id=a8ea642b19dd4321a9c8dee2fa66f64d",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1131,9 +1131,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.000638Z",
+      "@timestamp": "2026-06-28T13:43:39.829267Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=7252b05f8b864d5ba7807322f2e5e2b1",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=e62da342effc43b1916151e1ae6dadc0",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1141,9 +1141,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.000768Z",
+      "@timestamp": "2026-06-28T13:43:39.829394Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.16 request_id=7252b05f8b864d5ba7807322f2e5e2b1",
+      "message": "Checkout request failed status=503 duration_ms=35.16 request_id=e62da342effc43b1916151e1ae6dadc0",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1151,9 +1151,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.037850Z",
+      "@timestamp": "2026-06-28T13:43:39.866725Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=239b28e641f24a5bbf9f5c62b1f99343",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=50b960fc627b450bb2b746d0e224b361",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1161,9 +1161,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.038055Z",
+      "@timestamp": "2026-06-28T13:43:39.866871Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.19 request_id=239b28e641f24a5bbf9f5c62b1f99343",
+      "message": "Checkout request failed status=503 duration_ms=35.18 request_id=50b960fc627b450bb2b746d0e224b361",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1171,9 +1171,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.075268Z",
+      "@timestamp": "2026-06-28T13:43:39.903898Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=3f5b518ee0bc498497460e7b30d9005b",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=26bb19c7e5b440d6884081bc0cbb105a",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1181,9 +1181,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.075393Z",
+      "@timestamp": "2026-06-28T13:43:39.904107Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.17 request_id=3f5b518ee0bc498497460e7b30d9005b",
+      "message": "Checkout request failed status=503 duration_ms=35.20 request_id=26bb19c7e5b440d6884081bc0cbb105a",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1191,9 +1191,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.113067Z",
+      "@timestamp": "2026-06-28T13:43:39.941403Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=04a0e996d7854f5c956c92a8c6ad0425",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=6f992873d9384988a78837310c2c0f19",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1201,9 +1201,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.113232Z",
+      "@timestamp": "2026-06-28T13:43:39.941634Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.13 request_id=04a0e996d7854f5c956c92a8c6ad0425",
+      "message": "Checkout request failed status=503 duration_ms=35.21 request_id=6f992873d9384988a78837310c2c0f19",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1211,9 +1211,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.151152Z",
+      "@timestamp": "2026-06-28T13:43:39.979983Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=387a9f69ea924757aee821b46a4f92b9",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=9eb7007d0811496aa89a32d38efc3841",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1221,9 +1221,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.151310Z",
+      "@timestamp": "2026-06-28T13:43:39.980114Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.14 request_id=387a9f69ea924757aee821b46a4f92b9",
+      "message": "Checkout request failed status=503 duration_ms=35.20 request_id=9eb7007d0811496aa89a32d38efc3841",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1231,9 +1231,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.188635Z",
+      "@timestamp": "2026-06-28T13:43:40.017387Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=58fbe497491749219c88d3c497e70f62",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=8e9348c70920471c857a799df74ee8f7",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1241,9 +1241,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.188787Z",
+      "@timestamp": "2026-06-28T13:43:40.017518Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.15 request_id=58fbe497491749219c88d3c497e70f62",
+      "message": "Checkout request failed status=503 duration_ms=35.21 request_id=8e9348c70920471c857a799df74ee8f7",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1251,9 +1251,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.226203Z",
+      "@timestamp": "2026-06-28T13:43:40.054793Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=7fd966ee9105491fa3388abb0a766c48",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=0529d7470f0b436297094e6f8ede8da7",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1261,9 +1261,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.226427Z",
+      "@timestamp": "2026-06-28T13:43:40.055034Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.17 request_id=7fd966ee9105491fa3388abb0a766c48",
+      "message": "Checkout request failed status=503 duration_ms=35.23 request_id=0529d7470f0b436297094e6f8ede8da7",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1271,9 +1271,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.264412Z",
+      "@timestamp": "2026-06-28T13:43:40.093503Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=c4d1c00dfc8d4b0f88221e4b52c0ad11",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=e8b6006aa4294aa88efd4261195afdaa",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1281,9 +1281,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.264583Z",
+      "@timestamp": "2026-06-28T13:43:40.093631Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.17 request_id=c4d1c00dfc8d4b0f88221e4b52c0ad11",
+      "message": "Checkout request failed status=503 duration_ms=35.24 request_id=e8b6006aa4294aa88efd4261195afdaa",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1291,9 +1291,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.302343Z",
+      "@timestamp": "2026-06-28T13:43:40.130723Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=85681caa295f43cc83ac658634403520",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=7dbb63cdc3bf4b9f9eea79f11df5691f",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1301,9 +1301,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.302476Z",
+      "@timestamp": "2026-06-28T13:43:40.130873Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.15 request_id=85681caa295f43cc83ac658634403520",
+      "message": "Checkout request failed status=503 duration_ms=35.16 request_id=7dbb63cdc3bf4b9f9eea79f11df5691f",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1311,9 +1311,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.340229Z",
+      "@timestamp": "2026-06-28T13:43:40.168059Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=1f94dde9ddd542a0a3a084c9a4c5f722",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=dffc25f26f82441f9dffaa8f6cdb4287",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1321,9 +1321,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.340373Z",
+      "@timestamp": "2026-06-28T13:43:40.168187Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.16 request_id=1f94dde9ddd542a0a3a084c9a4c5f722",
+      "message": "Checkout request failed status=503 duration_ms=35.20 request_id=dffc25f26f82441f9dffaa8f6cdb4287",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1331,9 +1331,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.377811Z",
+      "@timestamp": "2026-06-28T13:43:40.205239Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=da0d3f2889564697829d9e78f491aa8d",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=af7a565184c841e6a80beaaafeabfa15",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1341,9 +1341,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.377943Z",
+      "@timestamp": "2026-06-28T13:43:40.205407Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.17 request_id=da0d3f2889564697829d9e78f491aa8d",
+      "message": "Checkout request failed status=503 duration_ms=35.17 request_id=af7a565184c841e6a80beaaafeabfa15",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1351,9 +1351,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.415626Z",
+      "@timestamp": "2026-06-28T13:43:40.242537Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=a1315aca41df4452bd832ef76b990b2d",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=4f5cc443996a4c328f3bbef508886ebc",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1361,9 +1361,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.415838Z",
+      "@timestamp": "2026-06-28T13:43:40.242673Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.18 request_id=a1315aca41df4452bd832ef76b990b2d",
+      "message": "Checkout request failed status=503 duration_ms=35.20 request_id=4f5cc443996a4c328f3bbef508886ebc",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1371,9 +1371,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.453974Z",
+      "@timestamp": "2026-06-28T13:43:40.279562Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=907f2284eead4fa8809bd1e2eec7c960",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=1a314d851bcb4b3f8fabbeb5f6c95cd5",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1381,9 +1381,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.454151Z",
+      "@timestamp": "2026-06-28T13:43:40.279703Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.12 request_id=907f2284eead4fa8809bd1e2eec7c960",
+      "message": "Checkout request failed status=503 duration_ms=35.18 request_id=1a314d851bcb4b3f8fabbeb5f6c95cd5",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1391,9 +1391,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.491984Z",
+      "@timestamp": "2026-06-28T13:43:40.317337Z",
       "level": "ERROR",
-      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=4214a1f982164bc19e2083a8c9906cba",
+      "message": "Payment dependency 10.0.0.3 unavailable after 3 retries request_id=83de3f558fb34f03ae043de763cda72c",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",
@@ -1401,9 +1401,9 @@
       "cncc_uuid": "cncc-demo-12345"
     },
     {
-      "@timestamp": "2026-06-28T12:02:48.492117Z",
+      "@timestamp": "2026-06-28T13:43:40.317467Z",
       "level": "WARN",
-      "message": "Checkout request failed status=503 duration_ms=35.22 request_id=4214a1f982164bc19e2083a8c9906cba",
+      "message": "Checkout request failed status=503 duration_ms=35.19 request_id=83de3f558fb34f03ae043de763cda72c",
       "service": "checkout-service",
       "namespace": "checkout",
       "pod": "checkout-api-7c9d",

@@ -6,8 +6,8 @@ cluster: demo-cluster
 pod: checkout-api-7c9d
 cncc_uuid: cncc-demo-12345
 window:
-  start: '2026-06-28T12:02:45.669803Z'
-  end: '2026-06-28T12:02:49.994987Z'
+  start: '2026-06-28T13:43:37.545405Z'
+  end: '2026-06-28T13:43:41.819841Z'
 timezone: UTC
 telemetry_sources:
   logs: opensearch_logs.json

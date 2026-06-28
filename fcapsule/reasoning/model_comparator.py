@@ -6,13 +6,19 @@ import json
 import re
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from fcapsule.io.archive_writer import create_archive
 from fcapsule.io.output_writer import write_json
 from fcapsule.reasoning.llm_client import ChatRequest, DeepSeekChatClient, LLMUnavailableError
 
 DEFAULT_MODELS = ("deepseek-v4-flash", "deepseek-v4-pro")
+ProgressCallback = Callable[[str, str, dict[str, Any]], None]
+
+
+def _emit(progress: ProgressCallback | None, status: str, message: str, **details: Any) -> None:
+    if progress is not None:
+        progress(status, message, details)
 
 
 def _compact_evidence(capsule: dict[str, Any]) -> dict[str, Any]:
@@ -188,6 +194,7 @@ def compare_models(
     models: list[str] | tuple[str, ...] = DEFAULT_MODELS,
     api_key_env: str = "DEEPSEEK_API_KEY",
     max_tokens: int = 2400,
+    progress: ProgressCallback | None = None,
 ) -> dict[str, Any]:
     capsule = json.loads(Path(capsule_path).read_text(encoding="utf-8"))
     output = Path(output_dir).resolve()
@@ -196,15 +203,16 @@ def compare_models(
     client = DeepSeekChatClient(api_key_env=api_key_env)
     results: list[dict[str, Any]] = []
     for model in models:
+        _emit(progress, "running", f"Calling {model}", model=model)
         started = time.perf_counter()
         raw = client.chat(ChatRequest(model=model, messages=prompt, max_tokens=max_tokens))
         parsed, parse_error = _extract_json(raw["content"])
         if parsed is None and raw.get("finish_reason") == "length" and max_tokens < 6000:
+            _emit(progress, "running", f"Retrying {model} with more tokens", model=model)
             raw = client.chat(ChatRequest(model=model, messages=prompt, max_tokens=6000))
             parsed, parse_error = _extract_json(raw["content"])
         score = _score_response(parsed, raw["content"], capsule)
-        results.append(
-            {
+        result = {
                 "model": model,
                 "provider": raw["provider"],
                 "status": "parsed" if parsed is not None else "unparsed",
@@ -219,6 +227,18 @@ def compare_models(
                 "raw_content": raw["content"],
                 "score": score,
             }
+        results.append(result)
+        _emit(
+            progress,
+            "done",
+            f"{model} response scored",
+            model=model,
+            total_score=score["total_score"],
+            domain_score=score["domain_score"],
+            expected_signal_score=score["expected_signal_score"],
+            citation_score=score["citation_score"],
+            latency_seconds=raw["latency_seconds"],
+            total_tokens=raw["usage"].get("total_tokens"),
         )
     ranked = sorted(results, key=lambda item: (-item["score"]["total_score"], item["model"]))
     comparison = {
@@ -239,6 +259,7 @@ def compare_models(
 
     render_dashboard(output)
     create_archive(output, capsule["case"]["case_id"])
+    _emit(progress, "done", "DeepSeek comparison complete", winner=comparison["winner"], score_delta=comparison["score_delta"])
     return comparison
 
 

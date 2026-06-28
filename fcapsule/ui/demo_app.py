@@ -6,6 +6,8 @@ import html
 import json
 import os
 import sys
+import threading
+import time
 import traceback
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,6 +20,123 @@ from fcapsule.pipeline import investigate_case
 from fcapsule.reasoning.llm_client import LLMUnavailableError
 from fcapsule.reasoning.model_comparator import DEFAULT_MODELS, compare_models
 from fcapsule.ui.dashboard import render_dashboard
+
+
+PHASES = {
+    "capture": {
+        "title": "1. Generate failing app and alert",
+        "waiting": "Waiting to start the local checkout failure.",
+    },
+    "pipeline": {
+        "title": "2. Build FCAPSule evidence capsule",
+        "waiting": "Waiting for the captured telemetry case.",
+    },
+    "deepseek-v4-flash": {
+        "title": "3A. DeepSeek v4 Flash",
+        "waiting": "Waiting for the same capsule input.",
+    },
+    "deepseek-v4-pro": {
+        "title": "3B. DeepSeek v4 Pro",
+        "waiting": "Waiting for the same capsule input.",
+    },
+}
+
+
+class DemoRunState:
+    """In-memory live state for the optional local demo UI."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.reset()
+
+    def reset(self) -> None:
+        with self.lock:
+            self.running = False
+            self.active_job = None
+            self.last_error = None
+            self.started_at = None
+            self.finished_at = None
+            self.phases = {
+                key: {"status": "waiting", "message": value["waiting"], "details": {}, "updated_at": None}
+                for key, value in PHASES.items()
+            }
+            self.events: list[dict[str, Any]] = []
+            self.capture_result: dict[str, Any] | None = None
+            self.pipeline_result: dict[str, Any] | None = None
+            self.comparison_result: dict[str, Any] | None = None
+
+    def begin(self, job: str) -> bool:
+        with self.lock:
+            if self.running:
+                return False
+            self.running = True
+            self.active_job = job
+            self.last_error = None
+            self.started_at = time.time()
+            self.finished_at = None
+            return True
+
+    def finish(self, error: str | None = None) -> None:
+        with self.lock:
+            self.running = False
+            self.finished_at = time.time()
+            if error:
+                self.last_error = error
+                self.events.append({"time": time.time(), "phase": "system", "status": "error", "message": error, "details": {}})
+
+    def clear_after_capture(self) -> None:
+        with self.lock:
+            for key in ("pipeline", "deepseek-v4-flash", "deepseek-v4-pro"):
+                self.phases[key] = {"status": "waiting", "message": PHASES[key]["waiting"], "details": {}, "updated_at": None}
+            self.pipeline_result = None
+            self.comparison_result = None
+
+    def clear_analysis(self) -> None:
+        with self.lock:
+            for key in ("pipeline", "deepseek-v4-flash", "deepseek-v4-pro"):
+                self.phases[key] = {"status": "waiting", "message": PHASES[key]["waiting"], "details": {}, "updated_at": None}
+            self.pipeline_result = None
+            self.comparison_result = None
+
+    def emit(self, phase: str, status: str, message: str, details: dict[str, Any] | None = None) -> None:
+        details = details or {}
+        with self.lock:
+            if phase not in self.phases:
+                self.phases[phase] = {"status": "waiting", "message": "", "details": {}, "updated_at": None}
+            self.phases[phase] = {"status": status, "message": message, "details": details, "updated_at": time.time()}
+            self.events.append({"time": time.time(), "phase": phase, "status": status, "message": message, "details": details})
+            self.events = self.events[-80:]
+
+    def set_capture_result(self, result: dict[str, Any]) -> None:
+        with self.lock:
+            self.capture_result = result
+
+    def set_pipeline_result(self, result: dict[str, Any]) -> None:
+        with self.lock:
+            self.pipeline_result = result
+
+    def set_comparison_result(self, result: dict[str, Any]) -> None:
+        with self.lock:
+            self.comparison_result = result
+
+    def snapshot(self) -> dict[str, Any]:
+        with self.lock:
+            elapsed = None
+            if self.started_at:
+                end = self.finished_at or time.time()
+                elapsed = round(end - self.started_at, 2)
+            return {
+                "running": self.running,
+                "active_job": self.active_job,
+                "last_error": self.last_error,
+                "elapsed_seconds": elapsed,
+                "phases": json.loads(json.dumps(self.phases)),
+                "events": json.loads(json.dumps(self.events)),
+                "capture_result": json.loads(json.dumps(self.capture_result)) if self.capture_result else None,
+                "pipeline_result": json.loads(json.dumps(self.pipeline_result)) if self.pipeline_result else None,
+                "comparison_result": json.loads(json.dumps(self.comparison_result)) if self.comparison_result else None,
+                "api_key_available": bool(os.environ.get("DEEPSEEK_API_KEY")),
+            }
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -279,6 +398,262 @@ def _plain_result(summary: dict[str, Any]) -> str:
     )
 
 
+def _pipeline_ui_result(output_dir: Path, result: dict[str, Any]) -> dict[str, Any]:
+    capsule = _load_json(output_dir / "capsule.json")
+    enriched = dict(result)
+    enriched["domain_summary"] = capsule.get("domain_summary", {})
+    return enriched
+
+
+def _html_page_live() -> str:
+    return """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FCAPSule AI P1 Live Demo</title>
+  <style>
+    :root { --ink:#16202a; --muted:#637181; --line:#d8e0e8; --paper:#fff; --bg:#edf2f7; --accent:#2f7d62; --accent-soft:#e6f3ee; --warn:#a4385a; --blue:#356a96; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:Arial, Helvetica, sans-serif; color:var(--ink); background:var(--bg); }
+    header { background:#fff; border-bottom:1px solid var(--line); padding:26px 30px 18px; }
+    main { width:min(1240px, calc(100% - 28px)); margin:22px auto 44px; display:grid; gap:18px; }
+    h1 { margin:0 0 8px; font-size:30px; letter-spacing:0; }
+    h2 { margin:0 0 12px; font-size:20px; letter-spacing:0; }
+    h3 { margin:0 0 8px; font-size:16px; letter-spacing:0; }
+    p { line-height:1.45; }
+    button, a.button { appearance:none; border:1px solid #1f604a; background:var(--accent); color:#fff; border-radius:6px; padding:10px 12px; font-weight:700; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; min-height:38px; }
+    button.secondary, a.secondary { background:#fff; color:var(--ink); border-color:var(--line); }
+    button:disabled { opacity:.58; cursor:wait; }
+    .muted { color:var(--muted); }
+    .hero { display:grid; grid-template-columns:minmax(0, 1.25fr) minmax(300px, .9fr); gap:16px; align-items:stretch; }
+    .hero-card, .panel, .card { background:var(--paper); border:1px solid var(--line); border-radius:8px; padding:16px; }
+    .hero-card.primary { border-left:6px solid var(--accent); }
+    .takeaway { font-size:18px; line-height:1.45; margin:0; }
+    .actions { display:flex; flex-wrap:wrap; gap:10px; }
+    .status { min-height:22px; color:var(--muted); }
+    .flow { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; }
+    .phase-card { min-height:168px; }
+    .phase-card.active { border-color:var(--blue); box-shadow:0 0 0 2px rgba(53,106,150,.12); }
+    .phase-card.done { border-color:var(--accent); box-shadow:0 0 0 2px rgba(47,125,98,.12); }
+    .phase-card.error { border-color:var(--warn); }
+    .phase-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+    .badge { border-radius:999px; border:1px solid var(--line); background:#f7f9fb; color:var(--muted); padding:3px 8px; font-size:12px; text-transform:uppercase; }
+    .active .badge { background:#e7f0f8; color:#204f73; border-color:#b9d0e2; }
+    .done .badge { background:var(--accent-soft); color:#15583f; border-color:#b7dccd; }
+    .error .badge { background:#f8e8ee; color:#832a45; border-color:#e5b8c8; }
+    .phase-card p { margin:8px 0 10px; color:var(--muted); }
+    .facts, .metrics { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; }
+    .fact, .metric { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px; }
+    .fact span, .metric span { display:block; color:var(--muted); font-size:12px; }
+    .fact strong, .metric strong { display:block; margin-top:5px; font-size:24px; }
+    .metric small { color:var(--muted); display:block; margin-top:6px; line-height:1.35; }
+    .model-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
+    .model-card.done { border-color:var(--accent); }
+    .model-card.winner { box-shadow:0 0 0 2px rgba(47,125,98,.14); }
+    .model-title { display:flex; justify-content:space-between; gap:8px; align-items:flex-start; }
+    .score-row { display:grid; grid-template-columns:132px minmax(80px, 1fr) 58px; align-items:center; gap:8px; margin:9px 0; }
+    .score-row span { color:var(--muted); font-size:13px; }
+    .score-row strong { text-align:right; font-size:13px; }
+    .score-track { height:10px; background:#e5ebf1; border-radius:999px; overflow:hidden; }
+    .score-track i { display:block; height:100%; width:0%; background:var(--accent); transition:width .25s ease; }
+    .domain-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(230px, 1fr)); gap:12px; }
+    .domain span { display:inline-block; color:#fff; background:#56616d; border-radius:4px; padding:2px 6px; font-size:12px; margin-bottom:10px; }
+    dl { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin:12px 0 0; }
+    dt { color:var(--muted); font-size:12px; }
+    dd { margin:2px 0 0; font-weight:700; }
+    .events { display:grid; gap:8px; max-height:320px; overflow:auto; padding-right:4px; }
+    .event { display:grid; grid-template-columns:88px 120px minmax(0, 1fr); gap:10px; align-items:start; border-bottom:1px solid var(--line); padding:8px 0; }
+    .event code { color:var(--muted); font-size:12px; }
+    .event b { font-size:13px; }
+    @media (max-width:980px) { header { padding:20px 16px; } .hero, .model-grid { grid-template-columns:1fr; } .flow, .facts, .metrics { grid-template-columns:1fr 1fr; } }
+    @media (max-width:640px) { .flow, .facts, .metrics { grid-template-columns:1fr; } .score-row, .event { grid-template-columns:1fr; } .score-row strong { text-align:left; } dl { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>FCAPSule AI P1 Live Demo</h1>
+    <p class="muted">Start from an empty UI, create a failing checkout service scenario, capture raw telemetry, build the evidence capsule, and compare DeepSeek Flash vs Pro.</p>
+  </header>
+  <main>
+    <section class="hero">
+      <div class="hero-card primary">
+        <h2>What is happening?</h2>
+        <p id="main-takeaway" class="takeaway">Nothing has run in this UI session yet. Start by generating a local checkout failure; then run FCAPSule to reduce the raw telemetry and compare the two DeepSeek outputs.</p>
+        <p class="muted">FCAPSule does not claim a final root cause. It preserves a compact, evidence-grounded incident capsule so humans or models can reason over less noise.</p>
+      </div>
+      <div class="hero-card">
+        <h2>Demo controls</h2>
+        <p class="muted">Use the buttons in order. The cards below fill while the process runs.</p>
+        <div class="actions">
+          <button id="capture-button" data-action="start-capture">1. Generate failing app + alert</button>
+          <button id="analysis-button" data-action="start-analysis" disabled>2. Run FCAPSule + DeepSeek</button>
+          <button class="secondary" id="reset-button" data-action="reset">Reset UI</button>
+        </div>
+        <p id="status" class="status">Ready.</p>
+      </div>
+    </section>
+    <section class="flow" id="phase-flow"></section>
+    <section class="panel">
+      <h2>Raw Incident Data</h2>
+      <p class="muted">This fills after the first button starts the demo app, enables the failure, triggers the alert, and writes the case files.</p>
+      <div class="facts" id="raw-facts"></div>
+    </section>
+    <section class="metrics">
+      <div class="metric"><span>Log compression</span><strong id="metric-compression">pending</strong><small>Raw log volume removed while keeping representatives.</small></div>
+      <div class="metric"><span>Signal preserved</span><strong id="metric-signal">pending</strong><small>Important alerts, logs, and metrics kept in the capsule.</small></div>
+      <div class="metric"><span>Grounded claims</span><strong id="metric-grounding">pending</strong><small>Hypothesis citations that point to real evidence IDs.</small></div>
+      <div class="metric"><span>Model winner</span><strong id="metric-winner">pending</strong><small>Best result using the same capsule and prompt.</small></div>
+    </section>
+    <section class="panel">
+      <h2>DeepSeek Same-Input Comparison</h2>
+      <p id="comparison-text" class="muted">Both model cards start empty. When step 2 reaches the model phase, Flash and Pro are filled with score, signal coverage, valid citations, latency, and token usage.</p>
+      <div class="model-grid" id="model-grid"></div>
+    </section>
+    <section class="panel">
+      <h2>Telemetry Domains</h2>
+      <p class="muted">These are observability signal families, not media types. FCAPSule aligns them into one evidence view.</p>
+      <div class="domain-grid" id="domain-grid"></div>
+    </section>
+    <section class="panel">
+      <h2>Live Progress Log</h2>
+      <div class="events" id="events"></div>
+    </section>
+    <section class="panel">
+      <h2>Detailed Artifacts</h2>
+      <div class="actions">
+        <a class="button secondary" href="/dashboard.html" target="_blank">Open generated dashboard</a>
+        <a class="button secondary" href="/outputs/capsule.md" target="_blank">Open Markdown capsule</a>
+        <a class="button secondary" href="/api/summary" target="_blank">Open JSON summary</a>
+      </div>
+    </section>
+  </main>
+  <script>
+    const phaseDefinitions = {
+      capture: 'Generate failing app and alert',
+      pipeline: 'Build FCAPSule evidence capsule',
+      'deepseek-v4-flash': 'DeepSeek v4 Flash',
+      'deepseek-v4-pro': 'DeepSeek v4 Pro'
+    };
+    const statusEl = document.querySelector('#status');
+    const captureButton = document.querySelector('#capture-button');
+    const analysisButton = document.querySelector('#analysis-button');
+    const resetButton = document.querySelector('#reset-button');
+    const pct = (value) => typeof value === 'number' ? (value * 100).toFixed(1) + '%' : 'pending';
+    const show = (value, fallback='pending') => value === null || value === undefined ? fallback : String(value);
+    const scoreBar = (label, value) => {
+      const number = Number(value);
+      const safe = Number.isFinite(number) ? Math.max(0, Math.min(1, number)) : 0;
+      const shown = Number.isFinite(number) ? number.toFixed(3) : 'pending';
+      return `<div class="score-row"><span>${label}</span><div class="score-track"><i style="width:${safe * 100}%"></i></div><strong>${shown}</strong></div>`;
+    };
+    function phaseClass(status) {
+      if (status === 'done') return 'done';
+      if (status === 'running') return 'active';
+      if (status === 'error') return 'error';
+      return '';
+    }
+    function renderPhaseCards(state) {
+      document.querySelector('#phase-flow').innerHTML = Object.entries(phaseDefinitions).map(([key, title]) => {
+        const phase = state.phases[key] || { status: 'waiting', message: 'Waiting', details: {} };
+        const details = phase.details || {};
+        const detailText = Object.entries(details).slice(0, 3).map(([k, v]) => `${k}: ${v}`).join(' · ');
+        return `<section class="phase-card card ${phaseClass(phase.status)}"><div class="phase-head"><h3>${title}</h3><span class="badge">${phase.status}</span></div><p>${phase.message}</p><small class="muted">${detailText || 'No data yet.'}</small></section>`;
+      }).join('');
+    }
+    function renderRawFacts(state) {
+      const result = state.capture_result;
+      const facts = result ? [
+        ['Healthy requests', result.healthy_requests], ['Failing requests', result.failing_requests], ['Captured logs', result.captured_logs],
+        ['Metric series', result.metric_series], ['Alert', result.alert], ['Alert status', result.alert_status], ['Final error rate', result.final_error_rate], ['Service port', result.service_port]
+      ] : [
+        ['Healthy requests', 'pending'], ['Failing requests', 'pending'], ['Captured logs', 'pending'], ['Metric series', 'pending'],
+        ['Alert', 'pending'], ['Alert status', 'pending'], ['Final error rate', 'pending'], ['Service port', 'pending']
+      ];
+      document.querySelector('#raw-facts').innerHTML = facts.map(([label, value]) => `<div class="fact"><span>${label}</span><strong>${show(value)}</strong></div>`).join('');
+    }
+    function renderMetrics(state) {
+      const evaluation = state.pipeline_result?.evaluation || {};
+      document.querySelector('#metric-compression').textContent = pct(evaluation.log_compression_ratio);
+      document.querySelector('#metric-signal').textContent = pct(evaluation.important_signal_preservation);
+      document.querySelector('#metric-grounding').textContent = pct(evaluation.hypothesis_grounding_score);
+      document.querySelector('#metric-winner').textContent = state.comparison_result?.winner || 'pending';
+    }
+    function renderModels(state) {
+      const comparison = state.comparison_result;
+      const results = comparison?.results || [];
+      const byModel = Object.fromEntries(results.map((item) => [item.model, item]));
+      document.querySelector('#model-grid').innerHTML = ['deepseek-v4-flash', 'deepseek-v4-pro'].map((model) => {
+        const item = byModel[model];
+        const phase = state.phases[model] || { status: 'waiting', message: 'Waiting' };
+        const score = item?.score || {};
+        const isWinner = comparison?.winner === model;
+        return `<section class="model-card card ${phaseClass(phase.status)} ${isWinner ? 'winner' : ''}"><div class="model-title"><h3>${model}</h3><span class="badge">${isWinner ? 'winner' : phase.status}</span></div><p class="muted">${phase.message}</p>${scoreBar('Overall quality', score.total_score)}${scoreBar('Signal coverage', score.expected_signal_score)}${scoreBar('Citation validity', score.citation_score)}${scoreBar('Domain coverage', score.domain_score)}<dl><div><dt>Latency</dt><dd>${show(item?.latency_seconds)}s</dd></div><div><dt>Tokens</dt><dd>${show(item?.usage?.total_tokens)}</dd></div><div><dt>Finish</dt><dd>${show(item?.finish_reason)}</dd></div></dl></section>`;
+      }).join('');
+      document.querySelector('#comparison-text').textContent = comparison
+        ? `${comparison.winner} performed best on the same capsule input. Score delta: ${comparison.score_delta}.`
+        : 'Both model cards start empty. When step 2 reaches the model phase, Flash and Pro are filled with score, signal coverage, valid citations, latency, and token usage.';
+    }
+    function renderDomains(state) {
+      const domains = state.pipeline_result?.domain_summary || {};
+      const explanations = {
+        fault_events: 'The alert/event stream that confirms an incident happened.',
+        log_text: 'Repeated application log messages compressed into templates.',
+        time_series_metrics: 'Numeric behavior before and during the incident.',
+        topology_metadata: 'Labels that connect service, pod, namespace, cluster, and CNCC identity.',
+        llm_reasoning: 'Model-written interpretation grounded in selected evidence.'
+      };
+      const entries = Object.entries(domains);
+      document.querySelector('#domain-grid').innerHTML = entries.length ? entries.map(([key, domain]) => `<section class="card domain"><span>${key}</span><h3>${domain.label}</h3><p>${explanations[key] || domain.signal_family}</p><dl><div><dt>Selected</dt><dd>${domain.selected_evidence_items}</dd></div><div><dt>Candidates</dt><dd>${domain.candidate_evidence_items}</dd></div><div><dt>Raw</dt><dd>${domain.raw_items}</dd></div></dl></section>`).join('') : '<p class="muted">Run FCAPSule to populate the telemetry domain map.</p>';
+    }
+    function renderEvents(state) {
+      const events = state.events || [];
+      document.querySelector('#events').innerHTML = events.length ? events.slice().reverse().map((event) => {
+        const time = new Date(event.time * 1000).toLocaleTimeString();
+        return `<div class="event"><code>${time}</code><b>${event.phase}</b><span>${event.message}</span></div>`;
+      }).join('') : '<p class="muted">No live events yet. Start with button 1.</p>';
+    }
+    function renderTakeaway(state) {
+      const capture = state.capture_result;
+      const pipeline = state.pipeline_result;
+      const comparison = state.comparison_result;
+      let text = 'Nothing has run in this UI session yet. Start by generating a local checkout failure; then run FCAPSule to reduce the raw telemetry and compare the two DeepSeek outputs.';
+      if (capture && !pipeline) text = `The demo app failed successfully: ${capture.captured_logs} logs and ${capture.metric_series} metric series were captured, and ${capture.alert} is ${capture.alert_status}. Now run FCAPSule.`;
+      if (pipeline && !comparison) text = `FCAPSule reduced ${pipeline.logs} logs into ${pipeline.templates} templates and selected ${pipeline.selected_evidence} evidence items. DeepSeek comparison is running or ready to start.`;
+      if (pipeline && comparison) text = `Complete: FCAPSule preserved ${(pipeline.evaluation.important_signal_preservation * 100).toFixed(1)}% of important signal with ${(pipeline.evaluation.log_compression_ratio * 100).toFixed(1)}% log compression. ${comparison.winner} won the same-input model comparison.`;
+      document.querySelector('#main-takeaway').textContent = text;
+    }
+    function renderState(state) {
+      statusEl.textContent = state.running ? `Running ${state.active_job}... elapsed ${state.elapsed_seconds || 0}s` : `Ready. DeepSeek key loaded: ${state.api_key_available}. ${state.last_error ? 'Last error: ' + state.last_error : ''}`;
+      captureButton.disabled = state.running;
+      analysisButton.disabled = state.running || !state.capture_result;
+      resetButton.disabled = state.running;
+      renderPhaseCards(state); renderRawFacts(state); renderMetrics(state); renderModels(state); renderDomains(state); renderEvents(state); renderTakeaway(state);
+    }
+    async function refreshState() {
+      const response = await fetch('/api/state');
+      renderState(await response.json());
+    }
+    async function postAction(action) {
+      statusEl.textContent = 'Starting ' + action + '...';
+      try {
+        const response = await fetch('/api/' + action, { method: 'POST' });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) throw new Error(payload.error || 'Action failed');
+        await refreshState();
+      } catch (error) {
+        statusEl.textContent = 'Error: ' + error.message;
+      }
+    }
+    document.querySelectorAll('button[data-action]').forEach((button) => button.addEventListener('click', () => postAction(button.dataset.action)));
+    refreshState();
+    setInterval(refreshState, 800);
+  </script>
+</body>
+</html>
+"""
+
+
 def _html_page(summary: dict[str, Any], printout: str) -> str:
     evaluation = summary["evaluation"]
     models = summary["models"]
@@ -452,9 +827,11 @@ class DemoRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path in {"/", "/index.html"}:
-            summary = self._summary()
-            page = _html_page(summary, render_printout(summary))
+            page = _html_page_live()
             self._send_bytes(page.encode("utf-8"), "text/html; charset=utf-8")
+            return
+        if self.path == "/api/state":
+            self._send_json(self.server.state.snapshot())
             return
         if self.path == "/api/summary":
             self._send_json(self._summary())
@@ -470,6 +847,32 @@ class DemoRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         try:
+            if self.path == "/api/reset":
+                self.server.state.reset()
+                self._send_json({"ok": True, "message": "Demo UI reset."})
+                return
+            if self.path == "/api/start-capture":
+                if self.server.state.snapshot()["running"]:
+                    self._send_json({"ok": False, "error": "A demo job is already running."}, HTTPStatus.CONFLICT)
+                    return
+                self.server.state.reset()
+                self.server.state.begin("capture")
+                thread = threading.Thread(target=self._run_capture_job, daemon=True)
+                thread.start()
+                self._send_json({"ok": True, "message": "Capture job started."}, HTTPStatus.ACCEPTED)
+                return
+            if self.path == "/api/start-analysis":
+                if self.server.state.snapshot()["running"]:
+                    self._send_json({"ok": False, "error": "A demo job is already running."}, HTTPStatus.CONFLICT)
+                    return
+                self.server.state.clear_analysis()
+                if not self.server.state.begin("analysis"):
+                    self._send_json({"ok": False, "error": "A demo job is already running."}, HTTPStatus.CONFLICT)
+                    return
+                thread = threading.Thread(target=self._run_analysis_job, daemon=True)
+                thread.start()
+                self._send_json({"ok": True, "message": "Analysis job started."}, HTTPStatus.ACCEPTED)
+                return
             if self.path == "/api/run-p1":
                 result = investigate_case(self.server.case_dir, self.server.output_dir)
                 render_dashboard(self.server.output_dir)
@@ -504,6 +907,65 @@ class DemoRequestHandler(BaseHTTPRequestHandler):
             return
         self._send_json({"ok": False, "error": "Unknown action"}, HTTPStatus.NOT_FOUND)
 
+    def _run_capture_job(self) -> None:
+        try:
+            from scripts.capture_demo_incident import capture
+
+            def progress(status: str, message: str, details: dict[str, Any]) -> None:
+                self.server.state.emit("capture", status, message, details)
+
+            result = capture(self.server.case_dir, progress=progress)
+            self.server.state.set_capture_result(result)
+            self.server.state.emit("capture", "done", "Alert triggered and raw case files are ready", result)
+            self.server.state.finish()
+        except Exception as exc:  # pragma: no cover - defensive UI path
+            traceback.print_exc()
+            self.server.state.emit("capture", "error", str(exc), {})
+            self.server.state.finish(str(exc))
+
+    def _run_analysis_job(self) -> None:
+        try:
+            def pipeline_progress(status: str, message: str, details: dict[str, Any]) -> None:
+                self.server.state.emit("pipeline", status, message, details)
+
+            result = investigate_case(self.server.case_dir, self.server.output_dir, progress=pipeline_progress)
+            enriched = _pipeline_ui_result(self.server.output_dir, result)
+            self.server.state.set_pipeline_result(enriched)
+            self.server.state.emit("pipeline", "done", "Evidence capsule, evaluation, and archive are ready", enriched)
+
+            def model_progress(status: str, message: str, details: dict[str, Any]) -> None:
+                model = details.get("model")
+                phase = model if model in PHASES else "pipeline"
+                self.server.state.emit(phase, status, message, details)
+
+            comparison = compare_models(
+                self.server.output_dir / "capsule.json",
+                self.server.output_dir,
+                self.server.models,
+                progress=model_progress,
+            )
+            self.server.state.set_comparison_result(comparison)
+            for item in comparison.get("results", []):
+                score = item.get("score", {})
+                self.server.state.emit(
+                    item["model"],
+                    "done",
+                    f"{item['model']} final score recorded",
+                    {
+                        "model": item["model"],
+                        "total_score": score.get("total_score"),
+                        "expected_signal_score": score.get("expected_signal_score"),
+                        "citation_score": score.get("citation_score"),
+                        "latency_seconds": item.get("latency_seconds"),
+                        "total_tokens": item.get("usage", {}).get("total_tokens"),
+                    },
+                )
+            self.server.state.finish()
+        except Exception as exc:  # pragma: no cover - defensive UI path
+            traceback.print_exc()
+            self.server.state.emit("pipeline", "error", str(exc), {})
+            self.server.state.finish(str(exc))
+
     def _serve_file(self, path: Path, content_type: str) -> None:
         if not path.exists():
             self._send_json({"error": f"Missing file: {path}"}, HTTPStatus.NOT_FOUND)
@@ -520,9 +982,11 @@ class DemoServer(ThreadingHTTPServer):
         models: tuple[str, ...] = DEFAULT_MODELS,
     ) -> None:
         super().__init__(address, DemoRequestHandler)
+        load_env_file()
         self.case_dir = Path(case_dir).resolve()
         self.output_dir = Path(output_dir).resolve()
         self.models = models
+        self.state = DemoRunState()
 
 
 def serve_demo_ui(

@@ -11,6 +11,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any, Callable
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -23,6 +24,13 @@ if str(ROOT) not in sys.path:
 from demo.unstable_service import create_server, utc_now  # noqa: E402
 from fcapsule.io.case_loader import load_case  # noqa: E402
 
+ProgressCallback = Callable[[str, str, dict[str, Any]], None]
+
+
+def _emit(progress: ProgressCallback | None, status: str, message: str, **details: Any) -> None:
+    if progress is not None:
+        progress(status, message, details)
+
 
 def request_json(url: str, method: str = "GET") -> tuple[int, dict]:
     request = Request(url, method=method)
@@ -33,8 +41,9 @@ def request_json(url: str, method: str = "GET") -> tuple[int, dict]:
         return exc.code, json.loads(exc.read())
 
 
-def capture(output: Path, healthy_requests: int = 60, failing_requests: int = 40) -> dict:
+def capture(output: Path, healthy_requests: int = 60, failing_requests: int = 40, progress: ProgressCallback | None = None) -> dict:
     output.mkdir(parents=True, exist_ok=True)
+    _emit(progress, "running", "Starting local checkout service")
     with tempfile.TemporaryDirectory(prefix="fcapsule-demo-") as temp_dir:
         raw_log_path = Path(temp_dir) / "service.jsonl"
         server, _state = create_server(raw_log_path)
@@ -48,15 +57,26 @@ def capture(output: Path, healthy_requests: int = 60, failing_requests: int = 40
             status, health = request_json(f"{base_url}/health")
             if status != 200 or health.get("status") != "ok":
                 raise RuntimeError("Demo service did not become healthy")
-            for _ in range(healthy_requests):
+            _emit(progress, "running", "Service is healthy", service_port=server.server_port, base_url=base_url)
+            for index in range(healthy_requests):
                 status, _ = request_json(f"{base_url}/checkout")
                 if status != 200:
                     raise RuntimeError("Healthy phase returned an unexpected failure")
                 _, metrics = request_json(f"{base_url}/metrics")
                 snapshots.append((utc_now(), metrics))
+                if index == 0 or (index + 1) % 15 == 0 or index + 1 == healthy_requests:
+                    _emit(
+                        progress,
+                        "running",
+                        "Sending healthy traffic",
+                        healthy_requests=index + 1,
+                        target_healthy_requests=healthy_requests,
+                        current_error_rate=metrics["request_error_rate"],
+                    )
 
             request_json(f"{base_url}/control/fail", method="POST")
-            for _ in range(failing_requests):
+            _emit(progress, "running", "Failure mode enabled: payment dependency is unavailable")
+            for index in range(failing_requests):
                 status, _ = request_json(f"{base_url}/checkout")
                 if status != 503:
                     raise RuntimeError("Failure phase did not return HTTP 503")
@@ -64,6 +84,23 @@ def capture(output: Path, healthy_requests: int = 60, failing_requests: int = 40
                 snapshots.append((utc_now(), metrics))
                 if metrics["http_requests_total"] >= 10 and metrics["request_error_rate"] > 0.25 and alert_started is None:
                     alert_started = snapshots[-1][0]
+                    _emit(
+                        progress,
+                        "running",
+                        "Alert threshold crossed",
+                        alert="CheckoutHighErrorRate",
+                        request_error_rate=metrics["request_error_rate"],
+                        alert_started=alert_started,
+                    )
+                if index == 0 or (index + 1) % 10 == 0 or index + 1 == failing_requests:
+                    _emit(
+                        progress,
+                        "running",
+                        "Sending failing traffic and collecting telemetry",
+                        failing_requests=index + 1,
+                        target_failing_requests=failing_requests,
+                        current_error_rate=metrics["request_error_rate"],
+                    )
         finally:
             server.shutdown()
             server.server_close()
@@ -73,6 +110,7 @@ def capture(output: Path, healthy_requests: int = 60, failing_requests: int = 40
             raise RuntimeError("Configured CheckoutHighErrorRate alert did not fire")
 
         raw_logs = [json.loads(line) for line in raw_log_path.read_text(encoding="utf-8").splitlines() if line]
+        _emit(progress, "running", "Raw telemetry captured", raw_logs=len(raw_logs), metric_snapshots=len(snapshots))
         ended = datetime.now(timezone.utc)
         labels = {"service": "checkout-service", "namespace": "checkout", "cluster": "demo-cluster", "pod": "checkout-api-7c9d", "cncc_uuid": "cncc-demo-12345"}
         metric_names = list(snapshots[0][1])
@@ -114,9 +152,10 @@ def capture(output: Path, healthy_requests: int = 60, failing_requests: int = 40
             "# Expected Signals\n\n- CheckoutHighErrorRate must be preserved.\n- Payment dependency unavailable ERROR logs must be preserved.\n- HTTP 503 WARN logs must be preserved.\n- Request error rate and latency anomalies must be selected.\n- Hypotheses must remain tentative and request upstream dependency evidence.\n",
             encoding="utf-8",
         )
+        _emit(progress, "running", "Case files written", output=str(output), logs=len(raw_logs), metric_series=len(metric_series))
 
     bundle = load_case(output)
-    return {
+    result = {
         "case_id": bundle.case_id,
         "service_port": server.server_port,
         "healthy_requests": healthy_requests,
@@ -127,6 +166,8 @@ def capture(output: Path, healthy_requests: int = 60, failing_requests: int = 40
         "alert_status": bundle.alerts[0]["status"],
         "final_error_rate": snapshots[-1][1]["request_error_rate"],
     }
+    _emit(progress, "done", "Capture complete and alert is firing", **result)
+    return result
 
 
 def main() -> int:

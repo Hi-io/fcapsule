@@ -63,14 +63,14 @@ python3 -m fcapsule.cli demo-ui --case cases/case_001 --out outputs/case_001
 
 The command starts a local server at `http://127.0.0.1:8765/`. The UI is optional and only reads or writes local P1 files. It provides:
 
-- a guided explanation of the incident, reduction, evidence grounding, and model comparison;
-- buttons to rerun P1 on the current case;
-- a button to capture a fresh synthetic failure and rerun P1;
-- a button to rerun the DeepSeek same-input comparison when `DEEPSEEK_API_KEY` is set;
+- an initially empty presentation screen;
+- a first button that starts the local checkout app, enables failure mode, captures raw logs/metrics, and shows when `CheckoutHighErrorRate` fires;
+- a second button that runs FCAPSule evidence reduction and then compares DeepSeek Flash/Pro using the same capsule input;
+- live phase cards that update while each stage is running;
 - cards for compression, signal preservation, grounded claims, and the model winner;
 - model cards that explain overall quality, signal coverage, citations, and domain coverage;
 - telemetry domain cards;
-- a collapsible technical run log.
+- a live progress log.
 
 Stop it with `Ctrl+C` in the terminal.
 

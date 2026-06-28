@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 from fcapsule.pipeline import investigate_case
-from fcapsule.ui.demo_app import build_demo_summary, render_printout
+from fcapsule.ui.demo_app import DemoRunState, build_demo_summary, render_printout
 from tests.common import CASE_001
 
 
@@ -20,6 +20,14 @@ class DemoUITests(unittest.TestCase):
             self.assertIn("FCAPSule AI P1 demo summary", printout)
             self.assertIn("Log compression", printout)
             self.assertIn("LLM comparison", printout)
+
+    def test_live_demo_state_starts_empty(self):
+        state = DemoRunState().snapshot()
+        self.assertFalse(state["running"])
+        self.assertIsNone(state["capture_result"])
+        self.assertIsNone(state["pipeline_result"])
+        self.assertIsNone(state["comparison_result"])
+        self.assertTrue(all(item["status"] == "waiting" for item in state["phases"].values()))
 
 
 if __name__ == "__main__":

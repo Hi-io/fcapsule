@@ -68,6 +68,8 @@ python3 -m fcapsule.cli demo-ui --case ./cases/case_001 --out ./outputs/case_001
 
 Then open `http://127.0.0.1:8765/`. The UI can rerun P1, capture a fresh synthetic failure, rerun the DeepSeek comparison when `DEEPSEEK_API_KEY` is set, and show the reductions and model comparison as demo-friendly cards and tables.
 
+The demo UI starts empty for presentation. Button 1 generates the failing local checkout scenario and shows the alert/raw telemetry as it is captured. Button 2 runs FCAPSule and DeepSeek comparison while the phase cards, metrics, domain map, model cards, and live event log update in the browser.
+
 Run the full test suite:
 
 ```bash
