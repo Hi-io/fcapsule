@@ -24,20 +24,20 @@ from fcapsule.ui.dashboard import render_dashboard
 
 PHASES = {
     "capture": {
-        "title": "1. Generate failing app and alert",
-        "waiting": "Waiting to start the local checkout failure.",
+        "title": "1. Capture incident",
+        "waiting": "Ready.",
     },
     "pipeline": {
-        "title": "2. Build FCAPSule evidence capsule",
-        "waiting": "Waiting for the captured telemetry case.",
+        "title": "2. Build capsule",
+        "waiting": "Waiting for incident data.",
     },
     "deepseek-v4-flash": {
         "title": "3A. DeepSeek v4 Flash",
-        "waiting": "Waiting for the same capsule input.",
+        "waiting": "Waiting for capsule.",
     },
     "deepseek-v4-pro": {
         "title": "3B. DeepSeek v4 Pro",
-        "waiting": "Waiting for the same capsule input.",
+        "waiting": "Waiting for capsule.",
     },
 }
 
@@ -451,53 +451,57 @@ def _html_page_live() -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FCAPSule AI P1 Live Demo</title>
   <style>
-    :root { --ink:#16202a; --muted:#637181; --line:#d8e0e8; --paper:#fff; --bg:#edf2f7; --accent:#2f7d62; --accent-soft:#e6f3ee; --warn:#a4385a; --blue:#356a96; }
+    :root { --ink:#172027; --muted:#65707a; --line:#cfd7df; --paper:#fff; --bg:#f5f7f8; --accent:#22654f; --accent-soft:#e7f1ed; --warn:#9a3350; --blue:#315f86; --rail:#111820; }
     * { box-sizing:border-box; }
     body { margin:0; font-family:Arial, Helvetica, sans-serif; color:var(--ink); background:var(--bg); }
-    header { background:#fff; border-bottom:1px solid var(--line); padding:26px 30px 18px; }
-    main { width:min(1240px, calc(100% - 28px)); margin:22px auto 44px; display:grid; gap:18px; }
-    h1 { margin:0 0 8px; font-size:30px; letter-spacing:0; }
-    h2 { margin:0 0 12px; font-size:20px; letter-spacing:0; }
+    header { background:var(--rail); color:#fff; border-bottom:4px solid var(--accent); padding:18px 30px; display:flex; justify-content:space-between; gap:18px; align-items:end; }
+    main { width:min(1280px, calc(100% - 28px)); margin:18px auto 36px; display:grid; gap:14px; }
+    h1 { margin:0 0 4px; font-size:28px; letter-spacing:0; }
+    h2 { margin:0 0 10px; font-size:18px; letter-spacing:0; }
     h3 { margin:0 0 8px; font-size:16px; letter-spacing:0; }
     p { line-height:1.45; }
-    button, a.button { appearance:none; border:1px solid #1f604a; background:var(--accent); color:#fff; border-radius:6px; padding:10px 12px; font-weight:700; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; min-height:38px; }
-    button.secondary, a.secondary { background:#fff; color:var(--ink); border-color:var(--line); }
+    button, a.button { appearance:none; border:1px solid #174637; background:var(--accent); color:#fff; border-radius:3px; padding:10px 12px; font-weight:700; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; min-height:38px; }
+    button.secondary, a.secondary { background:#fff; color:var(--ink); border-color:#aeb8c2; }
     button:disabled { opacity:.58; cursor:wait; }
+    header .muted { color:#b7c1ca; margin:0; }
     .muted { color:var(--muted); }
-    .hero { display:grid; grid-template-columns:minmax(0, 1.25fr) minmax(300px, .9fr); gap:16px; align-items:stretch; }
-    .hero-card, .panel, .card { background:var(--paper); border:1px solid var(--line); border-radius:8px; padding:16px; }
-    .hero-card.primary { border-left:6px solid var(--accent); }
-    .takeaway { font-size:18px; line-height:1.45; margin:0; }
+    .topbar { text-align:right; font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:#b7c1ca; }
+    .workspace { display:grid; grid-template-columns:300px minmax(0, 1fr); gap:14px; align-items:start; }
+    .rail { display:grid; gap:14px; position:sticky; top:14px; }
+    .hero { display:grid; gap:14px; }
+    .hero-card, .panel, .card { background:var(--paper); border:1px solid var(--line); border-radius:3px; padding:14px; }
+    .hero-card.primary { border-left:4px solid var(--accent); }
+    .takeaway { font-size:18px; line-height:1.4; margin:0; }
     .actions { display:flex; flex-wrap:wrap; gap:10px; }
     .status { min-height:22px; color:var(--muted); }
     .flow { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; }
-    .phase-card { min-height:168px; }
-    .phase-card.active { border-color:var(--blue); box-shadow:0 0 0 2px rgba(53,106,150,.12); }
-    .phase-card.done { border-color:var(--accent); box-shadow:0 0 0 2px rgba(47,125,98,.12); }
+    .phase-card { min-height:132px; border-top:3px solid #aeb8c2; }
+    .phase-card.active { border-top-color:var(--blue); box-shadow:inset 0 0 0 1px rgba(53,106,150,.12); }
+    .phase-card.done { border-top-color:var(--accent); box-shadow:inset 0 0 0 1px rgba(47,125,98,.12); }
     .phase-card.error { border-color:var(--warn); }
     .phase-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
-    .badge { border-radius:999px; border:1px solid var(--line); background:#f7f9fb; color:var(--muted); padding:3px 8px; font-size:12px; text-transform:uppercase; }
+    .badge { border:1px solid var(--line); background:#f7f9fb; color:var(--muted); padding:3px 7px; font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
     .active .badge { background:#e7f0f8; color:#204f73; border-color:#b9d0e2; }
     .done .badge { background:var(--accent-soft); color:#15583f; border-color:#b7dccd; }
     .error .badge { background:#f8e8ee; color:#832a45; border-color:#e5b8c8; }
     .phase-card p { margin:8px 0 10px; color:var(--muted); }
     .section-kicker { color:var(--muted); font-size:13px; margin-top:-4px; }
     .facts, .metrics { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; }
-    .fact, .metric { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px; }
-    .fact span, .metric span { display:block; color:var(--muted); font-size:12px; }
-    .fact strong, .metric strong { display:block; margin-top:5px; font-size:24px; overflow-wrap:anywhere; }
-    .metric small { color:var(--muted); display:block; margin-top:6px; line-height:1.35; }
+    .fact, .metric { background:#fff; border-left:3px solid #aeb8c2; border-top:1px solid var(--line); border-right:1px solid var(--line); border-bottom:1px solid var(--line); padding:12px; }
+    .fact span, .metric span { display:block; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.05em; }
+    .fact strong, .metric strong { display:block; margin-top:6px; font-size:24px; overflow-wrap:anywhere; }
+    .metric small { color:var(--muted); display:block; margin-top:5px; line-height:1.3; }
     .model-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
     .model-card.done { border-color:var(--accent); }
-    .model-card.winner { box-shadow:0 0 0 2px rgba(47,125,98,.14); }
+    .model-card.winner { border-left:4px solid var(--accent); }
     .model-title { display:flex; justify-content:space-between; gap:8px; align-items:flex-start; }
     .score-row { display:grid; grid-template-columns:132px minmax(80px, 1fr) 58px; align-items:center; gap:8px; margin:9px 0; }
     .score-row span { color:var(--muted); font-size:13px; }
     .score-row strong { text-align:right; font-size:13px; }
-    .score-track { height:10px; background:#e5ebf1; border-radius:999px; overflow:hidden; }
+    .score-track { height:8px; background:#e5ebf1; overflow:hidden; }
     .score-track i { display:block; height:100%; width:0%; background:var(--accent); transition:width .25s ease; }
     .domain-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:12px; }
-    .domain span { display:inline-block; color:#fff; background:#56616d; border-radius:4px; padding:2px 6px; font-size:12px; margin-bottom:10px; }
+    .domain span { display:inline-block; color:#fff; background:#56616d; padding:2px 6px; font-size:12px; margin-bottom:10px; }
     dl { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin:12px 0 0; }
     dt { color:var(--muted); font-size:12px; }
     dd { margin:2px 0 0; font-weight:700; }
@@ -505,78 +509,80 @@ def _html_page_live() -> str:
     .event { display:grid; grid-template-columns:88px 120px minmax(0, 1fr); gap:10px; align-items:start; border-bottom:1px solid var(--line); padding:8px 0; }
     .event code { color:var(--muted); font-size:12px; }
     .event b { font-size:13px; }
-    @media (max-width:980px) { header { padding:20px 16px; } .hero, .model-grid { grid-template-columns:1fr; } .flow, .facts, .metrics { grid-template-columns:1fr 1fr; } }
+    @media (max-width:980px) { header { padding:20px 16px; align-items:start; flex-direction:column; } .workspace { grid-template-columns:1fr; } .rail { position:static; } .model-grid { grid-template-columns:1fr; } .flow, .facts, .metrics { grid-template-columns:1fr 1fr; } .topbar { text-align:left; } }
     @media (max-width:640px) { .flow, .facts, .metrics { grid-template-columns:1fr; } .score-row, .event { grid-template-columns:1fr; } .score-row strong { text-align:left; } dl { grid-template-columns:1fr; } }
   </style>
 </head>
 <body>
   <header>
-    <h1>FCAPSule AI P1 Live Demo</h1>
-    <p class="muted">Start from an empty UI, create a failing checkout service scenario, capture raw telemetry, build the evidence capsule, and compare DeepSeek Flash vs Pro.</p>
+    <div>
+      <h1>FCAPSule P1 Monitor</h1>
+      <p class="muted">Incident capture, capsule build, model review.</p>
+    </div>
+    <div class="topbar">Local demo</div>
   </header>
   <main>
-    <section class="hero">
-      <div class="hero-card primary">
-        <h2>What is happening?</h2>
-        <p id="main-takeaway" class="takeaway">Nothing has run in this UI session yet. Start by generating a local checkout failure; then run FCAPSule to reduce the raw telemetry and compare the two DeepSeek outputs.</p>
-        <p class="muted">FCAPSule does not claim a final root cause. It preserves a compact, evidence-grounded incident capsule so humans or models can reason over less noise.</p>
-      </div>
-      <div class="hero-card">
-        <h2>Demo controls</h2>
-        <p class="muted">Use the buttons in order. The cards below fill while the process runs.</p>
-        <div class="actions">
-          <button id="capture-button" data-action="start-capture">1. Generate failing app + alert</button>
-          <button id="analysis-button" data-action="start-analysis" disabled>2. Run FCAPSule + DeepSeek</button>
-          <button class="secondary" id="reset-button" data-action="reset">Reset UI</button>
+    <div class="workspace">
+      <aside class="rail">
+        <section class="hero-card primary">
+          <h2>Run State</h2>
+          <p id="main-takeaway" class="takeaway">Idle. Capture an incident to begin.</p>
+        </section>
+        <section class="hero-card">
+          <h2>Controls</h2>
+          <div class="actions">
+            <button id="capture-button" data-action="start-capture">Capture incident</button>
+            <button id="analysis-button" data-action="start-analysis" disabled>Run analysis</button>
+            <button class="secondary" id="reset-button" data-action="reset">Reset</button>
+          </div>
+          <p id="status" class="status">Ready.</p>
+        </section>
+      </aside>
+      <div class="hero">
+        <section class="flow" id="phase-flow"></section>
+        <section class="panel">
+          <h2>Incident Snapshot</h2>
+          <div class="facts" id="raw-facts"></div>
+        </section>
+        <section class="panel">
+          <h2>Capsule Metrics</h2>
+          <div class="metrics">
+            <div class="metric"><span>Log reduction</span><strong id="metric-compression">pending</strong><small>Representative templates.</small></div>
+            <div class="metric"><span>Signal retained</span><strong id="metric-signal">pending</strong><small>Alert, log, and metric signal.</small></div>
+            <div class="metric"><span>Grounding</span><strong id="metric-grounding">pending</strong><small>Valid evidence citations.</small></div>
+            <div class="metric"><span>Model result</span><strong id="metric-winner">pending</strong><small>Same capsule input.</small></div>
+          </div>
+        </section>
+        <section class="panel">
+          <h2>Model Review</h2>
+          <p id="comparison-text" class="muted">Same capsule, same prompt.</p>
+          <div class="model-grid" id="model-grid"></div>
+        </section>
+        <section class="panel">
+          <h2>Signal Domains</h2>
+          <div class="domain-grid" id="domain-grid"></div>
+        </section>
+        <section class="panel">
+          <h2>Run Log</h2>
+          <div class="events" id="events"></div>
+        </section>
+        <section class="panel">
+          <h2>Artifacts</h2>
+          <div class="actions">
+            <a class="button secondary" href="/dashboard.html" target="_blank">Dashboard</a>
+            <a class="button secondary" href="/outputs/capsule.md" target="_blank">Capsule</a>
+            <a class="button secondary" href="/api/summary" target="_blank">JSON summary</a>
+          </div>
+        </section>
         </div>
-        <p id="status" class="status">Ready.</p>
-      </div>
-    </section>
-    <section class="flow" id="phase-flow"></section>
-    <section class="panel">
-      <h2>Raw Incident Data</h2>
-      <p class="muted">This fills after the first button starts the demo app, enables the failure, triggers the alert, and writes the case files.</p>
-      <div class="facts" id="raw-facts"></div>
-    </section>
-    <section class="panel">
-      <h2>FCAPSule Capsule Metrics</h2>
-      <p class="section-kicker">The first three cards measure the evidence capsule, not either DeepSeek model. The winner card comes from the separate same-input model comparison.</p>
-      <div class="metrics">
-        <div class="metric"><span>FCAPSule log reduction</span><strong id="metric-compression">pending</strong><small>Raw logs compressed into representative templates.</small></div>
-        <div class="metric"><span>Evidence signal kept</span><strong id="metric-signal">pending</strong><small>Important alert, log, and metric signals preserved.</small></div>
-        <div class="metric"><span>Hypothesis grounding</span><strong id="metric-grounding">pending</strong><small>Hypothesis citations point to real evidence IDs.</small></div>
-        <div class="metric"><span>Model comparison winner</span><strong id="metric-winner">pending</strong><small>Best model answer using the same capsule input.</small></div>
-      </div>
-    </section>
-    <section class="panel">
-      <h2>DeepSeek Same-Input Comparison</h2>
-      <p id="comparison-text" class="muted">Both models receive the same capsule. The clearest demo signal is expected incident coverage: did the model mention the important alert, service identity, metrics, logs, and missing evidence?</p>
-      <div class="model-grid" id="model-grid"></div>
-    </section>
-    <section class="panel">
-      <h2>Telemetry Domains</h2>
-      <p class="muted">Only active source domains are shown here. The counts mean: raw items were loaded, candidates were scored, and kept items made it into the capsule.</p>
-      <div class="domain-grid" id="domain-grid"></div>
-    </section>
-    <section class="panel">
-      <h2>Live Progress Log</h2>
-      <div class="events" id="events"></div>
-    </section>
-    <section class="panel">
-      <h2>Detailed Artifacts</h2>
-      <div class="actions">
-        <a class="button secondary" href="/dashboard.html" target="_blank">Open generated dashboard</a>
-        <a class="button secondary" href="/outputs/capsule.md" target="_blank">Open Markdown capsule</a>
-        <a class="button secondary" href="/api/summary" target="_blank">Open JSON summary</a>
-      </div>
-    </section>
+    </div>
   </main>
   <script>
     const phaseDefinitions = {
-      capture: 'Generate failing app and alert',
-      pipeline: 'Build FCAPSule evidence capsule',
-      'deepseek-v4-flash': 'DeepSeek v4 Flash',
-      'deepseek-v4-pro': 'DeepSeek v4 Pro'
+      capture: 'Capture incident',
+      pipeline: 'Build capsule',
+      'deepseek-v4-flash': 'DeepSeek Flash',
+      'deepseek-v4-pro': 'DeepSeek Pro'
     };
     const statusEl = document.querySelector('#status');
     const captureButton = document.querySelector('#capture-button');
@@ -662,11 +668,11 @@ def _html_page_live() -> str:
         return `${item.model}: ${found}/${total}`;
       }).join(' | ');
       if (comparison?.winner) {
-        document.querySelector('#comparison-text').textContent = `${comparison.winner} performed best on the same capsule input. Expected signal coverage: ${signalCounts}. FCAPSule metrics above are pipeline metrics, not model scores.`;
+        document.querySelector('#comparison-text').textContent = `${comparison.winner} leads on the current rubric. Signal coverage: ${signalCounts}.`;
       } else if (comparison) {
-        document.querySelector('#comparison-text').textContent = `No measurable winner under the current rubric. Expected signal coverage: ${signalCounts}. FCAPSule metrics above are pipeline metrics, not model scores.`;
+        document.querySelector('#comparison-text').textContent = `No measurable winner. Signal coverage: ${signalCounts}.`;
       } else {
-        document.querySelector('#comparison-text').textContent = 'Both models receive the same capsule. The clearest demo signal is expected incident coverage: did the model mention the important alert, service identity, metrics, logs, and missing evidence?';
+        document.querySelector('#comparison-text').textContent = 'Same capsule, same prompt.';
       }
     }
     function renderDomains(state) {
@@ -677,30 +683,30 @@ def _html_page_live() -> str:
         time_series_metrics: 'Numeric metric series analyzed for incident-window changes.'
       };
       const entries = Object.entries(domains).filter(([key, domain]) => ['fault_events', 'log_text', 'time_series_metrics'].includes(key) && (domain.raw_items || domain.candidate_evidence_items || domain.selected_evidence_items));
-      document.querySelector('#domain-grid').innerHTML = entries.length ? entries.map(([key, domain]) => `<section class="card domain"><span>${key}</span><h3>${domain.label}</h3><p>${explanations[key] || domain.signal_family}</p><dl><div><dt>Raw loaded</dt><dd>${domain.raw_items}</dd></div><div><dt>Scored</dt><dd>${domain.candidate_evidence_items}</dd></div><div><dt>Kept</dt><dd>${domain.selected_evidence_items}</dd></div></dl></section>`).join('') : '<p class="muted">Run FCAPSule to populate the active telemetry source domains.</p>';
+      document.querySelector('#domain-grid').innerHTML = entries.length ? entries.map(([key, domain]) => `<section class="card domain"><span>${key}</span><h3>${domain.label}</h3><p>${explanations[key] || domain.signal_family}</p><dl><div><dt>Raw</dt><dd>${domain.raw_items}</dd></div><div><dt>Scored</dt><dd>${domain.candidate_evidence_items}</dd></div><div><dt>Kept</dt><dd>${domain.selected_evidence_items}</dd></div></dl></section>`).join('') : '<p class="muted">No domain data yet.</p>';
     }
     function renderEvents(state) {
       const events = state.events || [];
       document.querySelector('#events').innerHTML = events.length ? events.slice().reverse().map((event) => {
         const time = new Date(event.time * 1000).toLocaleTimeString();
         return `<div class="event"><code>${time}</code><b>${event.phase}</b><span>${event.message}</span></div>`;
-      }).join('') : '<p class="muted">No live events yet. Start with button 1.</p>';
+      }).join('') : '<p class="muted">No events yet.</p>';
     }
     function renderTakeaway(state) {
       const capture = state.capture_result;
       const pipeline = state.pipeline_result;
       const comparison = state.comparison_result;
-      let text = 'Nothing has run in this UI session yet. Start by generating a local checkout failure; then run FCAPSule to reduce the raw telemetry and compare the two DeepSeek outputs.';
-      if (capture && !pipeline) text = `The demo app failed successfully: ${capture.captured_logs} logs and ${capture.metric_series} metric series were captured, and ${capture.alert} is ${capture.alert_status}. Now run FCAPSule.`;
-      if (pipeline && !comparison) text = `FCAPSule reduced ${pipeline.logs} logs into ${pipeline.templates} templates and selected ${pipeline.selected_evidence} evidence items. DeepSeek comparison is running or ready to start.`;
+      let text = 'Idle. Capture an incident to begin.';
+      if (capture && !pipeline) text = `${capture.alert} is ${capture.alert_status}. ${capture.captured_logs} logs and ${capture.metric_series} metric series captured.`;
+      if (pipeline && !comparison) text = `${pipeline.logs} logs reduced to ${pipeline.templates} templates. ${pipeline.selected_evidence} evidence items kept.`;
       if (pipeline && comparison) {
-        const winnerText = comparison.winner ? `${comparison.winner} won the same-input model comparison.` : 'The model comparison finished without a measurable winner.';
-        text = `Complete: FCAPSule preserved ${(pipeline.evaluation.important_signal_preservation * 100).toFixed(1)}% of important signal with ${(pipeline.evaluation.log_compression_ratio * 100).toFixed(1)}% log compression. ${winnerText}`;
+        const winnerText = comparison.winner ? `${comparison.winner} leads.` : 'No measurable winner.';
+        text = `${(pipeline.evaluation.log_compression_ratio * 100).toFixed(1)}% log reduction. ${(pipeline.evaluation.important_signal_preservation * 100).toFixed(1)}% signal retained. ${winnerText}`;
       }
       document.querySelector('#main-takeaway').textContent = text;
     }
     function renderState(state) {
-      statusEl.textContent = state.running ? `Running ${state.active_job}... elapsed ${state.elapsed_seconds || 0}s` : `Ready. DeepSeek key loaded: ${state.api_key_available}. ${state.last_error ? 'Last error: ' + state.last_error : ''}`;
+      statusEl.textContent = state.running ? `Running ${state.active_job}... ${state.elapsed_seconds || 0}s` : `${state.last_error ? 'Last error: ' + state.last_error : 'Ready.'}`;
       captureButton.disabled = state.running;
       analysisButton.disabled = state.running || !state.capture_result;
       resetButton.disabled = state.running;
@@ -798,20 +804,19 @@ def _html_page(summary: dict[str, Any], printout: str) -> str:
 <body>
   <header>
     <h1>FCAPSule AI P1 Demo</h1>
-    <p class="muted">A guided local view of the incident capture, evidence reduction, domain map, and DeepSeek model comparison.</p>
+    <p class="muted">Recorded run view.</p>
   </header>
   <main>
     <section class="hero">
       <div class="hero-card primary">
-        <h2>What is happening?</h2>
+        <h2>Run State</h2>
         <p class="takeaway">{html.escape(_plain_result(summary))}</p>
         <div class="mini-note">
-          <strong>How to read this:</strong> FCAPSule is not trying to declare a final root cause. It reduces noisy telemetry into a smaller evidence capsule, then checks whether model-written explanations stay grounded in that evidence.
+          <strong>Scope:</strong> compact evidence, grounded hypotheses, model review.
         </div>
       </div>
       <div class="hero-card">
-        <h2>Start Here</h2>
-        <p class="muted">Use these in order during a demo. The current page already shows the latest recorded result.</p>
+        <h2>Controls</h2>
         <div class="actions">
           <button data-action="capture-p1">1. Capture fresh failure</button>
           <button data-action="run-p1">2. Run P1 reduction</button>
@@ -830,21 +835,19 @@ def _html_page(summary: dict[str, Any], printout: str) -> str:
       <div class="card metric">Model winner<strong class="winner">{html.escape(str(models.get('winner') or 'No measurable winner'))}</strong><small>Best output using the same capsule input and scoring rubric.</small></div>
     </section>
     <section class="panel">
-      <h2>Model Comparison, In Plain English</h2>
+      <h2>Model Review</h2>
       <p>{html.escape(_comparison_takeaway(summary))}</p>
-      <p class="muted">The comparison is fair because both models receive the same capsule and the same prompt. Higher is better. A good answer should cover the incident signals, cite valid evidence IDs, and avoid pretending the final root cause is proven.</p>
       <div class="comparison-grid">{_model_cards(summary)}</div>
     </section>
     <section class="panel">
-      <h2>Telemetry Domains Used by FCAPSule</h2>
-      <p class="muted">These are not media types like audio or images. They are observability signal families that require different handling before they can be compared together.</p>
+      <h2>Signal Domains</h2>
       <div class="grid">{_domain_cards(summary)}</div>
     </section>
     <section class="panel">
-      <h2>Open Detailed Artifacts</h2>
+      <h2>Artifacts</h2>
       <div class="actions">
-        <a class="button secondary" href="/dashboard.html" target="_blank">Open generated dashboard</a>
-        <a class="button secondary" href="/outputs/capsule.md" target="_blank">Open Markdown capsule</a>
+        <a class="button secondary" href="/dashboard.html" target="_blank">Dashboard</a>
+        <a class="button secondary" href="/outputs/capsule.md" target="_blank">Capsule</a>
         <a class="button secondary" href="/api/summary" target="_blank">Open JSON summary</a>
       </div>
     </section>
