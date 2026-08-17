@@ -531,6 +531,7 @@ def run_simulation(
         "raw_spans_retained": False,
         "ephemeral_spans_observed": checkout.ephemeral_span_count,
     }
+    final_metrics = snapshots[-1][1]
     metadata = {
         "case_id": incident_id,
         "case_title": "Inventory lock contention amplified by checkout retries",
@@ -601,7 +602,6 @@ def run_simulation(
 
     bundle = load_case(case_dir)
     raw_files = [case_dir / name for name in ("metadata.yaml", "alert.json", "prometheus_metrics.json", "opensearch_logs.json")]
-    final_metrics = snapshots[-1][1]
     result = {
         "incident_id": incident_id,
         "case_id": bundle.case_id,
