@@ -2,7 +2,7 @@
   "alertname": "CheckoutHighErrorRate",
   "status": "firing",
   "severity": "warning",
-  "startsAt": "2026-06-28T14:49:50.090902Z",
+  "startsAt": "2026-06-29T11:50:10.186823Z",
   "endsAt": null,
   "labels": {
     "service": "checkout-service",

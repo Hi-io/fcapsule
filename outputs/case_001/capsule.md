@@ -9,12 +9,12 @@ This capsule records observed telemetry and ranked investigation paths. It does 
 ## 2. Alert Context
 
 - **CheckoutHighErrorRate** is `firing` with `warning` severity.
-- Started at `2026-06-28T14:49:50.090902Z`.
+- Started at `2026-06-29T11:50:10.186823Z`.
 - The synthetic payment dependency failure caused checkout requests to return HTTP 503.
 
 ## 3. Telemetry Window
 
-`2026-06-28T14:49:48.013129Z` to `2026-06-28T14:49:52.303642Z` (UTC).
+`2026-06-29T11:50:08.143024Z` to `2026-06-29T11:50:12.392942Z` (UTC).
 
 ## 4. Multidomain Telemetry Map
 
@@ -28,15 +28,15 @@ In FCAPSule P1, a domain is a telemetry signal family with its own data shape an
 
 ## 5. Incident Timeline
 
-- `2026-06-28T14:49:50.090902Z` **alert**: CheckoutHighErrorRate - The synthetic payment dependency failure caused checkout requests to return HTTP 503.
+- `2026-06-29T11:50:10.186823Z` **alert**: CheckoutHighErrorRate - The synthetic payment dependency failure caused checkout requests to return HTTP 503.
 
 ## 6. Selected Evidence
 
 1. **Payment dependency <IP> unavailable after <NUM> retries request_id=<ID>** (`ev_log_template_003`, `log_text`, score `0.934`): 40 matching logs (28.4% of the case).
 2. **http_request_errors_total** (`ev_metric_002`, `time_series_metrics`, score `0.925`): http_request_errors_total per-sample increase increased 1000.0% near the alert compared with the baseline median.
 3. **request_error_rate** (`ev_metric_003`, `time_series_metrics`, score `0.925`): request_error_rate value increased 1000.0% near the alert compared with the baseline median.
-4. **http_request_latency_p95_ms** (`ev_metric_004`, `time_series_metrics`, score `0.925`): http_request_latency_p95_ms value increased 1523.0% near the alert compared with the baseline median.
-5. **http_request_latency_average_ms** (`ev_metric_005`, `time_series_metrics`, score `0.925`): http_request_latency_average_ms value increased 617.8% near the alert compared with the baseline median.
+4. **http_request_latency_p95_ms** (`ev_metric_004`, `time_series_metrics`, score `0.925`): http_request_latency_p95_ms value increased 1536.0% near the alert compared with the baseline median.
+5. **http_request_latency_average_ms** (`ev_metric_005`, `time_series_metrics`, score `0.925`): http_request_latency_average_ms value increased 629.2% near the alert compared with the baseline median.
 6. **application_log_events_total** (`ev_metric_007`, `time_series_metrics`, score `0.925`): application_log_events_total per-sample increase increased 100.0% near the alert compared with the baseline median.
 7. **CheckoutHighErrorRate** (`ev_alert_001`, `fault_events`, score `0.887`): The synthetic payment dependency failure caused checkout requests to return HTTP 503.
 8. **Checkout request failed status=<NUM> duration_ms=<NUM> request_id=<ID>** (`ev_log_template_002`, `log_text`, score `0.859`): 40 matching logs (28.4% of the case).
@@ -60,8 +60,8 @@ In FCAPSule P1, a domain is a telemetry signal family with its own data shape an
 
 - `metric_007` **application_log_events_total** (score `1.000`): application_log_events_total per-sample increase increased 100.0% near the alert compared with the baseline median.
 - `metric_002` **http_request_errors_total** (score `1.000`): http_request_errors_total per-sample increase increased 1000.0% near the alert compared with the baseline median.
-- `metric_005` **http_request_latency_average_ms** (score `1.000`): http_request_latency_average_ms value increased 617.8% near the alert compared with the baseline median.
-- `metric_004` **http_request_latency_p95_ms** (score `1.000`): http_request_latency_p95_ms value increased 1523.0% near the alert compared with the baseline median.
+- `metric_005` **http_request_latency_average_ms** (score `1.000`): http_request_latency_average_ms value increased 629.2% near the alert compared with the baseline median.
+- `metric_004` **http_request_latency_p95_ms** (score `1.000`): http_request_latency_p95_ms value increased 1536.0% near the alert compared with the baseline median.
 - `metric_006` **payment_dependency_failures_total** (score `1.000`): payment_dependency_failures_total per-sample increase increased 1000.0% near the alert compared with the baseline median.
 - `metric_003` **request_error_rate** (score `1.000`): request_error_rate value increased 1000.0% near the alert compared with the baseline median.
 - `metric_001` **http_requests_total** (score `0.000`): http_requests_total per-sample increase increased 0.0% near the alert compared with the baseline median.
