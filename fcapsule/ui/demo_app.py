@@ -818,8 +818,8 @@ def _html_page(summary: dict[str, Any], printout: str) -> str:
       <div class="hero-card">
         <h2>Controls</h2>
         <div class="actions">
-          <button data-action="capture-p1">1. Capture fresh failure</button>
-          <button data-action="run-p1">2. Build capsule</button>
+          <button data-action="capture-incident">1. Capture fresh failure</button>
+          <button data-action="build-capsule">2. Build capsule</button>
           <button data-action="compare">3. Compare DeepSeek models</button>
         </div>
         <p id="status" class="status">Ready. DeepSeek key loaded: {str(summary['api_key_available']).lower()}. Env file: {html.escape(str(summary.get('env_loaded_from') or 'not found'))}.</p>
@@ -952,12 +952,12 @@ class DemoRequestHandler(BaseHTTPRequestHandler):
                 thread.start()
                 self._send_json({"ok": True, "message": "Analysis job started."}, HTTPStatus.ACCEPTED)
                 return
-            if self.path == "/api/run-p1":
+            if self.path == "/api/build-capsule":
                 result = investigate_case(self.server.case_dir, self.server.output_dir)
                 render_dashboard(self.server.output_dir)
                 self._send_json({"ok": True, "message": "Investigation complete.", "result": result})
                 return
-            if self.path == "/api/capture-p1":
+            if self.path == "/api/capture-incident":
                 from scripts.capture_demo_incident import capture
 
                 capture_result = capture(self.server.case_dir)

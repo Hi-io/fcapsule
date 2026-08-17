@@ -544,6 +544,16 @@ def run_simulation(
         },
         "timezone": "UTC",
         "scenario": config.scenario,
+        "workload": {
+            "baseline_requests": config.baseline_requests,
+            "incident_requests": config.incident_requests,
+            "concurrency": config.concurrency,
+        },
+        "incident_metrics": {
+            "retry_amplification": round(final_metrics["checkout_retry_amplification_ratio"], 3),
+            "error_rate": round(final_metrics["checkout_request_error_rate"], 4),
+            "pool_peak_utilization": round(final_metrics["inventory_db_pool_peak_utilization_ratio"], 3),
+        },
         "fault_injection": {"timestamp": injection_time, "configuration": "inventory-2026.08.18-rc3"},
         "topology": [
             {"from": "edge-gateway", "to": "checkout-api", "protocol": "HTTP"},

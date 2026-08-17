@@ -38,6 +38,72 @@ class ControlPlane:
         self.phases = self._empty_phases()
         self.live: dict[str, Any] = {}
         load_env_file()
+        existing = self.store.overview()
+        if existing["incidents"]:
+            incident = existing["incidents"][0]
+            self.current_incident_id = incident["incident_id"]
+            self.phases.update(
+                {
+                    "services": {"status": "done", "message": "Services started", "details": {}, "updated_at": time.time()},
+                    "baseline": {"status": "done", "message": "Baseline captured", "details": {}, "updated_at": time.time()},
+                    "injection": {"status": "done", "message": "Failure injected", "details": {}, "updated_at": time.time()},
+                    "alerts": {"status": "done", "message": "Alerts captured", "details": {}, "updated_at": time.time()},
+                }
+            )
+            self.live.update(
+                {
+                    "incident_id": incident["incident_id"],
+                    "app_id": incident["app_id"],
+                    "log_count": incident["log_count"],
+                    "metric_series_count": incident["metric_series_count"],
+                    "alert_count": incident["alert_count"],
+                    "trace_access": incident["trace_access"],
+                }
+            )
+            case_dir = Path(incident["case_dir"])
+            alerts_path = case_dir / "alert.json"
+            metadata_path = case_dir / "metadata.yaml"
+            if alerts_path.is_file():
+                alerts = json.loads(alerts_path.read_text(encoding="utf-8"))
+                alerts = alerts if isinstance(alerts, list) else [alerts]
+                self.live["alerts"] = [item.get("alertname") for item in alerts]
+            if metadata_path.is_file():
+                import yaml
+
+                metadata = yaml.safe_load(metadata_path.read_text(encoding="utf-8")) or {}
+                self.live.update(metadata.get("workload", {}))
+                self.live.update(metadata.get("incident_metrics", {}))
+        if existing["capsules"]:
+            capsule_record = existing["capsules"][0]
+            self.current_capsule_id = capsule_record["capsule_id"]
+            self.phases["capsule"] = {
+                "status": "done",
+                "message": "Capsule ready",
+                "details": {},
+                "updated_at": time.time(),
+            }
+            output_dir = Path(capsule_record["output_dir"])
+            evaluation_path = output_dir / "evaluation.json"
+            comparison_path = output_dir / "llm_comparison.json"
+            if evaluation_path.is_file():
+                self.live["evaluation"] = json.loads(evaluation_path.read_text(encoding="utf-8"))
+                self.live["selected_evidence"] = capsule_record["selected_evidence"]
+            if comparison_path.is_file():
+                comparison = json.loads(comparison_path.read_text(encoding="utf-8"))
+                self.live["comparison"] = self._compact_comparison(comparison)
+                self.phases["models"] = {
+                    "status": "done",
+                    "message": "Model comparison complete",
+                    "details": {},
+                    "updated_at": time.time(),
+                }
+            else:
+                self.phases["models"] = {
+                    "status": "skipped",
+                    "message": "No model comparison recorded",
+                    "details": {},
+                    "updated_at": time.time(),
+                }
 
     @staticmethod
     def _empty_phases() -> dict[str, dict[str, Any]]:
@@ -80,17 +146,28 @@ class ControlPlane:
                 self.events.append({"time": time.time(), "phase": "system", "status": "error", "message": str(error), "details": {}})
             self.events = self.events[-160:]
 
-    def _event(self, phase: str, status: str, message: str, details: dict[str, Any] | None = None) -> None:
+    def _event(
+        self,
+        phase: str,
+        status: str,
+        message: str,
+        details: dict[str, Any] | None = None,
+        update_live: bool = True,
+    ) -> None:
         details = details or {}
         with self.lock:
             self.phases[phase] = {"status": status, "message": message, "details": details, "updated_at": time.time()}
             self.events.append({"time": time.time(), "phase": phase, "status": status, "message": message, "details": details})
             self.events = self.events[-160:]
-            self.live.update(details)
+            if update_live:
+                self.live.update(details)
 
     def _simulation_progress(self, status: str, message: str, details: dict[str, Any]) -> None:
         lower = message.lower()
-        if "starting" in lower or "healthy" in lower:
+        if "running baseline" in lower:
+            self._event("services", "done", "Services healthy", {}, update_live=False)
+            phase = "baseline"
+        elif "starting" in lower or "healthy" in lower:
             phase = "services"
         elif "baseline" in lower:
             phase = "baseline"
@@ -103,13 +180,10 @@ class ControlPlane:
         phase_status = "done" if status == "done" or "captured" in lower or "injected" in lower else "running"
         if phase == "baseline" and details.get("completed") == details.get("total"):
             phase_status = "done"
-        if phase == "services" and "running baseline" in lower:
-            self._event("services", "done", "Services healthy", details)
-            phase = "baseline"
         self._event(phase, phase_status, message, details)
 
     def _pipeline_progress(self, status: str, message: str, details: dict[str, Any]) -> None:
-        self._event("capsule", "done" if status == "done" else "running", message, details)
+        self._event("capsule", "done" if status == "done" else "running", message, details, update_live=False)
 
     def start_simulation(self, payload: dict[str, Any]) -> bool:
         if not self._begin("simulation"):
@@ -134,6 +208,16 @@ class ControlPlane:
                 scenario=str(payload.get("scenario", "inventory-lock-contention")),
             )
             config.validate()
+            with self.lock:
+                self.live.update(
+                    {
+                        "app_id": config.app_id,
+                        "app_name": config.app_name,
+                        "baseline_requests": config.baseline_requests,
+                        "incident_requests": config.incident_requests,
+                        "concurrency": config.concurrency,
+                    }
+                )
             self.store.upsert_application(
                 config.app_id,
                 config.app_name,
@@ -190,7 +274,13 @@ class ControlPlane:
                 max_tokens = max(int(item["max_tokens"]) for item in enabled_models)
 
                 def model_progress(status: str, message: str, details: dict[str, Any]) -> None:
-                    self._event("models", "done" if status == "done" and "comparison" in message.lower() else "running", message, details)
+                    self._event(
+                        "models",
+                        "done" if status == "done" and "comparison" in message.lower() else "running",
+                        message,
+                        details,
+                        update_live=False,
+                    )
 
                 try:
                     comparison = compare_models(
@@ -227,7 +317,14 @@ class ControlPlane:
             )
             with self.lock:
                 self.current_capsule_id = capsule_id
-                self.live.update({"capsule": capsule, "evaluation": evaluation, "selected_evidence": result["selected_evidence"]})
+                self.live.update(
+                    {
+                        "capsule": capsule,
+                        "evaluation": evaluation,
+                        "selected_evidence": result["selected_evidence"],
+                        "comparison": self._compact_comparison(comparison),
+                    }
+                )
             self._event("capsule", "done", "Capsule ready", {"selected_evidence": result["selected_evidence"], "compression": evaluation["log_compression_ratio"], "signal_preservation": evaluation["important_signal_preservation"]})
             self._finish()
         except Exception as exc:  # pragma: no cover - surfaced through API and UI
@@ -256,4 +353,34 @@ class ControlPlane:
         path = Path(record["output_dir"]) / "capsule.json"
         if not path.is_file():
             return None
-        return {"record": record, "capsule": json.loads(path.read_text(encoding="utf-8"))}
+        comparison_path = Path(record["output_dir"]) / "llm_comparison.json"
+        comparison = json.loads(comparison_path.read_text(encoding="utf-8")) if comparison_path.is_file() else None
+        return {
+            "record": record,
+            "capsule": json.loads(path.read_text(encoding="utf-8")),
+            "comparison": self._compact_comparison(comparison),
+        }
+
+    @staticmethod
+    def _compact_comparison(comparison: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not comparison:
+            return None
+        return {
+            "winner": comparison.get("winner"),
+            "score_delta": comparison.get("score_delta"),
+            "interpretation": comparison.get("interpretation"),
+            "results": [
+                {
+                    "model": item.get("model"),
+                    "status": item.get("status"),
+                    "latency_seconds": item.get("latency_seconds"),
+                    "total_tokens": item.get("usage", {}).get("total_tokens"),
+                    "total_score": item.get("score", {}).get("total_score"),
+                    "signal_score": item.get("score", {}).get("expected_signal_score"),
+                    "signal_depth_score": item.get("score", {}).get("signal_depth_score"),
+                    "citation_score": item.get("score", {}).get("citation_score"),
+                    "domain_score": item.get("score", {}).get("domain_score"),
+                }
+                for item in comparison.get("results", [])
+            ],
+        }

@@ -2,6 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 from demo.incident_lab import SimulationConfig, run_simulation
 from fcapsule.io.case_loader import load_case
 
@@ -24,6 +26,9 @@ class IncidentLabTests(unittest.TestCase):
             self.assertTrue(result["trace_access"]["available"])
             self.assertFalse(result["trace_access"]["raw_spans_retained"])
             self.assertEqual(len(bundle.alerts), 3)
+            metadata = yaml.safe_load((case_dir / "metadata.yaml").read_text(encoding="utf-8"))
+            self.assertEqual(metadata["workload"]["concurrency"], 16)
+            self.assertGreater(metadata["incident_metrics"]["retry_amplification"], 1.25)
 
 
 if __name__ == "__main__":

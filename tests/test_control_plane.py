@@ -47,6 +47,12 @@ class ControlPlaneTests(unittest.TestCase):
             self.assertEqual(state["phases"]["capsule"]["status"], "done")
             self.assertEqual(state["live"]["evaluation"]["important_signal_preservation"], 1.0)
             self.assertEqual(state["phases"]["models"]["status"], "skipped")
+            restored = ControlPlane(Path(directory) / "state").snapshot()
+            self.assertEqual(restored["current_incident_id"], state["current_incident_id"])
+            self.assertGreater(restored["live"]["log_count"], 100)
+            self.assertEqual(len(restored["live"]["alerts"]), 3)
+            self.assertEqual(restored["phases"]["alerts"]["status"], "done")
+            self.assertEqual(restored["phases"]["capsule"]["status"], "done")
 
     def test_http_app_exposes_both_views_and_state_api(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):

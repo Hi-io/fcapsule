@@ -79,7 +79,9 @@ main { width:min(1460px, calc(100% - 32px)); margin:20px auto 42px; }
 .kpi strong { display:block; margin-top:7px; font-size:27px; font-weight:680; }
 .kpi small { color:var(--muted); }
 .grid-2 { display:grid; grid-template-columns:minmax(0, 1.55fr) minmax(310px, .75fr); gap:14px; align-items:start; }
+.grid-2 > *, .stack, .sheet, .table-wrap { min-width:0; }
 .stack { display:grid; gap:14px; }
+.table-wrap { max-width:100%; overflow-x:auto; }
 table { width:100%; border-collapse:collapse; }
 th { background:#f7f8f9; color:#53616b; text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.04em; font-weight:700; padding:9px 11px; border-bottom:1px solid var(--line); }
 td { padding:10px 11px; border-bottom:1px solid #e8ecef; vertical-align:middle; }
@@ -100,6 +102,13 @@ tbody tr:hover { background:#fafbfb; }
 .model-row small { color:var(--muted); }
 .toggle { display:flex; align-items:center; gap:6px; color:var(--muted); }
 .toggle input { width:16px; height:16px; }
+.model-compare { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; margin-top:12px; }
+.model-result { border:1px solid var(--line); border-top:3px solid #97a4ac; padding:11px; }
+.model-result.winner { border-top-color:var(--green); }
+.model-result h3 { margin:0 0 8px; font-size:13px; }
+.model-result dl { display:grid; grid-template-columns:repeat(3, 1fr); gap:7px; margin:0; }
+.model-result dt { color:var(--muted); font-size:10px; text-transform:uppercase; }
+.model-result dd { margin:2px 0 0; font-weight:700; }
 .lab-grid { display:grid; grid-template-columns:320px minmax(0, 1fr); gap:14px; align-items:start; }
 .control-panel { position:sticky; top:14px; }
 .field { margin-bottom:12px; }
@@ -141,7 +150,7 @@ tbody tr:hover { background:#fafbfb; }
 .mono { font-family:"Cascadia Mono", Consolas, monospace; font-size:12px; }
 .right { text-align:right; }
 @media (max-width:1050px) { .grid-2, .lab-grid { grid-template-columns:1fr; } .control-panel { position:static; } .phase-strip { grid-template-columns:repeat(3, 1fr); } .metrics-line { grid-template-columns:repeat(3, 1fr); } }
-@media (max-width:700px) { .product-bar { height:auto; min-height:58px; padding:10px 14px; grid-template-columns:1fr auto; } nav { grid-column:1/-1; order:3; margin-top:8px; } nav a { min-height:40px; } .system-state { justify-self:end; } main { width:min(100% - 18px, 1460px); margin-top:12px; } .page-head { align-items:start; flex-direction:column; } .kpis, .phase-strip, .metrics-line { grid-template-columns:1fr 1fr; } .kpi:nth-child(2) { border-right:0; } .kpi { border-bottom:1px solid var(--line); } .event { grid-template-columns:62px 1fr; } .event span { display:none; } .form-pair { grid-template-columns:1fr; } .table-wrap { overflow:auto; } }
+@media (max-width:700px) { .product-bar { height:auto; min-height:58px; padding:10px 14px; grid-template-columns:1fr auto; } nav { grid-column:1/-1; order:3; margin-top:8px; } nav a { min-height:40px; } .system-state { justify-self:end; } main { width:calc(100% - 18px); margin-top:12px; } .page-head { align-items:start; flex-direction:column; } .kpis, .phase-strip, .metrics-line { grid-template-columns:1fr 1fr; } .kpi:nth-child(2) { border-right:0; } .kpi { border-bottom:1px solid var(--line); } .event { grid-template-columns:62px 1fr; } .event span { display:none; } .form-pair, .model-compare { grid-template-columns:1fr; } }
 """
 
 
@@ -160,6 +169,7 @@ const safe = value => String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&am
 const shortTime = value => value ? new Date(value).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '--';
 document.querySelector(`[data-nav="${view}"]`)?.classList.add('active');
 let lastState = null;
+let inspectedCapsule = null;
 
 function setSystem(state) {
   const node = document.querySelector('.system-state');
@@ -190,7 +200,7 @@ function renderConsole(state) {
       </div>
       <div class="stack">
         <section class="sheet"><div class="sheet-head"><h2>Model profiles</h2><span class="eyebrow">${state.api_key_available ? 'Provider ready' : 'Key not loaded'}</span></div><div class="sheet-body" id="models">${modelProfiles(data.models)}</div></section>
-        <section class="sheet"><div class="sheet-head"><h2>Capsule inspector</h2></div><div class="sheet-body capsule-detail" id="capsule-detail"><p>Select a capsule to inspect its strongest evidence.</p></div></section>
+        <section class="sheet"><div class="sheet-head"><h2>Capsule inspector</h2></div><div class="sheet-body capsule-detail" id="capsule-detail">${inspectedCapsule ? capsuleDetail(inspectedCapsule.data, inspectedCapsule.id) : '<p>Select a capsule to inspect its strongest evidence.</p>'}</div></section>
         <div class="notice">Trace sources are checked on demand. FCAPSule records availability and derived evidence, not raw spans.</div>
       </div>
     </div>`;
@@ -216,8 +226,18 @@ async function inspectCapsule(id) {
   const response = await fetch('/api/capsules/' + encodeURIComponent(id)); const data = await response.json();
   const node = document.querySelector('#capsule-detail');
   if (!response.ok) { node.innerHTML = `<p>${safe(data.error)}</p>`; return; }
+  inspectedCapsule = {id, data};
+  node.innerHTML = capsuleDetail(data, id);
+}
+
+function capsuleDetail(data, id) {
   const capsule = data.capsule; const evaluation = capsule.evaluation || {}; const evidence = capsule.selected_evidence || [];
-  node.innerHTML = `<div class="eyebrow">${safe(capsule.case.case_id)}</div><h3>${safe(capsule.case.case_title)}</h3><p>${evidence.length} evidence items, ${pct(evaluation.log_compression_ratio)} log reduction, ${pct(evaluation.important_signal_preservation)} signal retained.</p><h3>Strongest evidence</h3><ul class="evidence-list">${evidence.slice(0,5).map(item => `<li><code>${safe(item.evidence_id)}</code> ${safe(item.title)}</li>`).join('')}</ul><div class="actions"><a href="/artifacts/${encodeURIComponent(id)}/capsule.md" target="_blank"><button class="secondary">Open report</button></a><a href="/artifacts/${encodeURIComponent(id)}/dashboard.html" target="_blank"><button class="secondary">Open dashboard</button></a></div>`;
+  return `<div class="eyebrow">${safe(capsule.case.case_id)}</div><h3>${safe(capsule.case.case_title)}</h3><p>${evidence.length} evidence items, ${pct(evaluation.log_compression_ratio)} log reduction, ${pct(evaluation.important_signal_preservation)} signal retained.</p>${modelComparison(data.comparison)}<h3>Strongest evidence</h3><ul class="evidence-list">${evidence.slice(0,5).map(item => `<li><code>${safe(item.evidence_id)}</code> ${safe(item.title)}</li>`).join('')}</ul><div class="actions"><a href="/artifacts/${encodeURIComponent(id)}/capsule.md" target="_blank"><button class="secondary">Open report</button></a><a href="/artifacts/${encodeURIComponent(id)}/dashboard.html" target="_blank"><button class="secondary">Open dashboard</button></a></div>`;
+}
+
+function modelComparison(comparison) {
+  if (!comparison?.results?.length) return '';
+  return `<h3>Model comparison</h3><p>${safe(comparison.interpretation || 'Same capsule and rubric.')}</p><div class="model-compare">${comparison.results.map(item => `<div class="model-result ${item.model === comparison.winner ? 'winner' : ''}"><h3>${safe(item.model)} ${item.model === comparison.winner ? '<span class="eyebrow">best observed</span>' : ''}</h3><dl><div><dt>Quality</dt><dd>${Number(item.total_score || 0).toFixed(3)}</dd></div><div><dt>Latency</dt><dd>${Number(item.latency_seconds || 0).toFixed(1)}s</dd></div><div><dt>Tokens</dt><dd>${fmt.format(item.total_tokens || 0)}</dd></div></dl></div>`).join('')}</div>`;
 }
 
 async function saveModel(id) {
@@ -230,7 +250,7 @@ async function saveModel(id) {
 function renderLab(state) {
   const live = state.live || {}; const phases = state.phases; const incident = state.current_incident_id;
   app.innerHTML = `
-    <div class="page-head"><div><div class="eyebrow">Controlled test environment</div><h1>Incident Lab</h1><p>Run a real local failure and feed its evidence into FCAPSule.</p></div><span>${incident ? status('firing') : status('ready')}</span></div>
+    <div class="page-head"><div><div class="eyebrow">Controlled test environment</div><h1>Incident Lab</h1><p>Run a real local failure and feed its evidence into FCAPSule.</p></div><span>${state.running ? status('running') : incident ? status('captured') : status('ready')}</span></div>
     <div class="lab-grid">
       <section class="sheet control-panel"><div class="sheet-head"><h2>Simulation</h2><span class="eyebrow">Local</span></div><div class="sheet-body">
         <div class="field"><label for="app-name">Application name</label><input id="app-name" value="Checkout Platform"></div>
@@ -243,8 +263,8 @@ function renderLab(state) {
       </div></section>
       <div class="stack">
         <section class="phase-strip">${phaseStrip(phases)}</section>
-        <section class="sheet"><div class="sheet-head"><h2>Live incident</h2><span class="eyebrow">${state.running ? 'Updating' : incident ? 'Captured' : 'No run'}</span></div><div class="metrics-line">${metricTiles(live)}</div><div class="sheet-body"><div class="grid-2"><div><h2 style="font-size:14px;margin-top:0">Fault sequence</h2>${alertSequence(live)}</div><div><h2 style="font-size:14px;margin-top:0">Data policy</h2><p>FM events, PM series and logs are captured for analysis. Trace access is probed during the incident; raw spans remain in the source buffer and are not retained.</p>${live.trace_access ? `<div class="source-row"><span class="source on">TRACE ${safe(live.trace_access.probe_status)}</span><span class="source">${live.trace_access.source_retention_seconds}s source window</span><span class="source">0 spans retained</span></div>` : ''}</div></div></div></section>
-        <section class="sheet"><div class="sheet-head"><h2>Activity</h2><span class="eyebrow">Newest last</span></div><div class="event-list">${eventList(state.events)}</div></section>
+        <section class="sheet"><div class="sheet-head"><h2>Live incident</h2><span class="eyebrow">${state.running ? 'Updating' : incident ? 'Captured' : 'No run'}</span></div><div class="metrics-line">${metricTiles(live)}</div><div class="sheet-body"><div class="grid-2"><div><h2 style="font-size:14px;margin-top:0">Fault sequence</h2>${alertSequence(live)}</div><div><h2 style="font-size:14px;margin-top:0">Data policy</h2><p>FM events, PM series and logs are captured for analysis. Trace access is probed during the incident; raw spans remain in the source buffer and are not retained.</p>${live.trace_access ? `<div class="source-row"><span class="source on">TRACE ${safe(live.trace_access.probe_status)}</span><span class="source">${live.trace_access.source_retention_seconds}s source window</span><span class="source">0 spans retained</span></div>` : ''}</div></div>${modelComparison(live.comparison)}</div></section>
+        <section class="sheet"><div class="sheet-head"><h2>Activity</h2><span class="eyebrow">Newest first</span></div><div class="event-list">${eventList(state.events)}</div></section>
       </div>
     </div>`;
   document.querySelector('#run-simulation').addEventListener('click', runSimulation);
@@ -275,7 +295,7 @@ function alertSequence(live) {
 }
 function eventList(events) {
   if (!events.length) return '<div class="empty">No activity yet.</div>';
-  return events.map(item => `<div class="event"><time>${shortTime(item.time * 1000)}</time><b>${safe(item.phase)}</b><span>${safe(item.message)}</span></div>`).join('');
+  return events.slice().reverse().map(item => `<div class="event"><time>${shortTime(item.time * 1000)}</time><b>${safe(item.phase)}</b><span>${safe(item.message)}</span></div>`).join('');
 }
 async function runSimulation() {
   const payload = {app_name:document.querySelector('#app-name').value,app_id:document.querySelector('#app-id').value,scenario:document.querySelector('#scenario').value,baseline_requests:Number(document.querySelector('#baseline').value),incident_requests:Number(document.querySelector('#incident').value),concurrency:Number(document.querySelector('#concurrency').value)};
