@@ -1,142 +1,184 @@
-# FCAPSule AI P1 Data Schema
+# FCAPSule Data Contracts
 
-## Case Folder
+## Normalized Incident Case
 
-Every case is self-contained:
+Every adapter produces a directory with four required files and one optional regression note:
 
 ```text
-cases/<case_id>/
-  metadata.yaml
-  alert.json
-  prometheus_metrics.json
-  opensearch_logs.json
-  expected_notes.md       # optional but recommended
+metadata.yaml
+alert.json
+prometheus_metrics.json
+opensearch_logs.json
+expected_notes.md
 ```
 
-P1 requires the first four files. Validation errors identify the file and field that failed.
+### `metadata.yaml`
 
-## `metadata.yaml`
+Required:
 
-Required fields:
+- `case_id`
+- `case_title`
+- `service`
+- `namespace`
+- `cluster`
+- `window.start`
+- `window.end`
 
-| Field | Type | Meaning |
-|---|---|---|
-| `case_id` | string | Stable case identifier |
-| `case_title` | string | Human-readable title |
-| `service` | string | Primary affected service |
-| `cluster` | string | Cluster identity |
-| `namespace` | string | Namespace identity |
-| `window.start` | ISO-8601 string | Inclusive telemetry start |
-| `window.end` | ISO-8601 string | Telemetry end; must be after start |
+Supported context:
 
-Recommended fields: `pod`, `cncc_uuid`, `timezone`, `telemetry_sources`, `fields`, `privacy`, and `notes`.
+- `cncc_uuid`, pod, and environment identity;
+- `scenario`;
+- `fault_injection` or observed configuration changes;
+- `topology` relationships;
+- `trace_access`;
+- telemetry source names;
+- source field mapping;
+- privacy declarations;
+- operator notes.
 
-All timestamps must include a timezone. P1 normalizes comparisons to UTC.
+All timestamps must include a timezone and are compared in UTC.
 
-## `alert.json`
+### `alert.json`
 
-The file may contain one alert object or a list of alert objects.
+A single object or list:
 
-Required alert fields:
+```json
+{
+  "alertname": "InventoryPoolSaturation",
+  "status": "firing",
+  "severity": "critical",
+  "startsAt": "2026-08-18T00:00:00Z",
+  "endsAt": null,
+  "labels": {
+    "service": "checkout-platform",
+    "component": "inventory-api",
+    "namespace": "commerce",
+    "cluster": "local-lab"
+  },
+  "annotations": {
+    "summary": "Inventory database pool is saturated",
+    "description": "Reservation workers cannot acquire pool slots."
+  }
+}
+```
 
-| Field | Type |
-|---|---|
-| `alertname` | string |
-| `status` | string |
-| `severity` | string |
-| `startsAt` | ISO-8601 string |
-| `labels` | object |
-
-Optional fields: `endsAt` and `annotations`. Entity labels should use `service`, `namespace`, `cluster`, `pod`, and `cncc_uuid` when available.
-
-## `prometheus_metrics.json`
+### `prometheus_metrics.json`
 
 ```json
 {
   "window": {"start": "...", "end": "..."},
   "series": [
     {
-      "metric": "request_error_rate",
-      "labels": {"pod": "checkout-api-7c9d"},
-      "values": [["2026-06-21T10:00:00Z", 0.05]]
+      "metric": "checkout_retry_amplification_ratio",
+      "labels": {"service": "checkout-platform", "component": "checkout-api"},
+      "values": [["2026-08-18T00:00:00Z", 1.0], ["2026-08-18T00:01:00Z", 2.1]]
     }
   ]
 }
 ```
 
-Each series needs a metric name, labels object, and at least two numeric timestamp/value points. Metrics ending in `_total` are treated as counters and analyzed using non-negative per-sample deltas. Other series are treated as gauges.
+Each series requires at least two numeric points.
 
-## `opensearch_logs.json`
+### `opensearch_logs.json`
 
 ```json
 {
   "hits": [
     {
-      "@timestamp": "2026-06-21T10:01:22Z",
+      "@timestamp": "2026-08-18T00:00:00Z",
+      "indexed_at": "2026-08-18T00:00:01Z",
       "level": "ERROR",
-      "message": "Failed to connect to 10.0.0.3 after 3 retries",
-      "service": "checkout-service",
-      "namespace": "checkout",
-      "pod": "checkout-api-7c9d",
-      "cluster": "demo-cluster",
-      "cncc_uuid": "cncc-demo-12345"
+      "service": "checkout-platform",
+      "component": "inventory-api",
+      "message": "Reservation DB pool exhausted active=8 pool_size=8"
     }
   ]
 }
 ```
 
-Field names can be overridden in `metadata.yaml.fields`. Timestamp and message are required.
+Field names can be mapped in metadata.
 
-## `expected_notes.md`
+### `expected_notes.md`
 
-This optional manual reference lists signals a reviewer expects the capsule to preserve. It is not treated as root-cause truth. In P1 it supports regression review and documents case intent.
+Regression cases may list diagnostic signal groups that should survive selection. These notes are not final root-cause truth. They define review intent and make missing evidence inspectable.
 
-## Output Contracts
+## Trace Access Contract
 
-### `capsule.json`
+Trace metadata is stored under `metadata.trace_access`:
 
-Contains:
+```json
+{
+  "mode": "on_demand",
+  "available": true,
+  "probe_status": "verified",
+  "source_retention_seconds": 900,
+  "raw_spans_retained": false,
+  "ephemeral_spans_observed": 1266
+}
+```
+
+Raw spans are never part of the normalized case archive or evidence archive. A live adapter may use them temporarily to derive evidence.
+
+## Capsule Contract
+
+`capsule.json` includes:
 
 - `schema_version`;
-- case metadata and alerts;
-- `domain_summary` describing the P1 operational telemetry domains;
-- entity resolution and warnings;
-- timeline;
-- selected evidence and selection summary;
-- log and metric analyses;
-- verified hypotheses;
-- missing evidence and next checks;
-- objective evaluation.
+- `case`;
+- `alerts`;
+- `entity_resolution`;
+- `timeline`;
+- `selected_evidence`;
+- `selection_summary`;
+- `log_summary` and `log_templates`;
+- `metric_anomalies`;
+- `hypotheses`;
+- `missing_evidence`;
+- `next_steps`;
+- `domain_summary`;
+- `evaluation`.
 
-### `evidence.json`
+Evidence items include:
 
-Contains every candidate evidence item, including candidates not selected. Each item records:
-
-- stable `evidence_id` and source ID;
-- explicit telemetry `domain` and evidence `type`;
+- stable `evidence_id`;
+- source ID and domain;
 - title and summary;
-- total score;
-- every intermediate score component;
+- score and score components;
 - selection rationale;
-- linked entities and time range;
-- anonymized representative lines when applicable.
+- linked entities;
+- time range;
+- anonymized representative lines when relevant.
 
-### `evaluation.json`
+## Control-Plane Schema
 
-Contains objective metrics and inline definitions. Ratios use values from `0.0` to `1.0`.
+SQLite tables:
 
-### `baselines.json`
+### `applications`
 
-Contains raw, keyword-filter, time-window sample, and LLM comparison protocol data. The deterministic P1 records LLM comparison outputs only when an approved provider is configured and `compare-llms` is run.
+Identity, namespace, cluster, environment, status, source configuration, and timestamps.
 
-### `llm_comparison.json`
+### `incidents`
 
-Created by `compare-llms`. It contains the exact prompt, compared model names, parsed responses when available, raw assistant content, token usage, latency, citation validity, domain coverage, expected signal coverage, actionability score, winner, and score delta. API keys are never written to this file.
+Application reference, scenario, severity, time range, normalized case location, FM/PM/log counts, observed raw bytes, trace-access metadata, and summary.
 
-### `dashboard.html`
+### `capsules`
 
-Static local review UI generated from `capsule.json`, `evaluation.json`, and optional `llm_comparison.json`. It is a derived artifact and can be regenerated.
+Incident/application reference, artifact location, retained bytes, selected evidence count, reduction, signal preservation, grounding, runtime, model winner, and creation time.
 
-### Archive
+### `model_profiles`
 
-`fcapsule_<case_id>.zip` contains derived output files. It excludes raw telemetry and credentials by design.
+Model ID, provider, enabled state, maximum tokens, and update time.
+
+## Artifact Policy
+
+The derived ZIP contains:
+
+- `capsule.json`;
+- `capsule.md`;
+- `evidence.json`;
+- `evaluation.json`;
+- `baselines.json`;
+- optional comparison outputs.
+
+It excludes normalized raw input files and raw traces.
+

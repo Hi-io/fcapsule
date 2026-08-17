@@ -1,79 +1,101 @@
-# FCAPSule AI P1 Evaluation Plan
+# FCAPSule Evaluation Plan
 
-## Main Question
+## Evaluation Question
 
-Can FCAPSule AI reduce noisy incident telemetry into a compact evidence capsule while preserving useful investigation signal?
+Can FCAPSule reduce a large cross-domain incident window while preserving representative diagnostic signal, grounding every investigation claim, and lowering retained size and model context?
 
-## Baselines
+## Reference Scenario
 
-### Raw telemetry
+The checkout/inventory scenario is the primary reproducible regression case. It must preserve:
 
-The reviewer receives the complete case without ranking or reduction. This is the preservation ceiling and the usability/compression floor.
+- retry-amplification, pool-saturation, and error-budget FM events;
+- retry/breaker, pool exhaustion, and lock/deadline log patterns;
+- error, latency, retry, pool, and telemetry-health PM groups;
+- topology/configuration context;
+- verified on-demand trace availability and zero retained raw spans.
 
-### Keyword filter
-
-Select logs containing `ERROR`, `WARN`, the primary service, or alert name. This tests whether the attention pipeline adds value beyond common filtering.
-
-### Time-window sample
-
-Select the 20 logs nearest to the first alert. This tests whether structured reduction is better than a bounded chronological sample.
-
-### DeepSeek same-input comparison
-
-Send the same generated `capsule.json` to `deepseek-v4-flash` and `deepseek-v4-pro`. Record provider/model, prompt, token count, latency, parse status, evidence citations, unsupported claims, domain coverage, expected signal coverage, and reviewer notes. This comparison is optional because P1 must still work without credentials, but it is part of the current P1 evaluation when a DeepSeek API key is configured.
+The expected chain is an investigation path, not a root-cause label.
 
 ## Objective Metrics
 
 | Metric | Definition |
 |---|---|
-| Log compression | `1 - selected representative lines / raw lines` |
-| Template reduction | `1 - grouped templates / raw lines` |
+| Log reduction | `1 - selected representative lines / raw log lines` |
+| Template reduction | `1 - templates / raw log lines` |
 | Token reduction | `1 - estimated capsule tokens / estimated raw tokens` |
-| Signal preservation | Selected important signals / identified important signals |
-| Metric anomaly preservation | Selected anomalous metrics / identified anomalous metrics |
-| Hypothesis grounding | Valid cited evidence IDs / all cited evidence IDs |
-| Runtime | End-to-end wall-clock pipeline time |
-| Retention survivability | Present required capsule sections / eight required sections |
-| LLM domain coverage | Operational telemetry domains explicitly used by the model / four source domains |
-| LLM expected signal coverage | Expected incident signal groups mentioned / expected signal groups |
-| LLM citation validity | Valid cited evidence IDs / cited evidence IDs |
+| Signal preservation | retained representative signal groups / identified groups |
+| PM preservation | retained important PM groups / identified PM groups |
+| Grounding | valid cited evidence IDs / all cited IDs |
+| Retention completeness | required capsule sections present / required sections |
+| Runtime | wall-clock pipeline duration |
+| Storage reduction | retained capsule bytes compared with observed raw bytes |
 
-P1 token estimates use serialized character count divided by four. They are comparative estimates, not provider billing counts.
+Important signals are representative groups, not every correlated series. Counting every derivative metric as independently important would reward redundancy and conflict with the attention objective.
 
-## Important Signal Definition
+## Baselines
 
-Without production RCA ground truth, P1 defines important signal operationally:
+- random log sample;
+- keyword-filtered log sample;
+- alert-window sample;
+- highest-volume log templates;
+- deterministic evidence pipeline;
+- optional single-model reasoning over the same capsule;
+- same-input multi-model comparison.
 
-- every supplied alert;
-- WARN/ERROR/CRITICAL log templates;
-- rare templates;
-- metric anomalies at or above the configured threshold;
-- affected entity labels;
-- case-specific expected notes used for manual review.
+## Model Comparison
 
-This measures evidence preservation, not causal correctness.
+Enabled models receive identical messages and capsule evidence. Record:
 
-## Subjective Review
+- provider and model;
+- prompt;
+- finish reason and parse status;
+- provider latency and wall-clock latency;
+- prompt, completion, and total tokens;
+- valid and invalid evidence citations;
+- operational domain coverage;
+- expected signal-group coverage;
+- actionability;
+- evidence breadth;
+- unsupported final-root-cause language;
+- total rubric score.
 
-Reviewers compare the capsule with raw and baseline outputs using the form in `docs/p1_evaluation.md`. Questions use a 1-5 Likert scale for clarity, usefulness, trust, omissions, actionability, and expected time savings.
+A model wins only when its total score is measurably higher. Latency and token use remain separate tradeoffs rather than hidden quality bonuses.
 
-## P1 Acceptance Thresholds
+## Acceptance Thresholds
 
-- complete case parses without warning;
-- at least one evidence item from alerts, logs, and metrics;
-- log compression at least 80% on the reference case;
-- important signal preservation at least 90%;
-- hypothesis grounding exactly 100%;
-- every hypothesis has missing evidence or next checks;
-- archive excludes raw telemetry;
-- optional LLM comparison stores prompt, responses, scores, usage, and dashboard output without storing credentials;
-- all automated tests pass.
+For the reference scenario:
 
-## Limitations and Threats to Validity
+- all three FM alerts fire;
+- at least 100 logs and 18 PM series are collected in the reduced test configuration;
+- raw spans retained equals zero;
+- log reduction is at least 90%;
+- representative signal preservation is at least 90%;
+- citation grounding is 100%;
+- retention completeness is 100%;
+- the archive contains no raw telemetry;
+- the Operations and Incident Lab HTTP routes respond;
+- application, incident, and capsule records persist in SQLite;
+- the automated suite passes.
 
-- The reference case is synthetic and intentionally clear.
-- Automatically identified signals may not match expert judgment.
-- A small case exaggerates capsule overhead in token reduction.
-- Statistical results depend on the chosen baseline window.
-- Likert review is subjective and may have few reviewers.
-- P1 evaluates evidence selection, not production root-cause accuracy.
+## Human Review
+
+Reviewers should score:
+
+- whether the strongest evidence is useful;
+- whether important evidence is missing;
+- whether redundant evidence occupies capsule capacity;
+- whether the hypotheses are appropriately cautious;
+- whether next checks are actionable;
+- whether the UI makes source availability and selection status understandable.
+
+## Threats to Validity
+
+- Synthetic incidents do not reproduce all production behavior.
+- Expected signal groups are authored with scenario knowledge.
+- Token estimates are comparative character-based estimates.
+- Statistical PM methods may over-score correlated derivatives.
+- Model rubric scores measure grounded evidence use, not definitive causality.
+- Thread scheduling changes exact counts and timings.
+
+Results must be reported with these limitations.
+

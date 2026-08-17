@@ -1,114 +1,132 @@
-# FCAPSule AI Project Design
+# FCAPSule Product Design
 
-## Overview
+## Design Summary
 
-FCAPSule AI preserves the evidence that matters before raw telemetry disappears. It accepts a bounded incident case and orchestrates log-text reduction, time-series analysis, fault-event processing, topology/entity resolution, evidence attention, grounded reasoning, optional LLM comparison, verification, and evaluation.
+FCAPSule is implemented as a dependency-light Python control plane with a normalized evidence pipeline, local SQLite metadata, CLI commands, and two web views. Raw telemetry is not treated as product storage. The system queries a bounded window, derives evidence, retains the capsule, and leaves raw data in the source platform.
 
-The primary P1 user is an engineer who needs a compact starting point for investigation. The academic goal is to demonstrate Template 4.1, orchestration of AI models and analysis methods toward a shared goal, rather than a single chatbot over sampled logs.
+The architecture deliberately separates four responsibilities:
 
-## P1 Scope
+1. **Collection:** source adapters or the incident lab create a normalized case.
+2. **Attention:** deterministic processors score and select cross-domain evidence.
+3. **Reasoning:** deterministic and optional pretrained models produce grounded investigation paths.
+4. **Control plane:** applications, incidents, capsules, settings, and review state are persisted and displayed.
 
-P1 is a local CLI with file-based inputs. It implements the complete logical workflow and stable extension interfaces while excluding live integrations, authentication, remediation, and production deployment. A static local dashboard is included to make evaluation and model comparison easier to inspect.
+## Implemented Components
 
-## Architecture
+| Component | Responsibility |
+|---|---|
+| `fcapsule/io/case_loader.py` | validate normalized cases |
+| `fcapsule/processing/` | entity alignment, anonymization, log templates, PM anomalies, FM timeline |
+| `fcapsule/attention/` | transparent scoring and domain-balanced selection |
+| `fcapsule/reasoning/` | deterministic hypotheses, verification, DeepSeek comparison |
+| `fcapsule/evaluation/` | baselines, reduction, preservation, grounding, retention metrics |
+| `fcapsule/store.py` | SQLite application/incident/capsule/model metadata |
+| `fcapsule/control_plane.py` | asynchronous simulation and capsule jobs |
+| `fcapsule/ui/app.py` | Operations and Incident Lab web application |
+| `demo/incident_lab.py` | real local checkout/inventory failure scenario |
+| `fcapsule/cli.py` | operator and automation entry point |
 
-```text
-case files
-   |
-   v
-schema validation -> entity resolution -> anonymization
-   |                                         |
-   +-> log reduction ------------------------+
-   +-> metric anomaly analysis --------------+-> evidence attention
-   +-> alert timeline -----------------------+          |
-                                                      v
-                                          hypothesis generation
-                                                      |
-                                                      v
-                                                verification
-                                                      |
-                                                      v
-                                   capsule + evaluation + archive
-                                                     |
-                                                     v
-                                   optional DeepSeek comparison + dashboard
-```
+## Evidence Selection
 
-## Telemetry Domains
+Candidate evidence exposes these components:
 
-"Domain" is explicit in P1. It means a different operational signal family with its own data shape and analysis method. This is analogous to how text, audio, and images are different AI modalities, but FCAPSule P1 does not need image generation. Its domains are:
+- severity;
+- anomaly magnitude;
+- proximity to the alert;
+- entity match;
+- rarity;
+- semantic relevance;
+- repetition penalty.
 
-| Domain | Data shape | P1 method | Output role |
-|---|---|---|---|
-| Fault events | Alert/event records | severity ranking, timeline construction | incident trigger and window |
-| Log text | Semi-structured textual logs | masking, template extraction, severity/frequency analysis | compact behavioral evidence |
-| Time-series metrics | Numeric timestamped samples | counter deltas, robust change scoring | measurable degradation evidence |
-| Topology metadata | service/pod/namespace/cluster/CNCC labels | entity resolution and coverage checks | cross-domain alignment |
-| LLM reasoning | generated structured analysis | prompted comparison and citation scoring | optional evaluation of model-assisted interpretation |
+Selection uses per-domain quotas and representative signal groups. This prevents a large family of similarly scored PM series from displacing diagnostic log patterns or FM events.
 
-## Components
+The default maximum is twenty retained evidence items:
 
-### Case loader
+- up to four FM events;
+- up to six log templates;
+- up to ten PM anomalies;
+- remaining capacity filled by global score.
 
-Loads `metadata.yaml`, alerts, metrics, logs, and optional expected notes. It normalizes timestamps and rejects malformed required input with actionable messages.
+Within logs and PM, representatives for errors, retries, latency, pool saturation, locks, and telemetry health are considered before redundant candidates.
 
-### Entity resolver
+## Reasoning
 
-Matches service, namespace, cluster, pod, and CNCC UUID across domains. Mismatches are retained as warnings rather than silently discarded.
+The deterministic reasoner provides a credential-free baseline. For the reference incident it can connect retry evidence, pool evidence, related PM changes, and the FM trigger into a tentative investigation path.
 
-### Log reducer
+The verifier rejects unknown evidence IDs, bounds confidence, and reduces confidence when required data is missing. Optional external models receive only compact evidence and must return structured JSON.
 
-Masks dynamic tokens and groups messages by normalized template. It records counts, severity, temporal range, representative lines, and proximity to the alert.
+## Storage
 
-### Metrics analyzer
+SQLite stores metadata, not source telemetry. The schema includes:
 
-Splits each series into baseline and incident segments relative to the first alert. It calculates robust z-score, percentage change, direction, and an explainable anomaly score.
+- `applications`;
+- `incidents`;
+- `capsules`;
+- `model_profiles`;
+- `settings`.
 
-### Alert timeline
+Case exports and generated capsule artifacts live under the configured state directory. In local mode the default is `.fcapsule/`.
 
-Normalizes one or more alerts and combines them with selected log and metric events into chronological context.
+## Web Application
 
-### Evidence attention engine
+The web application uses the Python standard library HTTP server. This keeps local setup small and makes the CLI the primary contract. The pages use a shared JSON API:
 
-Normalizes cross-domain features and records every scoring component. P1 prioritizes severity, anomaly, temporal proximity, entity match, rarity, and relevance while penalizing repetitive low-value logs.
+- `GET /api/state`;
+- `GET /api/capsules/<id>`;
+- `POST /api/simulations`;
+- `POST /api/capsules`;
+- `POST /api/models/<id>`;
+- `POST /api/reset`.
 
-### Reasoning, LLM comparison, and verification
+Long-running simulation, pipeline, and model work executes on background threads. The client polls current state and renders phase progress.
 
-The default deterministic reasoner produces cautious investigation paths from selected evidence. The verifier rejects nonexistent evidence IDs and reduces confidence when support is weak or required telemetry is missing.
+## Trace Policy
 
-The optional DeepSeek comparison sends the same `capsule.json` to `deepseek-v4-flash` and `deepseek-v4-pro`, stores each response, records token usage and latency, validates evidence citations, and scores the outputs against a fixed rubric. This supports the project question of whether a stronger model produces a better grounded investigation note under the same process.
+The lab exposes an ephemeral trace probe. FCAPSule records:
 
-### Evaluation, dashboard, and demo UI
+- whether the source was available;
+- the source retention window;
+- whether access was verified;
+- the number of ephemeral spans observed;
+- that zero raw spans were retained.
 
-The evaluator compares the selected capsule against keyword and time-window baselines. It reports compression, template reduction, token reduction, signal preservation, anomaly preservation, grounding, runtime, retention survivability, and optional LLM comparison results. The dashboard renders these outputs in a local HTML page for quick review.
+A production adapter may fetch trace-derived facts during the incident window, but raw span payloads must not enter the capsule archive.
 
-The optional demo UI starts a local stdlib HTTP server over the same files. It is intended for presentation: it can trigger P1, capture a fresh synthetic failure, rerun model comparison, and display a readable printout of what happened without making the core project depend on a web framework.
+## Failure Scenario
 
-## Design Rationale
+The simulator runs two independent HTTP servers.
 
-- **Local-first:** reproducible without company systems or credentials.
-- **Explainable methods:** P1 exposes intermediate scores instead of hiding selection behind one model call.
-- **Deterministic fallback:** the whole system works without an external LLM.
-- **Evidence IDs:** generated hypotheses can be mechanically verified.
-- **Separate raw and derived data:** outputs preserve evidence without copying the complete source bundle into the archive.
-- **Adapter boundaries:** future live sources can produce the same `CaseBundle` contract.
+1. Healthy checkout requests reserve inventory quickly.
+2. A configuration reload introduces partition lock contention in inventory.
+3. Affected reservations exceed the checkout client deadline.
+4. Checkout retries up to three times while the circuit breaker remains closed.
+5. Concurrent retries amplify inventory calls.
+6. The eight-slot database pool saturates.
+7. Inventory acquisition errors and checkout failures grow.
+8. Retry amplification, pool saturation, and error-budget alerts fire.
+9. FCAPSule captures logs, PM series, FM events, topology, configuration context, and trace availability.
 
-## Template Alignment
+The scenario is deterministic in structure but keeps real scheduling, HTTP deadlines, and concurrency behavior.
 
-P1 orchestrates distinct domains:
+## Extension Boundaries
 
-1. text/log template analysis;
-2. metric/time-series anomaly analysis;
-3. fault/alert event processing;
-4. infrastructure entity resolution;
-5. LLM-assisted reasoning comparison and deterministic verification.
+Live adapters must return the normalized case shape. Intended implementations include:
 
-Each stage changes or enriches the shared evidence representation, and downstream stages depend on earlier outputs. This is an orchestrated pipeline, not unrelated parallel calls.
+- Alertmanager webhook and alert queries;
+- Prometheus range queries;
+- OpenSearch bounded log queries;
+- Kubernetes topology/configuration lookups;
+- OpenTelemetry/Tempo/Jaeger on-demand trace queries;
+- Kafka lag metadata.
 
-## Limitations
+A Kubernetes deployment should add authentication, durable SQL, job workers, health probes, and adapter-specific retry/circuit-breaking without changing the evidence pipeline contract.
 
-P1 cannot validate real production usefulness from one synthetic case. Statistical anomaly scores depend on the supplied window, log templates use deterministic masking, and hypotheses are investigation suggestions rather than causal conclusions.
+## Known Limits
 
-## Evolution
+- The shipped live-source adapters remain export-oriented reference boundaries, not production clients.
+- SQLite and in-process threads are single-node choices.
+- The log parser is Drain-inspired deterministic masking rather than semantic clustering.
+- PM analysis uses robust explainable statistics rather than a pretrained forecasting model.
+- The reference scenario is synthetic and cannot establish production root-cause accuracy.
+- Model quality scores evaluate grounded use of known evidence, not whether a model discovered definitive causality.
 
-The schema and adapters are intentionally isolated so live Prometheus, OpenSearch, and Alertmanager inputs can be added without replacing the attention, reasoning, capsule, or evaluation layers.

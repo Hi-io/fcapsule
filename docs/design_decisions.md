@@ -1,33 +1,42 @@
-# P1 Design Decisions
+# Design Decisions
 
-## Standard Library CLI Instead of a Framework
+## Dependency-Light Local Service
 
-`argparse` keeps P1 runnable on the available machine without package installation. The console entry point remains compatible with future packaging.
+The reference implementation uses `argparse`, the standard library HTTP server, SQLite, and PyYAML. This keeps local operation transparent and reproducible. A production HTTP framework can replace the transport without changing the control-plane or capsule contracts.
 
-## Dataclass Contract Instead of Runtime Pydantic
+## SQLite Metadata, Source-Owned Telemetry
 
-The execution environment does not include Pydantic or pip. P1 therefore performs explicit typed validation and returns an immutable `CaseBundle`. The schema boundary can migrate to Pydantic later without changing input files.
+SQLite is sufficient for one local process and makes multi-application state durable. Raw telemetry remains in observability sources. This avoids turning FCAPSule into a second telemetry warehouse.
 
-## Deterministic Reasoning by Default
+## Two Views, One Control Plane
 
-External LLM availability, privacy approval, and output stability cannot be assumed. A deterministic evidence-only generator proves orchestration and verification now. The optional DeepSeek comparison uses the same capsule input for `deepseek-v4-flash` and `deepseek-v4-pro`, then scores outputs through a fixed rubric without making the rest of P1 depend on credentials.
+Operations and Incident Lab share the same state and APIs. The lab is a source/test harness; Operations is the product surface. Keeping them together ensures simulated incidents follow the same lifecycle as future live-source incidents.
 
-## Domains Are Operational Signal Families
+## Deterministic Core
 
-P1 uses "domain" to mean fault events, log text, time-series metrics, topology metadata, and LLM reasoning. This is intentionally clearer than saying only "multimodal", because reviewers may otherwise assume media modalities such as text, audio, and image. FCAPSule does not need image generation for P1; the important point is that each telemetry family has a different structure and analysis method.
+External model availability and privacy approval cannot be assumed. Evidence selection, baseline hypotheses, and citation verification therefore work without credentials. Pretrained models are an optional reasoning layer over the same selected evidence.
 
-## Counter Deltas
+## Domain-Balanced Selection
 
-Prometheus counters are not gauges. Metrics ending in `_total` are transformed into non-negative per-sample increments before baseline comparison, preventing normal cumulative growth from appearing anomalous.
+Global ranking alone allowed similarly scored PM series to displace diagnostic logs. The selector now reserves capacity per domain and prioritizes representative error, retry, latency, lock, pool, and telemetry-health groups before filling by score.
 
-## Explainable Attention Score
+## Representative Signal Evaluation
 
-P1 records severity, anomaly, time proximity, entity match, rarity, relevance, and repetition penalty. The weights are heuristic and must be calibrated in later evaluation, but every selection is inspectable.
+A large system can expose many correlated derivatives of the same behavior. Signal preservation counts representative diagnostic groups instead of treating every related metric as independently essential.
 
-## Derived-Only Archive
+## On-Demand Traces
 
-The archive exists to preserve useful evidence under retention constraints, not to duplicate all telemetry. Raw source files remain outside the ZIP.
+Raw spans are high-volume and short-lived. FCAPSule verifies that they can be queried during the incident and retains only availability and derived evidence. This preserves investigative capability without violating the product's compact-retention goal.
 
-## Static Dashboard Before Full UI
+## Cautious Causality
 
-P1 includes a generated `dashboard.html` so the model comparison and domain map are easy to inspect. It is not a production UI, does not require a server, and can be replaced by a richer P5 review interface.
+The simulator knows which fault was injected, but the capsule is evaluated as an investigator would see it. Hypotheses remain tentative and request database or trace evidence before calling a final root cause.
+
+## Background Jobs and Polling
+
+Simulation and model calls cannot block HTTP requests. The control plane runs jobs in background threads and exposes a snapshot polled by the browser. A distributed deployment should replace threads with a durable job queue.
+
+## No Autonomous Remediation
+
+FCAPSule produces evidence and next checks. System changes require a separate, explicitly authorized control boundary.
+

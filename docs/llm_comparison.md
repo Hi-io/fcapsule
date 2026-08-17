@@ -1,33 +1,55 @@
-# DeepSeek Model Comparison
+# Model Comparison
 
-P1 can compare `deepseek-v4-flash` and `deepseek-v4-pro` using the exact same capsule input. This is not required for deterministic operation, but it supports the project evaluation question: with the same FCAPSule process and evidence, does a stronger pretrained LLM produce a more grounded and useful investigation note?
+FCAPSule initially provides profiles for `deepseek-v4-flash` and `deepseek-v4-pro`. The comparison asks whether a stronger pretrained model makes better grounded use of the exact same evidence capsule.
 
-## Inputs
+## Fair-Input Rule
 
-The comparison uses `outputs/<case_id>/capsule.json`. It does not send raw telemetry files directly. The prompt includes selected evidence IDs, domains, summaries, metric anomalies, deterministic hypotheses, missing evidence, and next checks.
+Every model receives:
 
-## Outputs
+- the same system instruction;
+- the same response schema;
+- the same case metadata;
+- the same domain summary;
+- the same timeline;
+- the same selected evidence;
+- the same deterministic hypotheses, limitations, and next checks.
 
-- `llm_prompt.json`: the exact prompt sent to both models.
-- `llm_comparison.json`: model outputs, usage, latency, parse status, scores, winner, and score delta.
-- `dashboard.html`: visual comparison page.
+Models never receive different raw samples.
 
-## Scoring
+## Recorded Fields
 
-The rubric is deterministic:
+- provider and model;
+- status and parse error;
+- latency and wall-clock time;
+- finish reason;
+- token usage;
+- reasoning-content presence;
+- parsed and raw response;
+- cited and valid evidence IDs;
+- domain and expected-signal matches;
+- rubric scores.
 
-- JSON validity;
+## Rubric
+
+The total score combines:
+
+- valid JSON;
 - valid evidence citations;
-- explicit coverage of fault events, log text, time-series metrics, and topology metadata;
-- expected incident signal coverage;
-- evidence breadth in the primary hypothesis;
-- concrete next checks;
-- caution against claiming a final root cause.
+- operational domain coverage;
+- expected signal-group coverage;
+- actionable next checks;
+- breadth of valid primary support;
+- caution against unsupported final-root-cause language.
 
-The score is evidence-useful rather than aesthetic. Expected incident signal coverage is weighted most heavily because a response that misses an important operational signal is less useful even if it cites many evidence IDs. Evidence breadth is still recorded, but it is secondary once citations are valid.
+The winner is `null` when scores tie. Model latency and tokens are displayed separately because a faster or cheaper model may still be preferable when quality differences are small.
 
-If the top two scores tie, P1 records no measurable winner instead of choosing a model by list order.
+## Configuration
 
-## Privacy
+Use the Operations view to enable models and set maximum tokens. Credentials remain in `.env` or the deployment secret store.
 
-The API key must be supplied through `DEEPSEEK_API_KEY`. It is not stored in output files. Raw telemetry is already reduced before the LLM comparison step.
+If no credential is loaded, the deterministic capsule still completes and the model stage is marked skipped.
+
+## Adding Providers
+
+A new provider must implement the chat-client boundary and return normalized content, usage, finish reason, latency, and provider identity. It must use the same prompt builder and scorer for a valid comparison.
+

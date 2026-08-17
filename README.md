@@ -1,129 +1,161 @@
-# FCAPSule AI
+# FCAPSule
 
-FCAPSule AI is a multidomain telemetry attention engine for cloud incident evidence. It reduces a prepared bundle of alerts, logs, metrics, and infrastructure metadata into a compact, grounded evidence capsule that remains useful after raw telemetry expires.
+FCAPSule is a telemetry attention and incident evidence retention engine. It observes fault-management events, performance metrics, application logs, topology, and on-demand trace availability, then produces a compact evidence capsule that remains useful after raw telemetry expires.
 
-Prototype 1 (P1) is deliberately local and reproducible. It proves the evidence-selection workflow using files and a CLI before live Prometheus, OpenSearch, Kafka, or Alertmanager integrations are introduced.
+It is not another root-cause chatbot and it does not replace Prometheus, OpenSearch, Alertmanager, Kafka, or a tracing backend. FCAPSule sits above those systems as an investigation layer: it opens a bounded incident window, extracts the strongest cross-domain evidence, records why each item was selected, and stores derived evidence instead of copying raw telemetry.
 
-In P1, "multimodal" means multiple operational telemetry domains, not media generation. The handled domains are fault events, log text, time-series metrics, topology metadata, and optional LLM reasoning.
+## Product Surfaces
 
-## What P1 Does
+FCAPSule provides one local control plane with two web views:
 
-P1:
+- **Operations** (`/console`) lists tracked applications, signal-source status, incidents, retained capsules, storage reduction, and model profiles.
+- **Incident Lab** (`/lab`) runs a controlled multi-service failure and shows each stage as it happens. It exists for testing, demonstrations, and regression evaluation; it is not required for normal capsule generation.
 
-- validates a self-contained incident case;
-- aligns telemetry by service, namespace, cluster, pod, and optional CNCC UUID;
-- anonymizes sensitive values;
-- groups noisy logs into Drain-inspired templates;
-- detects explainable time-series anomalies;
-- builds an alert-centered timeline;
-- scores and selects cross-domain evidence;
-- generates and verifies evidence-grounded investigation hypotheses;
-- optionally compares DeepSeek LLM outputs on the same capsule input;
-- writes Markdown and JSON capsules, evaluation results, baselines, a static dashboard, and a ZIP archive.
+The CLI remains fully usable without the web application.
 
-It does not claim a final root cause, modify production systems, or replace an observability platform.
+## Operational Domains
+
+The project uses the word *domain* for telemetry families with different data shapes and analysis methods:
+
+| Domain | Input | FCAPSule treatment |
+|---|---|---|
+| Fault management (FM) | alerts and incident events | trigger, severity, event sequence, affected entities |
+| Performance management (PM) | numeric time series | baseline comparison and anomaly selection |
+| Application logs | semi-structured text | masking, template reduction, severity and proximity scoring |
+| Topology and configuration | service relationships and runtime changes | cross-source entity alignment and dependency context |
+| On-demand traces | temporary source buffer | availability and retention-window probe; raw spans are not retained |
+| AI reasoning | selected evidence only | cited investigation paths, limitations, and next checks |
+
+These are operational modalities, not media modalities. FCAPSule does not generate or process images to satisfy multidomain behavior.
 
 ## Quickstart
 
 Requirements: Python 3.11+ and PyYAML.
 
 ```bash
-python3 -m fcapsule.cli investigate --case ./cases/case_001 --out ./outputs/case_001
+python3 -m fcapsule.cli serve
 ```
 
-Inspect a case without producing output:
+Open:
+
+- Operations: `http://127.0.0.1:8765/console`
+- Incident Lab: `http://127.0.0.1:8765/lab`
+
+The control plane stores local metadata under `.fcapsule/`. That directory is ignored by Git.
+
+### Run the incident from the CLI
 
 ```bash
-python3 -m fcapsule.cli inspect --case ./cases/case_001
+python3 -m fcapsule.cli simulate \
+  --output ./.fcapsule/cases/cli-latest \
+  --baseline-requests 180 \
+  --incident-requests 240 \
+  --concurrency 24
 ```
 
-Recompute evaluation results:
+The scenario starts live checkout and inventory HTTP services. A runtime configuration change creates inventory partition lock contention. Checkout retries continue while the circuit breaker remains closed, amplifying dependency calls until database-pool saturation and user-facing failures trigger three alerts.
+
+### Build a capsule directly
 
 ```bash
-python3 -m fcapsule.cli evaluate --case ./cases/case_001 --output ./outputs/case_001
+python3 -m fcapsule.cli investigate \
+  --case ./.fcapsule/cases/cli-latest \
+  --out ./.fcapsule/capsules/cli-latest
 ```
 
-Compare the same capsule with DeepSeek models:
+### Register an application
+
+```bash
+python3 -m fcapsule.cli register \
+  --app-id checkout-platform \
+  --name "Checkout Platform" \
+  --namespace commerce \
+  --cluster local-lab \
+  --environment development
+```
+
+### Inspect control-plane state
+
+```bash
+python3 -m fcapsule.cli status
+```
+
+### Compare configured models
+
+Place `DEEPSEEK_API_KEY=...` in a local `.env` file. `.env` is ignored by Git.
 
 ```bash
 python3 -m fcapsule.cli compare-llms \
-  --capsule ./outputs/case_001/capsule.json \
-  --out ./outputs/case_001 \
+  --capsule ./.fcapsule/capsules/cli-latest/capsule.json \
+  --out ./.fcapsule/capsules/cli-latest \
   --models deepseek-v4-flash deepseek-v4-pro
 ```
 
-The CLI automatically loads a local `.env` file when present. Keep `DEEPSEEK_API_KEY=...` in `.env`; that file is ignored by git.
+Model comparison is optional. The deterministic evidence selector and hypothesis verifier work without an API key.
 
-Open the local visual review page:
+## Incident Lab Output
 
-```bash
-python3 -m fcapsule.cli dashboard --output ./outputs/case_001
+The default lab workload produces:
+
+- two live local services and concurrent HTTP traffic;
+- a healthy baseline followed by a controlled degradation;
+- thousands of structured logs from checkout and inventory components;
+- more than twenty PM series;
+- a three-stage FM alert sequence;
+- topology and configuration-change context;
+- a verified on-demand trace probe with zero raw spans retained;
+- an evidence capsule, objective evaluation, dashboard, and derived-only archive.
+
+The exact counts vary slightly with thread scheduling. The causal structure and required signal groups are deterministic and covered by regression tests.
+
+## Capsule Outputs
+
+An investigation writes:
+
+```text
+capsule.json          structured evidence and provenance
+capsule.md            human-readable investigation capsule
+evidence.json         all candidates with scoring components
+evaluation.json       reduction, preservation, grounding, and runtime
+baselines.json        comparison baselines
+dashboard.html        static detailed review
+llm_comparison.json   optional same-input model comparison
+llm_prompt.json       optional recorded prompt
+fcapsule_<id>.zip     derived evidence only; no raw telemetry
 ```
 
-Run the optional demo UI:
+## Data and Retention Policy
 
-```bash
-python3 -m fcapsule.cli demo-ui --case ./cases/case_001 --out ./outputs/case_001
-```
+- Raw telemetry is read from configured sources for a bounded incident window.
+- Capsule archives exclude raw logs and raw trace spans.
+- Representative log lines are anonymized before entering evidence.
+- Trace integrations are query-on-demand. FCAPSule records availability, source retention, and derived findings, not the underlying span set.
+- Every generated hypothesis must cite selected evidence IDs and remains an investigation path rather than a final root-cause claim.
 
-Then open `http://127.0.0.1:8765/`. The UI can rerun P1, capture a fresh synthetic failure, rerun the DeepSeek comparison when `DEEPSEEK_API_KEY` is set, and show the reductions and model comparison as demo-friendly cards and tables.
-
-The demo UI starts empty for presentation. Button 1 generates the failing local checkout scenario and shows the alert/raw telemetry as it is captured. Button 2 runs FCAPSule and DeepSeek comparison while the phase cards, metrics, domain map, model cards, and live event log update in the browser.
-
-Run the full test suite:
+## Tests
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
-## Reproduce the Synthetic Incident
+The suite covers validation, processing, domain-balanced selection, hypothesis grounding, model comparison scoring, the real incident simulation, SQLite control-plane state, HTTP routes, and the full capsule pipeline.
 
-The repository includes an intentionally unstable checkout service and a telemetry collector. The collector runs healthy traffic, switches the service into a dependency-failure mode, observes the resulting error-rate alert, and writes a complete case bundle.
+## Deployment Direction
 
-```bash
-python3 scripts/capture_demo_incident.py --output ./cases/case_001
-```
+The local control plane is the reference implementation. The intended deployment model is a service or Kubernetes pod configured with read-only access to observability APIs and durable metadata storage. Adapters normalize OpenSearch, Prometheus, Alertmanager, topology, and trace-source responses into the same incident contract used by the local lab.
 
-The generated data is synthetic and safe to commit. See `docs/data_privacy.md` for boundaries.
-
-## Expected Outputs
-
-An investigation creates:
-
-```text
-outputs/case_001/
-  capsule.md
-  capsule.json
-  evidence.json
-  evaluation.json
-  baselines.json
-  llm_comparison.json      # only after compare-llms
-  llm_prompt.json          # only after compare-llms
-  dashboard.html
-  fcapsule_case_001.zip
-```
-
-## P1 Limitations
-
-- Inputs are prepared files, not live observability APIs.
-- Log parsing is Drain-inspired masking and exact template grouping.
-- Metric analysis uses explainable statistical methods rather than a trained forecasting model.
-- The default hypothesis generator is deterministic so P1 works without an API key; DeepSeek comparison is an optional P1 evaluation mode.
-- The demo UI is optional and local-only; the CLI remains the primary execution interface.
-- The sample incident is synthetic and does not establish production RCA accuracy.
+Raw telemetry remains in the source systems. The pod retains application registrations, incident metadata, capsules, evaluation results, and source references. See `docs/architecture.md` and `ROADMAP.md` for the distributed path.
 
 ## Documentation
 
-- `FCAPSule_AI_Project_Guide.md`: reviewed concept and P1 requirements.
-- `PROJECT_DESIGN.md`: implemented architecture and design rationale.
-- `DATA_SCHEMA.md`: case and output contracts.
-- `EVALUATION_PLAN.md`: baselines, metrics, and review rubric.
-- `PROMPTS.md`: grounded reasoning constraints.
-- `docs/llm_comparison.md`: DeepSeek comparison workflow and rubric.
-- `ROADMAP.md`: evolution beyond P1.
-- `docs/p1_usage.md`: detailed operating guide.
-- `docs/design_decisions.md`: important P1 trade-offs.
-
-## Roadmap
-
-P2 introduces live Prometheus and OpenSearch adapters. Later phases add Alertmanager triggers, improved scoring, a review UI, retention-aware storage, broader evaluation, and optional downstream AIOps agents. The full sequence is documented in `ROADMAP.md`.
+- `FCAPSule_AI_Concept.md`: stable problem, purpose, and research framing.
+- `FCAPSule_AI_Project_Guide.md`: current product requirements and operating boundaries.
+- `PROJECT_DESIGN.md`: implemented architecture and engineering rationale.
+- `DATA_SCHEMA.md`: normalized case, store, and capsule contracts.
+- `EVALUATION_PLAN.md`: objective metrics and model-comparison protocol.
+- `docs/operations.md`: CLI and web operating guide.
+- `docs/architecture.md`: component and deployment architecture.
+- `docs/data_privacy.md`: collection, anonymization, and retention policy.
+- `docs/design_decisions.md`: important design decisions and tradeoffs.
+- `docs/llm_comparison.md`: model profiles, prompts, and scoring.
+- `ROADMAP.md`: remaining work toward distributed operation.

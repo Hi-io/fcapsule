@@ -1,41 +1,90 @@
-# P1 Architecture
+# Architecture
+
+## Runtime Flow
 
 ```text
-metadata.yaml  alert.json  prometheus_metrics.json  opensearch_logs.json
-       \          |                 |                       /
-                    validated CaseBundle
-                            |
-             +--------------+---------------+
-             |              |               |
-       entity resolver  log reducer  metrics analyzer
-             |              |               |
-             +---------- alert timeline ----+
-                            |
-                 evidence scorer/selector
-                            |
-                grounded hypothesis generator
-                            |
-                     evidence verifier
-                            |
-             capsule + baselines + evaluation
-                            |
-              optional DeepSeek model comparison
-                            |
-                    static review dashboard
-                            |
-                  derived-only ZIP archive
+Alert trigger or explicit incident window
+                  |
+                  v
+        Application registry (SQLite)
+                  |
+                  v
++------------------------------------------------+
+| Read-only source adapters                      |
+| FM | PM | logs | topology/config | trace probe |
++----------------------+-------------------------+
+                       |
+                       v
+              Normalized incident case
+                       |
+         +-------------+-------------+
+         |             |             |
+   FM timeline     PM analysis    log reduction
+         |             |             |
+         +------ entity alignment ---+
+                       |
+                       v
+        transparent evidence scoring
+                       |
+             domain-balanced selection
+                       |
+          grounded reasoning + verifier
+                       |
+           optional model comparison
+                       |
+                       v
++------------------------------------------------+
+| Capsule store                                  |
+| JSON | Markdown | evaluation | dashboard | ZIP |
++----------------------+-------------------------+
+                       |
+              Operations / API / CLI
 ```
 
-Data source adapters are future boundaries. They must produce the same normalized case contract so downstream components remain unchanged.
+## Control Plane
 
-## Domain Flow
+`ControlPlane` coordinates background jobs and exposes an immutable snapshot to the HTTP API. `FCAPSuleStore` persists application, incident, capsule, and model metadata in SQLite. The simulation lab and Operations UI are two clients of the same state.
 
-P1 treats domains as operational telemetry signal families:
+## Source Ownership
 
-- `fault_events`: alerts and incident event streams;
-- `log_text`: semi-structured application logs;
-- `time_series_metrics`: numeric samples over time;
-- `topology_metadata`: service, namespace, pod, cluster, and CNCC identity context;
-- `llm_reasoning`: optional generated interpretation over the selected evidence.
+FCAPSule owns derived evidence. Observability systems own raw telemetry.
 
-The dashboard renders these domains separately so reviewers can see whether the capsule preserved evidence across the different signal families.
+- FM alerts may be copied into the capsule because they define the event.
+- PM series are analyzed; only anomaly descriptions and selected values are retained.
+- Logs are grouped; only anonymized representative lines are retained.
+- Topology and relevant configuration facts may be retained.
+- Trace availability and derived findings may be retained; raw spans may not.
+
+## Deployment Shape
+
+The current service is single-node and local-first:
+
+```text
+python process
+  |-- HTTP/API server
+  |-- background jobs
+  |-- SQLite metadata
+  |-- local derived artifacts
+  `-- read-only adapter calls
+```
+
+The target Kubernetes shape is:
+
+```text
+FCAPSule pod
+  |-- API/UI container
+  |-- worker process or queue consumer
+  |-- mounted configuration
+  |-- secret references
+  |-- PostgreSQL metadata
+  `-- object storage for derived capsules
+       |
+       +-- Alertmanager
+       +-- Prometheus
+       +-- OpenSearch
+       +-- Kubernetes API
+       `-- trace backend (query on demand)
+```
+
+Distributed workers and Kafka-triggered scheduling are future scaling work. They do not change the normalized case or capsule contracts.
+

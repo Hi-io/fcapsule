@@ -1,6 +1,6 @@
 # FCAPSule AI - Concept Guide
 
-> **Historical document:** This concept draft is retained for project history. `FCAPSule_AI_Project_Guide.md` is the reviewed source of truth for the current design and Prototype 1 requirements.
+> **Stable concept document:** This file defines the long-lived problem, purpose, and research framing. Current product requirements are in `FCAPSule_AI_Project_Guide.md`.
 
 **Project subtitle:** A Multimodal Telemetry Attention Engine for Cloud Incident Evidence
 
@@ -217,11 +217,11 @@ Evaluation must be explicit. Suggested metrics:
 | Faithfulness | Every conclusion must cite evidence source IDs |
 | Model comparison | Single-model baseline vs multi-model orchestration |
 
-### 4.7 Prototype scope
+### 4.7 Integrated evaluation scope
 
-Prototype should demonstrate models operating successfully and being combined toward the overall goal.
+The integrated system should demonstrate models and deterministic methods operating successfully toward the overall goal.
 
-Prototype target:
+Evaluation target:
 
 - Use a small dataset or anonymized/synthetic data.
 - Process logs, metrics, and faults for one incident window.

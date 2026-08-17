@@ -1,65 +1,76 @@
-# FCAPSule AI Roadmap
+# FCAPSule Roadmap
 
-## P1: File-Based Evidence Capsule
+FCAPSule 1.0 provides a complete local control plane, a realistic regression lab, domain-balanced evidence capsules, model profiles, and two operational web views. The remaining roadmap focuses on live integrations, deployment, scale, and broader evaluation.
 
-- validated case folders;
-- entity alignment and anonymization;
-- log template reduction;
-- metric anomaly detection;
-- alert timeline;
-- explainable evidence ranking;
-- grounded hypothesis generation and verification;
-- optional DeepSeek same-input comparison;
-- Markdown/JSON capsule, evaluation, baselines, static dashboard, optional demo UI, and archive;
-- synthetic incident capture and regression tests.
+## 1. Live Source Adapters
 
-## P2: Live Read Adapters
+- Alertmanager webhook receiver and alert query support;
+- Prometheus range-query client with query templates;
+- OpenSearch bounded log search with source-field mapping;
+- Kubernetes workload/topology resolver;
+- Tempo, Jaeger, or OpenTelemetry trace availability and on-demand query;
+- Kafka/OpenSearch indexing-lag metadata;
+- credential references, timeouts, retries, and per-source health.
 
-- Prometheus range-query adapter;
-- OpenSearch query adapter;
-- credential and timeout configuration;
-- snapshot-to-case export for reproducibility.
+## 2. Service Deployment
 
-## P3: Alertmanager Trigger
+- FastAPI or equivalent production HTTP boundary;
+- background job queue;
+- PostgreSQL metadata;
+- object storage for immutable capsule artifacts;
+- Kubernetes manifests or Helm chart;
+- readiness, liveness, and metrics endpoints;
+- role-based access and audit logging;
+- retention policies and integrity hashes.
 
-- webhook receiver;
-- alert label to entity resolution;
-- automatic incident window selection;
-- asynchronous capsule job status.
+## 3. Evidence Quality
 
-## P4: Evidence Attention Improvements
+- calibrated scoring weights from reviewed cases;
+- semantic log embeddings as an optional model;
+- stronger contradiction handling;
+- configuration/deployment change correlation;
+- cross-capsule similarity and recurrence detection;
+- explicit evidence exclusion reasons in the UI;
+- reviewer feedback and relevance labels.
 
-- learned or calibrated scoring weights;
-- embedding-based semantic relevance;
-- cross-case similarity;
-- more explicit contradiction handling.
+## 4. AI Orchestration
 
-## P5: Rich Review UI
+- provider-neutral model registry;
+- additional pretrained LLM comparisons;
+- pretrained time-series methods compared with the statistical baseline;
+- semantic log model comparison;
+- cost budgets and rate limiting;
+- prompt and rubric versioning;
+- model result history and reviewer preference.
 
-- local case browser;
-- evidence inclusion/exclusion controls;
-- side-by-side baseline comparison;
-- model comparison history;
-- reviewer feedback capture.
+## 5. Operations Experience
 
-## P6: Retention-Aware Capsule Store
+- application registration editor;
+- live adapter status and query diagnostics;
+- incident filters and search;
+- capsule comparison and version history;
+- downloadable reports and shareable links;
+- reviewer notes;
+- configurable evidence limits and retention.
 
-- immutable capsule versions;
-- retention policy metadata;
-- searchable evidence index;
-- integrity and provenance checks.
+## 6. Evaluation
 
-## P7: Final Evaluation
-
-- multiple synthetic and anonymized cases;
-- model/method ablations;
-- domain-expert review;
-- latency and cost analysis;
+- multiple complex synthetic scenarios;
+- anonymized real incident windows where approval exists;
+- method and model ablations;
+- domain-expert usefulness review;
+- latency, cost, and scale curves;
+- unsupported-claim and faithfulness analysis;
 - documented threats to validity.
 
-## Optional Later Work
+## 7. Distributed Scale
 
-- Grafana panel links or snapshots;
-- downstream RCA/AIOps agent integration;
-- postmortem drafting;
-- remediation recommendations with human approval.
+- queue-backed workers;
+- idempotent alert-trigger jobs;
+- sharded application ownership;
+- event-driven scheduling;
+- multi-cluster registry;
+- high-availability metadata and artifact storage.
+
+Autonomous remediation remains outside the core roadmap. FCAPSule may feed downstream AIOps systems, but any action must use a separate approval and safety boundary.
+

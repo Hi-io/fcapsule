@@ -1,6 +1,6 @@
 # FCAPSule AI Grounded Reasoning Prompts
 
-P1 uses deterministic reasoning by default and can optionally compare DeepSeek model outputs. These prompts define the grounding contract enforced by the verifier and the comparison rubric.
+FCAPSule uses deterministic reasoning by default and can optionally compare pretrained model outputs. These prompts define the grounding contract enforced by the verifier and the comparison rubric.
 
 ## Hypothesis Generation
 
@@ -65,4 +65,4 @@ Explain the operational telemetry domains separately:
 
 ## Mechanical Enforcement
 
-Regardless of model output, P1 verifies cited IDs against selected evidence, bounds confidence to `[0, 1]`, marks unknown IDs unsupported, and reduces confidence for weak or incomplete support. The DeepSeek comparison additionally scores JSON validity, citation validity, domain coverage, expected signal coverage, actionability, and cautious RCA language.
+Regardless of model output, FCAPSule verifies cited IDs against selected evidence, bounds confidence to `[0, 1]`, marks unknown IDs unsupported, and reduces confidence for weak or incomplete support. Model comparison additionally scores JSON validity, citation validity, domain coverage, expected signal coverage, actionability, and cautious RCA language.
