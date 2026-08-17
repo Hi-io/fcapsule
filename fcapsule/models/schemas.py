@@ -1,4 +1,4 @@
-"""Small, dependency-light schemas for P1 case validation."""
+"""Dependency-light schemas for normalized incident case validation."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 
 
 class CaseValidationError(ValueError):
-    """Raised when an incident case does not satisfy the P1 contract."""
+    """Raised when an incident case does not satisfy the normalized contract."""
 
 
 def parse_timestamp(value: Any, field: str) -> datetime:

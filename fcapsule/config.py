@@ -1,4 +1,4 @@
-"""Shared P1 defaults."""
+"""Shared FCAPSule processing defaults."""
 
 MAX_SELECTED_EVIDENCE = 20
 REPRESENTATIVE_LINES_PER_TEMPLATE = 2

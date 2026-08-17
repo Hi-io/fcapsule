@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fcapsule-ai"
-version = "0.1.0"
-description = "A multimodal telemetry attention engine for cloud incident evidence"
+version = "1.0.0"
+description = "A telemetry attention and incident evidence retention engine"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["PyYAML>=6.0"]
