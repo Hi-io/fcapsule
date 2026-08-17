@@ -315,6 +315,15 @@ class FCAPSuleStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def update_capsule_model_winner(self, capsule_id: str, winner: str | None) -> None:
+        with self._connect() as connection:
+            result = connection.execute(
+                "UPDATE capsules SET model_winner = ? WHERE capsule_id = ?",
+                (winner, capsule_id),
+            )
+            if result.rowcount == 0:
+                raise KeyError(f"Unknown capsule: {capsule_id}")
+
     def list_model_profiles(self) -> list[dict[str, Any]]:
         with self._connect() as connection:
             rows = connection.execute("SELECT * FROM model_profiles ORDER BY model_id").fetchall()

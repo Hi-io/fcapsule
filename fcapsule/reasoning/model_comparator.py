@@ -22,9 +22,28 @@ def _emit(progress: ProgressCallback | None, status: str, message: str, **detail
 
 
 def _compact_evidence(capsule: dict[str, Any]) -> dict[str, Any]:
+    case = capsule["case"]
     return {
-        "case": capsule["case"],
-        "domain_summary": capsule.get("domain_summary", {}),
+        "case": {
+            "case_id": case.get("case_id"),
+            "case_title": case.get("case_title"),
+            "service": case.get("service"),
+            "namespace": case.get("namespace"),
+            "cluster": case.get("cluster"),
+            "window": case.get("window"),
+            "fault_injection": case.get("fault_injection"),
+            "topology": case.get("topology", []),
+            "trace_access": case.get("trace_access", {}),
+        },
+        "domain_summary": {
+            domain_id: {
+                "label": domain.get("label"),
+                "raw_items": domain.get("raw_items"),
+                "candidate_evidence_items": domain.get("candidate_evidence_items"),
+                "selected_evidence_items": domain.get("selected_evidence_items"),
+            }
+            for domain_id, domain in capsule.get("domain_summary", {}).items()
+        },
         "timeline": capsule.get("timeline", []),
         "selected_evidence": [
             {
@@ -40,8 +59,14 @@ def _compact_evidence(capsule: dict[str, Any]) -> dict[str, Any]:
             }
             for item in capsule.get("selected_evidence", [])
         ],
-        "metric_anomalies": capsule.get("metric_anomalies", []),
-        "deterministic_hypotheses": capsule.get("hypotheses", []),
+        "deterministic_hypotheses": [
+            {
+                "hypothesis": item.get("hypothesis"),
+                "supporting_evidence": item.get("supporting_evidence", []),
+                "missing_evidence": item.get("missing_evidence", []),
+            }
+            for item in capsule.get("hypotheses", [])
+        ],
         "missing_evidence": capsule.get("missing_evidence", []),
         "next_steps": capsule.get("next_steps", []),
         "warnings": capsule.get("warnings", []),
@@ -51,7 +76,7 @@ def _compact_evidence(capsule: dict[str, Any]) -> dict[str, Any]:
 def build_model_prompt(capsule: dict[str, Any]) -> list[dict[str, str]]:
     evidence = _compact_evidence(capsule)
     schema = {
-        "incident_summary": "One concise paragraph grounded only in evidence IDs.",
+        "incident_summary": "At most 80 words, grounded only in evidence IDs.",
         "primary_hypothesis": {
             "claim": "Most likely investigation path, not a final root cause.",
             "confidence": 0.0,
@@ -63,7 +88,7 @@ def build_model_prompt(capsule: dict[str, Any]) -> list[dict[str, str]]:
                 "topology_metadata": "How entity alignment contributes.",
                 "trace_access": "What trace availability contributes and what was not retained.",
             },
-            "contradictions_or_limits": ["Missing telemetry or uncertainty."],
+            "contradictions_or_limits": ["At most 3 concise limitations."],
         },
         "alternative_hypotheses": [
             {
@@ -72,8 +97,8 @@ def build_model_prompt(capsule: dict[str, Any]) -> list[dict[str, str]]:
                 "why_less_likely": "Short reason.",
             }
         ],
-        "next_checks": ["Concrete check an engineer can run next."],
-        "retention_value": "What the capsule preserves if raw telemetry expires.",
+        "next_checks": ["Exactly 3 concrete checks, each at most 30 words."],
+        "retention_value": "At most 50 words on what remains after raw telemetry expires.",
     }
     return [
         {
@@ -81,7 +106,7 @@ def build_model_prompt(capsule: dict[str, Any]) -> list[dict[str, str]]:
             "content": (
                 "You are FCAPSule AI's incident investigation model. Analyze only the supplied evidence. "
                 "Do not invent telemetry, do not assert final root cause, and cite evidence IDs exactly. "
-                "Return valid JSON only."
+                "Return valid JSON only. Be concise: the entire JSON response must stay under 1400 words."
             ),
         },
         {
@@ -92,7 +117,8 @@ def build_model_prompt(capsule: dict[str, Any]) -> list[dict[str, str]]:
                 "time_series_metrics are numeric measurements over time, and topology_metadata aligns services, "
                 "pods, namespaces, clusters, and CNCC UUIDs. trace_access records whether request traces can be "
                 "queried during the source retention window without retaining raw spans.\n\n"
-                "Use the exact JSON schema below and keep every claim grounded in evidence IDs.\n\n"
+                "Use the exact JSON schema below and keep every claim grounded in evidence IDs. Use at most eight "
+                "primary supporting evidence IDs, at most two alternatives, and at most three concise limitations.\n\n"
                 f"JSON schema:\n{json.dumps(schema, indent=2)}\n\n"
                 f"Capsule evidence:\n{json.dumps(evidence, indent=2, ensure_ascii=False)}"
             ),
@@ -163,6 +189,20 @@ def _score_response(parsed: dict[str, Any] | None, raw_text: str, capsule: dict[
         matched = [term for term in cleaned if term and term in text]
         matched_groups[group] = matched
     signal_score = sum(1 for terms in matched_groups.values() if terms) / len(matched_groups)
+    depth_targets = {
+        "case_identity": 2,
+        "fault_sequence": max(1, min(3, len(capsule.get("alerts", [])))),
+        "performance_change": 4,
+        "log_behavior": 5,
+        "topology_and_config": 5,
+        "trace_policy": 4,
+        "uncertainty": 3,
+    }
+    signal_depth_scores = {
+        group: min(1.0, len(set(terms)) / depth_targets.get(group, 3))
+        for group, terms in matched_groups.items()
+    }
+    signal_depth_score = sum(signal_depth_scores.values()) / len(signal_depth_scores)
 
     next_checks = parsed.get("next_checks", []) if isinstance(parsed, dict) else []
     actionability = min(1.0, len(next_checks) / 3) if isinstance(next_checks, list) else 0.0
@@ -179,7 +219,8 @@ def _score_response(parsed: dict[str, Any] | None, raw_text: str, capsule: dict[
         json_score * 0.1
         + citation_score * 0.17
         + domain_score * 0.15
-        + signal_score * 0.38
+        + signal_score * 0.2
+        + signal_depth_score * 0.18
         + actionability * 0.1
         + evidence_depth * 0.05
         + (1.0 - final_root_cause_penalty) * 0.05
@@ -190,6 +231,7 @@ def _score_response(parsed: dict[str, Any] | None, raw_text: str, capsule: dict[
         "citation_score": round(citation_score, 4),
         "domain_score": round(domain_score, 4),
         "expected_signal_score": round(signal_score, 4),
+        "signal_depth_score": round(signal_depth_score, 4),
         "actionability_score": round(actionability, 4),
         "evidence_depth_score": round(evidence_depth, 4),
         "final_root_cause_penalty": final_root_cause_penalty,
@@ -198,10 +240,12 @@ def _score_response(parsed: dict[str, Any] | None, raw_text: str, capsule: dict[
         "valid_primary_supporting_evidence_ids": valid_primary_support,
         "mentioned_domains": mentioned_domains,
         "matched_expected_signal_terms": matched_groups,
+        "signal_depth_by_group": {key: round(value, 4) for key, value in signal_depth_scores.items()},
         "definitions": {
             "total_score": "Weighted score over JSON validity, citation validity, domain coverage, expected signal coverage, actionability, evidence depth, and RCA caution.",
             "domain_score": "Fraction of operational domains explicitly used by the model.",
             "expected_signal_score": "Fraction of expected incident signal groups mentioned by the model.",
+            "signal_depth_score": "Average within-group coverage of concrete identity, fault, PM, log, topology, trace, and uncertainty terms.",
             "evidence_depth_score": "Breadth of valid evidence IDs used in the primary hypothesis, capped at eight supporting items.",
         },
     }
@@ -226,9 +270,9 @@ def compare_models(
         started = time.perf_counter()
         raw = client.chat(ChatRequest(model=model, messages=prompt, max_tokens=max_tokens))
         parsed, parse_error = _extract_json(raw["content"])
-        if parsed is None and raw.get("finish_reason") == "length" and max_tokens < 6000:
+        if parsed is None and raw.get("finish_reason") == "length" and max_tokens < 8000:
             _emit(progress, "running", f"Retrying {model} with more tokens", model=model)
-            raw = client.chat(ChatRequest(model=model, messages=prompt, max_tokens=6000))
+            raw = client.chat(ChatRequest(model=model, messages=prompt, max_tokens=8000))
             parsed, parse_error = _extract_json(raw["content"])
         score = _score_response(parsed, raw["content"], capsule)
         result = {
@@ -281,6 +325,29 @@ def compare_models(
     render_dashboard(output)
     create_archive(output, capsule["case"]["case_id"])
     _emit(progress, "done", "DeepSeek comparison complete", winner=comparison["winner"], score_delta=comparison["score_delta"])
+    return comparison
+
+
+def rescore_comparison(capsule_path: str | Path, output_dir: str | Path) -> dict[str, Any]:
+    """Apply the current rubric to already recorded model responses without new API calls."""
+
+    capsule = json.loads(Path(capsule_path).read_text(encoding="utf-8"))
+    output = Path(output_dir).resolve()
+    comparison_path = output / "llm_comparison.json"
+    comparison = json.loads(comparison_path.read_text(encoding="utf-8"))
+    for item in comparison.get("results", []):
+        item["score"] = _score_response(item.get("response"), item.get("raw_content", ""), capsule)
+    ranked = sorted(comparison.get("results", []), key=lambda item: (-item["score"]["total_score"], item["model"]))
+    score_delta = round(ranked[0]["score"]["total_score"] - ranked[1]["score"]["total_score"], 4) if len(ranked) > 1 else 0
+    comparison["winner"] = ranked[0]["model"] if ranked and score_delta > 0 else None
+    comparison["score_delta"] = score_delta
+    comparison["interpretation"] = _interpret_comparison(ranked)
+    comparison["rubric_version"] = "1.1"
+    write_json(comparison_path, comparison)
+    from fcapsule.ui.dashboard import render_dashboard
+
+    render_dashboard(output)
+    create_archive(output, capsule["case"]["case_id"])
     return comparison
 
 

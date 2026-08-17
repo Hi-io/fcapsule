@@ -43,6 +43,8 @@ class StoreTests(unittest.TestCase):
                 }
             )
             self.assertEqual(capsule["incident_id"], "incident-001")
+            store.update_capsule_model_winner("capsule-001", "deepseek-v4-pro")
+            self.assertEqual(store.get_capsule("capsule-001")["model_winner"], "deepseek-v4-pro")
             overview = store.overview()
             self.assertEqual(overview["totals"]["applications"], 1)
             self.assertEqual(overview["totals"]["degraded_applications"], 1)

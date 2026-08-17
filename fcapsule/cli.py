@@ -15,7 +15,7 @@ from fcapsule.models.schemas import CaseValidationError
 from fcapsule.pipeline import investigate_case
 from fcapsule.processing.entity_resolver import resolve_entities
 from fcapsule.reasoning.llm_client import LLMUnavailableError
-from fcapsule.reasoning.model_comparator import DEFAULT_MODELS, compare_models
+from fcapsule.reasoning.model_comparator import DEFAULT_MODELS, compare_models, rescore_comparison
 from fcapsule.store import FCAPSuleStore
 from fcapsule.ui.app import serve_app
 from fcapsule.ui.dashboard import render_dashboard
@@ -34,6 +34,10 @@ def _parser() -> argparse.ArgumentParser:
     compare.add_argument("--models", nargs="+", default=list(DEFAULT_MODELS), help="Model names to compare")
     compare.add_argument("--api-key-env", default="DEEPSEEK_API_KEY", help="Environment variable containing the API key")
     compare.add_argument("--max-tokens", type=int, default=2400)
+    rescore = subparsers.add_parser("rescore-llms", help="Apply the current rubric to stored model responses")
+    rescore.add_argument("--capsule", required=True)
+    rescore.add_argument("--out", required=True)
+    rescore.add_argument("--state-dir", default=None)
     evaluate = subparsers.add_parser("evaluate", help="Recompute objective evaluation metrics")
     evaluate.add_argument("--case", required=True)
     evaluate.add_argument("--output", required=True)
@@ -119,6 +123,12 @@ def main(argv: list[str] | None = None) -> int:
                     f"citations={score['citation_score']:.3f}, latency={item['latency_seconds']:.2f}s"
                 )
             print(f"Output: {args.out}")
+        elif args.command == "rescore-llms":
+            comparison = rescore_comparison(args.capsule, args.out)
+            if args.state_dir:
+                store = FCAPSuleStore(Path(args.state_dir) / "fcapsule.db")
+                store.update_capsule_model_winner(f"capsule-{comparison['case_id']}", comparison.get("winner"))
+            print(json.dumps({"winner": comparison.get("winner"), "score_delta": comparison.get("score_delta"), "rubric_version": comparison.get("rubric_version")}, indent=2))
         elif args.command == "inspect":
             bundle = load_case(args.case)
             summary = {
