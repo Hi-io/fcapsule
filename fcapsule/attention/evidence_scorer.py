@@ -8,7 +8,10 @@ from fcapsule.domains import domain_for_evidence_type
 from fcapsule.models.schemas import CaseBundle
 
 ALERT_SEVERITY = {"critical": 1.0, "error": 0.85, "warning": 0.65, "warn": 0.65, "info": 0.25}
-SUSPICIOUS_TERMS = ("error", "failed", "timeout", "unavailable", "dropped", "queue", "latency", "exception")
+SUSPICIOUS_TERMS = (
+    "error", "failed", "timeout", "unavailable", "dropped", "queue", "latency", "exception",
+    "retry", "pool", "lock", "breaker", "saturation", "exhausted", "deadline",
+)
 
 
 def _entity_score(entities: list[str], expected: set[str]) -> float:
@@ -99,7 +102,13 @@ def score_evidence(
     for metric in metric_anomalies:
         entities = list(metric["labels"].values())
         name = metric["metric"].lower()
-        semantic = 1.0 if any(term in name for term in ("error", "latency", "memory", "cpu", "queue", "log", "request")) else 0.4
+        semantic = 1.0 if any(
+            term in name
+            for term in (
+                "error", "latency", "memory", "cpu", "queue", "log", "request", "retry",
+                "pool", "exhaust", "slow", "circuit", "saturation", "attempt",
+            )
+        ) else 0.4
         components = {
             "severity_weight": 0.5,
             "anomaly_score": metric["anomaly_score"],

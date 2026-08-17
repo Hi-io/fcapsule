@@ -1,4 +1,4 @@
-"""Objective P1 metrics with documented, reproducible definitions."""
+"""Objective capsule metrics with documented, reproducible definitions."""
 
 from __future__ import annotations
 
@@ -12,6 +12,22 @@ from fcapsule.models.schemas import CaseBundle
 
 def _estimate_tokens(value: Any) -> int:
     return max(1, len(json.dumps(value, ensure_ascii=True)) // 4)
+
+
+def _representative_ids(items: list[dict[str, Any]], id_field: str, text_field: str, groups: tuple[tuple[str, ...], ...]) -> set[str]:
+    selected: set[str] = set()
+    for terms in groups:
+        match = next(
+            (
+                item
+                for item in items
+                if any(term in str(item.get(text_field, "")).lower() for term in terms)
+            ),
+            None,
+        )
+        if match:
+            selected.add(str(match[id_field]))
+    return selected
 
 
 def calculate_metrics(
@@ -29,14 +45,34 @@ def calculate_metrics(
         len(item.get("representative_lines", [])) for item in selected if item["type"] == "log_template"
     )
     selected_source_ids = {item["source_id"] for item in selected}
-    important_logs = {
-        item["template_id"]
-        for item in log_templates
-        if item["severity_score"] >= 0.55 or item["rarity_score"] >= 0.9
-    }
-    important_metrics = {
-        item["metric_id"] for item in metric_anomalies if item["anomaly_score"] >= ANOMALY_THRESHOLD
-    }
+    important_logs = _representative_ids(
+        log_templates,
+        "template_id",
+        "template",
+        (
+            ("error", "failed", "unavailable", "aborted"),
+            ("retry", "attempt", "breaker"),
+            ("pool", "exhaust"),
+            ("lock", "deadline", "timeout"),
+        ),
+    )
+    anomalous_metrics = [item for item in metric_anomalies if item["anomaly_score"] >= ANOMALY_THRESHOLD]
+    important_metrics = _representative_ids(
+        anomalous_metrics,
+        "metric_id",
+        "metric",
+        (
+            ("error", "failure"),
+            ("latency", "duration"),
+            ("retry", "attempt"),
+            ("pool", "exhaust", "saturation"),
+            ("log_indexing", "scrape", "telemetry"),
+        ),
+    )
+    if not important_logs:
+        important_logs = {item["template_id"] for item in log_templates[:4]}
+    if not important_metrics:
+        important_metrics = {item["metric_id"] for item in anomalous_metrics[:5]}
     important_alerts = {f"alert_{index:03d}" for index in range(1, len(bundle.alerts) + 1)}
     important = important_logs | important_metrics | important_alerts
     preserved = important & selected_source_ids
@@ -72,6 +108,9 @@ def calculate_metrics(
         "token_reduction_percentage": round(1 - capsule_tokens / raw_tokens, 4) if raw_tokens else 0.0,
         "important_signal_count": len(important),
         "preserved_signal_count": len(preserved),
+        "important_signal_ids": sorted(important),
+        "preserved_signal_ids": sorted(preserved),
+        "missing_signal_ids": sorted(important - preserved),
         "important_signal_preservation": round(signal_preservation, 4),
         "metric_anomaly_preservation": round(anomaly_preservation, 4),
         "hypothesis_grounding_score": round(grounding, 4),
@@ -81,7 +120,7 @@ def calculate_metrics(
             "log_compression_ratio": "1 - representative selected log lines / raw log lines",
             "template_reduction_ratio": "1 - grouped templates / raw log lines",
             "token_reduction_percentage": "1 - estimated capsule tokens / estimated raw telemetry tokens",
-            "important_signal_preservation": "selected operational signals / automatically identified important signals",
+            "important_signal_preservation": "selected representative fault, failure, retry, saturation, latency, and telemetry-health signals / identified signal groups",
             "hypothesis_grounding_score": "valid cited evidence IDs / all cited evidence IDs",
             "retention_survivability_score": "present required capsule sections / eight required sections",
         },

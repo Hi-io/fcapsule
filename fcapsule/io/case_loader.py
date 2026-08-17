@@ -1,4 +1,4 @@
-"""Load and validate a self-contained P1 incident case."""
+"""Load and validate a normalized incident case."""
 
 from __future__ import annotations
 

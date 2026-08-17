@@ -1,4 +1,4 @@
-"""End-to-end P1 orchestration."""
+"""End-to-end FCAPSule investigation orchestration."""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ def investigate_case(case_dir: str | Path, output_dir: str | Path, progress: Pro
     selected_log_lines = sum(len(item.get("representative_lines", [])) for item in selected if item["type"] == "log_template")
 
     payload: dict[str, Any] = {
-        "schema_version": "p1-1.0",
+        "schema_version": "1.0",
         "case": bundle.metadata,
         "alerts": bundle.alerts,
         "entity_resolution": entities,
@@ -90,5 +90,5 @@ def investigate_case(case_dir: str | Path, output_dir: str | Path, progress: Pro
         "evaluation": evaluation,
         "archive": str(archive),
     }
-    _emit(progress, "done", "P1 evidence capsule complete", **result)
+    _emit(progress, "done", "Evidence capsule complete", **result)
     return result

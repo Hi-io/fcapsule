@@ -1,4 +1,4 @@
-"""Render human-readable and machine-readable P1 outputs."""
+"""Render human-readable and machine-readable capsule outputs."""
 
 from __future__ import annotations
 
@@ -25,11 +25,11 @@ def render_capsule(payload: dict[str, Any]) -> str:
         lines.extend([f"- **{alert['alertname']}** is `{alert['status']}` with `{alert['severity']}` severity.", f"- Started at `{alert['startsAt']}`.", f"- {alert.get('annotations', {}).get('description', 'No description supplied.')}", ""])
     else:
         lines.extend(["No alert was supplied.", ""])
-    lines.extend(["## 3. Telemetry Window", "", f"`{metadata['window']['start']}` to `{metadata['window']['end']}` ({metadata.get('timezone', 'UTC')}).", "", "## 4. Multidomain Telemetry Map", "", "In FCAPSule P1, a domain is a telemetry signal family with its own data shape and analysis method. It is similar to how text, audio, and images are different AI modalities, but here the domains are operational telemetry: fault events, log text, time-series metrics, topology metadata, and LLM reasoning.", ""])
+    lines.extend(["## 3. Telemetry Window", "", f"`{metadata['window']['start']}` to `{metadata['window']['end']}` ({metadata.get('timezone', 'UTC')}).", "", "## 4. Operational Signal Domains", "", "FCAPSule handles operational domains with different data shapes and analysis methods: fault management events, application logs, performance metrics, topology/configuration, on-demand trace access, and evidence-grounded AI reasoning.", ""])
     for domain_id, domain in payload.get("domain_summary", {}).items():
         lines.append(
             f"- **{domain['label']}** (`{domain_id}`): {domain['signal_family']}; "
-            f"selected evidence `{domain['selected_evidence_items']}`; P1 role: {domain['p1_role']}"
+            f"selected evidence `{domain['selected_evidence_items']}`; role: {domain['role']}"
         )
     lines.extend(["", "## 5. Incident Timeline", ""])
     for item in payload["timeline"]:

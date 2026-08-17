@@ -23,7 +23,7 @@ class PipelineRegressionTests(unittest.TestCase):
             self.assertGreaterEqual(evaluation["important_signal_preservation"], 0.9)
             self.assertEqual(evaluation["hypothesis_grounding_score"], 1.0)
             capsule = (output / "capsule.md").read_text(encoding="utf-8")
-            self.assertIn("## 4. Multidomain Telemetry Map", capsule)
+            self.assertIn("## 4. Operational Signal Domains", capsule)
             self.assertIn("## 12. Retention Note", capsule)
             self.assertIn("does not assert a final root cause", capsule)
 

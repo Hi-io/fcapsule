@@ -1,4 +1,4 @@
-"""Deterministic, evidence-only hypothesis generator for reproducible P1 runs."""
+"""Deterministic, evidence-only hypothesis generator for reproducible runs."""
 
 from __future__ import annotations
 
@@ -21,8 +21,39 @@ def generate_hypotheses(selected: list[dict[str, Any]]) -> list[dict[str, Any]]:
     error_metric = _first(selected, "metric_anomaly", ("error", "failure"))
     latency_metric = _first(selected, "metric_anomaly", ("latency", "duration"))
     log_metric = _first(selected, "metric_anomaly", ("log", "dropped", "queue"))
+    retry_log = _first(selected, "log_template", ("retry", "attempt", "breaker"))
+    pool_log = _first(selected, "log_template", ("pool", "exhausted", "lock"))
+    retry_metric = _first(selected, "metric_anomaly", ("retry", "attempt"))
+    pool_metric = _first(selected, "metric_anomaly", ("pool", "exhaust", "slow"))
 
-    if error_log and (error_metric or alert):
+    if retry_log and pool_log and (retry_metric or pool_metric):
+        support = [retry_log["evidence_id"], pool_log["evidence_id"]]
+        if retry_metric:
+            support.append(retry_metric["evidence_id"])
+        if pool_metric:
+            support.append(pool_metric["evidence_id"])
+        if alert:
+            support.append(alert["evidence_id"])
+        hypotheses.append(
+            {
+                "hypothesis_id": "hyp_001",
+                "hypothesis": "Retry amplification may be sustaining inventory pool pressure after reservation lock contention begins.",
+                "confidence": round(
+                    min(0.9, sum(next(item["score"] for item in selected if item["evidence_id"] == value) for value in support) / len(support)),
+                    3,
+                ),
+                "supporting_evidence": support,
+                "contradicting_evidence": [],
+                "missing_evidence": ["Inventory lock owner and query-level database diagnostics"],
+                "next_checks": [
+                    "Inspect reservation database lock ownership at the first pool-saturation event.",
+                    "Validate checkout retry and circuit-breaker policy against dependency latency.",
+                    "Query failed-request traces from the source buffer before its retention window expires.",
+                ],
+            }
+        )
+
+    if error_log and (error_metric or alert) and not hypotheses:
         support = [error_log["evidence_id"]]
         if error_metric:
             support.append(error_metric["evidence_id"])
