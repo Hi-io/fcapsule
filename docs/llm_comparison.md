@@ -37,11 +37,14 @@ The total score combines:
 - valid evidence citations;
 - operational domain coverage;
 - expected signal-group coverage;
+- depth of concrete terms within each expected signal group;
 - actionable next checks;
 - breadth of valid primary support;
 - caution against unsupported final-root-cause language.
 
 The winner is `null` when scores tie. Model latency and tokens are displayed separately because a faster or cheaper model may still be preferable when quality differences are small.
+
+Use `python3 -m fcapsule.cli rescore-llms --capsule <capsule.json> --out <output>` to apply the current rubric to stored provider responses without making new API calls.
 
 ## Configuration
 
@@ -52,4 +55,3 @@ If no credential is loaded, the deterministic capsule still completes and the mo
 ## Adding Providers
 
 A new provider must implement the chat-client boundary and return normalized content, usage, finish reason, latency, and provider identity. It must use the same prompt builder and scorer for a valid comparison.
-

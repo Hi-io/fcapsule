@@ -40,6 +40,15 @@ Capsule result:
 - 100% valid hypothesis citations;
 - 100% retention-section completeness.
 
+Recorded same-input model comparison under rubric 1.1:
+
+- `deepseek-v4-flash`: quality `0.9670`, signal depth `0.8167`, provider latency `15.8s`, total tokens `7,913`;
+- `deepseek-v4-pro`: quality `0.9914`, signal depth `0.9524`, provider latency `48.9s`, total tokens `10,894`;
+- best observed: `deepseek-v4-pro`;
+- score delta: `0.0244`.
+
+Both models produced valid JSON with complete domain-group coverage. Pro's measured advantage came from deeper concrete coverage of application identity, PM behavior, topology/configuration, and uncertainty. Flash was materially faster and used fewer tokens, so the result demonstrates a quality/latency/cost tradeoff rather than an unconditional deployment choice.
+
 Counts and latency values may vary slightly because the workload uses live HTTP services, deadlines, and concurrent scheduling. Alert names, diagnostic groups, data policy, and acceptance thresholds are deterministic.
 
 ## What the Run Demonstrates
@@ -75,4 +84,3 @@ Record:
 - confusing or missing evidence;
 - preferred model result, when model comparison is enabled;
 - suggested product improvement.
-

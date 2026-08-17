@@ -93,6 +93,14 @@ python3 -m fcapsule.cli compare-llms \
 
 Model comparison is optional. The deterministic evidence selector and hypothesis verifier work without an API key.
 
+Re-score stored responses after a rubric change without making provider calls:
+
+```bash
+python3 -m fcapsule.cli rescore-llms \
+  --capsule ./.fcapsule/capsules/cli-latest/capsule.json \
+  --out ./.fcapsule/capsules/cli-latest
+```
+
 ## Incident Lab Output
 
 The default lab workload produces:

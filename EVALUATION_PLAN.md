@@ -54,12 +54,15 @@ Enabled models receive identical messages and capsule evidence. Record:
 - valid and invalid evidence citations;
 - operational domain coverage;
 - expected signal-group coverage;
+- within-group signal depth across identity, FM, PM, logs, topology/configuration, trace policy, and uncertainty;
 - actionability;
 - evidence breadth;
 - unsupported final-root-cause language;
 - total rubric score.
 
 A model wins only when its total score is measurably higher. Latency and token use remain separate tradeoffs rather than hidden quality bonuses.
+
+Stored responses can be evaluated again after a rubric revision with `fcapsule rescore-llms`. Re-scoring does not call the provider and records the rubric version.
 
 ## Acceptance Thresholds
 
@@ -98,4 +101,3 @@ Reviewers should score:
 - Thread scheduling changes exact counts and timings.
 
 Results must be reported with these limitations.
-
