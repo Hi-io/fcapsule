@@ -1,4 +1,4 @@
-"""Generate a static review dashboard for FCAPSule P1 outputs."""
+"""Generate a static review dashboard for FCAPSule outputs."""
 
 from __future__ import annotations
 
@@ -27,9 +27,10 @@ def _domain_cards(capsule: dict[str, Any]) -> str:
         "log_text": "#27746f",
         "time_series_metrics": "#6b5aa6",
         "topology_metadata": "#6d6a26",
+        "trace_access": "#94612f",
         "llm_reasoning": "#3c6f9f",
     }
-    active_domains = {"fault_events", "log_text", "time_series_metrics"}
+    active_domains = {"fault_events", "log_text", "time_series_metrics", "topology_metadata", "trace_access", "llm_reasoning"}
     for domain_id, domain in capsule.get("domain_summary", {}).items():
         if domain_id not in active_domains:
             continue
@@ -52,7 +53,7 @@ def _domain_cards(capsule: dict[str, Any]) -> str:
                 selected=domain.get("selected_evidence_items", 0),
                 candidates=domain.get("candidate_evidence_items", 0),
                 raw=domain.get("raw_items", 0),
-                role=html.escape(str(domain.get("p1_role", ""))),
+                role=html.escape(str(domain.get("role", ""))),
             )
         )
     return "\n".join(cards) or "<p class='muted'>No active telemetry source domains were selected.</p>"
@@ -114,7 +115,7 @@ def render_dashboard(output_dir: str | Path) -> Path:
     evaluation = _load_json(output / "evaluation.json")
     comparison = _load_json(output / "llm_comparison.json")
     case = capsule.get("case", {})
-    title = f"{case.get('case_id', 'case')} FCAPSule P1 Dashboard"
+    title = f"{case.get('case_id', 'case')} FCAPSule Dashboard"
     winner_label = comparison.get("winner") or "No measurable winner"
     html_text = f"""<!doctype html>
 <html lang="en">
@@ -134,7 +135,7 @@ def render_dashboard(output_dir: str | Path) -> Path:
     p {{ line-height:1.45; }}
     .muted {{ color:var(--muted); }}
     .summary {{ display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; }}
-    .stat, .domain-card, .model-card, .panel {{ background:var(--paper); border:1px solid var(--line); border-radius:8px; padding:16px; }}
+    .stat, .domain-card, .model-card, .panel {{ background:var(--paper); border:1px solid var(--line); border-radius:2px; padding:16px; }}
     .stat strong {{ display:block; font-size:24px; margin-top:4px; }}
     .domains, .models {{ display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px; }}
     .domain-card {{ border-top:5px solid var(--accent); }}
@@ -157,7 +158,7 @@ def render_dashboard(output_dir: str | Path) -> Path:
 <body>
   <header>
     <h1>{html.escape(str(case.get('case_title', title)))}</h1>
-    <p class="muted">Case <code>{html.escape(str(case.get('case_id', 'unknown')))}</code> - Service <code>{html.escape(str(case.get('service', 'unknown')))}</code> - generated from local P1 outputs.</p>
+    <p class="muted">Case <code>{html.escape(str(case.get('case_id', 'unknown')))}</code> - Service <code>{html.escape(str(case.get('service', 'unknown')))}</code> - generated from retained capsule outputs.</p>
   </header>
   <main>
     <section class="summary">
@@ -167,12 +168,12 @@ def render_dashboard(output_dir: str | Path) -> Path:
       <div class="stat">LLM winner<strong>{html.escape(str(winner_label))}</strong></div>
     </section>
     <section class="panel">
-      <h2>Multidomain Telemetry Map</h2>
-      <p class="muted">These are the active operational telemetry source domains: different signal families, data structures, and analysis methods.</p>
+      <h2>Operational Signal Domains</h2>
+      <p class="muted">FM, PM, logs, topology, on-demand traces, and grounded reasoning are handled as distinct signal families.</p>
       <div class="domains">{_domain_cards(capsule)}</div>
     </section>
     <section class="panel">
-      <h2>DeepSeek Model Comparison</h2>
+      <h2>Model Comparison</h2>
       <p class="muted">{html.escape(str(comparison.get('interpretation', 'Run compare-llms to generate model observations.')))}</p>
       <div class="models">{_model_cards(comparison)}</div>
     </section>

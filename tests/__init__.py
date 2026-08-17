@@ -1,1 +1,1 @@
-"""FCAPSule P1 tests."""
+"""FCAPSule regression tests."""

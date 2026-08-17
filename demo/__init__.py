@@ -1,1 +1,1 @@
-"""Synthetic application used to produce safe P1 telemetry."""
+"""Synthetic applications used to produce safe regression telemetry."""

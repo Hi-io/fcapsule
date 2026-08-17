@@ -1,4 +1,4 @@
-"""Simple comparison baselines required by the P1 guide."""
+"""Simple comparison baselines used by capsule evaluation."""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ def build_baselines(bundle: CaseBundle, sample_size: int = 20) -> dict[str, Any]
             "selected_log_indexes": time_matches,
         },
         "single_llm": {
-            "description": "Not executed in offline P1; represented as an experimental protocol in EVALUATION_PLAN.md.",
+            "description": "Not executed in offline mode; represented as an experimental protocol in EVALUATION_PLAN.md.",
             "status": "not_run",
         },
     }

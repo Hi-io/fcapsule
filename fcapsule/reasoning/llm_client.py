@@ -1,4 +1,4 @@
-"""LLM boundary for optional P1 model comparison."""
+"""LLM boundary for optional model comparison."""
 
 from __future__ import annotations
 

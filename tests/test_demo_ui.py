@@ -17,7 +17,7 @@ class DemoUITests(unittest.TestCase):
             self.assertGreaterEqual(summary["pipeline"]["selected_evidence"], 3)
             self.assertIn("fault_events", summary["domains"])
             printout = render_printout(summary)
-            self.assertIn("FCAPSule AI P1 demo summary", printout)
+            self.assertIn("FCAPSule legacy case demo summary", printout)
             self.assertIn("Log compression", printout)
             self.assertIn("LLM comparison", printout)
 

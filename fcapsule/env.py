@@ -1,4 +1,4 @@
-"""Small .env loader for local P1 runs without external dependencies."""
+"""Small .env loader for local runs without external dependencies."""
 
 from __future__ import annotations
 

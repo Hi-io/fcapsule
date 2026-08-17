@@ -61,6 +61,7 @@ def build_model_prompt(capsule: dict[str, Any]) -> list[dict[str, str]]:
                 "log_text": "How log templates contribute.",
                 "time_series_metrics": "How metrics contribute.",
                 "topology_metadata": "How entity alignment contributes.",
+                "trace_access": "What trace availability contributes and what was not retained.",
             },
             "contradictions_or_limits": ["Missing telemetry or uncertainty."],
         },
@@ -89,7 +90,8 @@ def build_model_prompt(capsule: dict[str, Any]) -> list[dict[str, str]]:
                 "Analyze this multidomain telemetry capsule. The domains are operational telemetry families, "
                 "not media files: fault_events are alert/event streams, log_text is semi-structured text logs, "
                 "time_series_metrics are numeric measurements over time, and topology_metadata aligns services, "
-                "pods, namespaces, clusters, and CNCC UUIDs.\n\n"
+                "pods, namespaces, clusters, and CNCC UUIDs. trace_access records whether request traces can be "
+                "queried during the source retention window without retaining raw spans.\n\n"
                 "Use the exact JSON schema below and keep every claim grounded in evidence IDs.\n\n"
                 f"JSON schema:\n{json.dumps(schema, indent=2)}\n\n"
                 f"Capsule evidence:\n{json.dumps(evidence, indent=2, ensure_ascii=False)}"
@@ -126,13 +128,18 @@ def _expected_signal_terms(capsule: dict[str, Any]) -> dict[str, list[str]]:
     alert_names = [str(alert.get("alertname", "")) for alert in capsule.get("alerts", [])]
     metric_names = [str(item.get("metric", "")) for item in capsule.get("metric_anomalies", [])]
     selected_titles = [str(item.get("title", "")) for item in capsule.get("selected_evidence", [])]
+    topology = [
+        str(value)
+        for edge in case.get("topology", [])
+        for value in (edge.get("from", ""), edge.get("to", ""), edge.get("protocol", ""))
+    ]
     return {
         "case_identity": [case.get("service", ""), case.get("namespace", ""), case.get("pod", "")],
-        "fault_event": alert_names,
-        "metric_signal": ["error rate", "request_error_rate", "checkout_errors_total", *metric_names[:4]],
-        "baseline_context": ["request rate", "traffic spike", "baseline", "ev_metric_001", "flat"],
-        "fault_injection_context": ["failure mode", "ev_log_template_004", "synthetic", "injection", "configuration"],
-        "log_signal": ["checkout failed", "dependency", "503", "failed", *selected_titles[:4]],
+        "fault_sequence": alert_names,
+        "performance_change": ["error rate", "latency", "retry", "pool", *metric_names[:8]],
+        "log_behavior": ["failed", "retry", "breaker", "pool", "lock", "deadline", *selected_titles[:6]],
+        "topology_and_config": ["configuration", "partition", "inventory-api", "reservation-db", *topology],
+        "trace_policy": ["on-demand", "retention", "raw spans", "trace"],
         "uncertainty": ["not a final root cause", "missing", "trace", "dependency health"],
     }
 
@@ -145,7 +152,7 @@ def _score_response(parsed: dict[str, Any] | None, raw_text: str, capsule: dict[
     valid_citations = [item for item in cited_ids if item in valid_ids]
     citation_score = len(valid_citations) / len(cited_ids) if cited_ids else 0.0
 
-    domain_ids = ("fault_events", "log_text", "time_series_metrics", "topology_metadata")
+    domain_ids = ("fault_events", "log_text", "time_series_metrics", "topology_metadata", "trace_access")
     mentioned_domains = [domain for domain in domain_ids if domain in text]
     domain_score = len(mentioned_domains) / len(domain_ids)
 
@@ -193,7 +200,7 @@ def _score_response(parsed: dict[str, Any] | None, raw_text: str, capsule: dict[
         "matched_expected_signal_terms": matched_groups,
         "definitions": {
             "total_score": "Weighted score over JSON validity, citation validity, domain coverage, expected signal coverage, actionability, evidence depth, and RCA caution.",
-            "domain_score": "Fraction of P1 operational domains explicitly used by the model.",
+            "domain_score": "Fraction of operational domains explicitly used by the model.",
             "expected_signal_score": "Fraction of expected incident signal groups mentioned by the model.",
             "evidence_depth_score": "Breadth of valid evidence IDs used in the primary hypothesis, capped at eight supporting items.",
         },
@@ -256,7 +263,7 @@ def compare_models(
     score_delta = round(ranked[0]["score"]["total_score"] - ranked[1]["score"]["total_score"], 4) if len(ranked) > 1 else 0
     winner = ranked[0]["model"] if ranked and score_delta > 0 else None
     comparison = {
-        "schema_version": "p1-llm-comparison-1.0",
+        "schema_version": "llm-comparison-1.0",
         "case_id": capsule["case"]["case_id"],
         "input_capsule": str(Path(capsule_path).resolve()),
         "models": list(models),
@@ -286,5 +293,5 @@ def _interpret_comparison(ranked: list[dict[str, Any]]) -> str:
         return "The rubric did not show a measurable improvement between the compared model outputs."
     return (
         f"{best['model']} scored higher by {delta:.3f}, mainly reflecting stronger grounded use of the "
-        "same multidomain evidence input under the P1 rubric."
+        "same multidomain evidence input under the fixed rubric."
     )

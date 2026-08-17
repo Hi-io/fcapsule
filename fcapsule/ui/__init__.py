@@ -1,1 +1,1 @@
-"""Static UI helpers for local P1 review."""
+"""FCAPSule web and static review interfaces."""

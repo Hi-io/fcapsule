@@ -1,4 +1,4 @@
-"""Drain-inspired masking and exact template grouping for P1."""
+"""Drain-inspired masking and exact template grouping."""
 
 from __future__ import annotations
 

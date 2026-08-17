@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the demo service, trigger a failure, and capture a validated P1 case."""
+"""Run the legacy demo service and capture a validated incident case."""
 
 from __future__ import annotations
 

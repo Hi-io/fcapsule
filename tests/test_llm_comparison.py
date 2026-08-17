@@ -28,6 +28,7 @@ class LLMComparisonTests(unittest.TestCase):
                         "log_text": "Checkout failed and dependency errors are grouped.",
                         "time_series_metrics": "request_error_rate and checkout_errors_total increased.",
                         "topology_metadata": "The same service, namespace, and pod align the signals.",
+                        "trace_access": "Traces are queryable during source retention and raw spans are not retained.",
                     },
                     "contradictions_or_limits": ["Missing trace and dependency health evidence."],
                 },
@@ -50,7 +51,7 @@ class LLMComparisonTests(unittest.TestCase):
             investigate_case(CASE_001, output)
             dashboard = render_dashboard(output)
             self.assertTrue(dashboard.exists())
-            self.assertIn("Multidomain Telemetry Map", dashboard.read_text(encoding="utf-8"))
+            self.assertIn("Operational Signal Domains", dashboard.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

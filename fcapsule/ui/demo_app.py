@@ -1,4 +1,4 @@
-"""Optional local demo UI for FCAPSule P1."""
+"""Legacy single-case demo UI retained for compatibility."""
 
 from __future__ import annotations
 
@@ -245,7 +245,7 @@ def render_printout(summary: dict[str, Any]) -> str:
     pipeline = summary["pipeline"]
     models = summary["models"]
     lines = [
-        "FCAPSule AI P1 demo summary",
+        "FCAPSule legacy case demo summary",
         f"Case directory: {summary['case_dir']}",
         f"Output directory: {summary['output_dir']}",
         "",
@@ -257,7 +257,7 @@ def render_printout(summary: dict[str, Any]) -> str:
         f"- Raw logs: {case.get('logs', 'pending')}",
         f"- Metric series: {case.get('metric_series', 'pending')}",
         "",
-        "2. P1 processing",
+        "2. Capsule processing",
         f"- Log templates generated: {pipeline.get('log_templates')}",
         f"- Metric anomalies analyzed: {pipeline.get('metric_anomalies')}",
         f"- Candidate evidence items: {pipeline.get('candidate_evidence')}",
@@ -321,7 +321,7 @@ def _domain_cards(summary: dict[str, Any]) -> str:
             "</dl>"
             "</section>"
         )
-    return "\n".join(cards) or "<p class='muted'>Run P1 to populate the active telemetry source domains.</p>"
+    return "\n".join(cards) or "<p class='muted'>Build a capsule to populate the active telemetry source domains.</p>"
 
 
 def _score_bar(value: Any, label: str) -> str:
@@ -449,7 +449,7 @@ def _html_page_live() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FCAPSule AI P1 Live Demo</title>
+  <title>FCAPSule Legacy Case Demo</title>
   <style>
     :root { --ink:#172027; --muted:#65707a; --line:#cfd7df; --paper:#fff; --bg:#f5f7f8; --accent:#22654f; --accent-soft:#e7f1ed; --warn:#9a3350; --blue:#315f86; --rail:#111820; }
     * { box-sizing:border-box; }
@@ -516,7 +516,7 @@ def _html_page_live() -> str:
 <body>
   <header>
     <div>
-      <h1>FCAPSule P1 Monitor</h1>
+      <h1>FCAPSule Case Monitor</h1>
       <p class="muted">Incident capture, capsule build, model review.</p>
     </div>
     <div class="topbar">Local demo</div>
@@ -746,7 +746,7 @@ def _html_page(summary: dict[str, Any], printout: str) -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FCAPSule AI P1 Demo</title>
+  <title>FCAPSule Legacy Case Demo</title>
   <style>
     :root {{ --ink:#16202a; --muted:#637181; --line:#d8e0e8; --paper:#fff; --bg:#edf2f7; --accent:#2f7d62; --accent-soft:#e6f3ee; --warn:#a4385a; --amber:#8a6a20; }}
     * {{ box-sizing:border-box; }}
@@ -803,7 +803,7 @@ def _html_page(summary: dict[str, Any], printout: str) -> str:
 </head>
 <body>
   <header>
-    <h1>FCAPSule AI P1 Demo</h1>
+    <h1>FCAPSule Legacy Case Demo</h1>
     <p class="muted">Recorded run view.</p>
   </header>
   <main>
@@ -819,7 +819,7 @@ def _html_page(summary: dict[str, Any], printout: str) -> str:
         <h2>Controls</h2>
         <div class="actions">
           <button data-action="capture-p1">1. Capture fresh failure</button>
-          <button data-action="run-p1">2. Run P1 reduction</button>
+          <button data-action="run-p1">2. Build capsule</button>
           <button data-action="compare">3. Compare DeepSeek models</button>
         </div>
         <p id="status" class="status">Ready. DeepSeek key loaded: {str(summary['api_key_available']).lower()}. Env file: {html.escape(str(summary.get('env_loaded_from') or 'not found'))}.</p>
@@ -955,7 +955,7 @@ class DemoRequestHandler(BaseHTTPRequestHandler):
             if self.path == "/api/run-p1":
                 result = investigate_case(self.server.case_dir, self.server.output_dir)
                 render_dashboard(self.server.output_dir)
-                self._send_json({"ok": True, "message": "P1 investigation complete.", "result": result})
+                self._send_json({"ok": True, "message": "Investigation complete.", "result": result})
                 return
             if self.path == "/api/capture-p1":
                 from scripts.capture_demo_incident import capture
@@ -966,7 +966,7 @@ class DemoRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(
                     {
                         "ok": True,
-                        "message": "Fresh failure captured and P1 investigation complete.",
+                        "message": "Fresh failure captured and investigation complete.",
                         "capture": capture_result,
                         "investigation": investigation,
                     }
@@ -1079,7 +1079,7 @@ def serve_demo_ui(
 
     server = DemoServer((host, port), case_dir, output_dir, models)
     url = f"http://{host}:{server.server_port}/"
-    print("FCAPSule AI P1 demo UI")
+    print("FCAPSule legacy case demo UI")
     print(f"URL: {url}")
     print(f"Case: {Path(case_dir).resolve()}")
     print(f"Output: {Path(output_dir).resolve()}")
@@ -1095,7 +1095,7 @@ def serve_demo_ui(
 def demo_ui_main(argv: list[str] | None = None) -> int:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Run the optional FCAPSule P1 local demo UI.")
+    parser = argparse.ArgumentParser(description="Run the legacy FCAPSule single-case demo UI.")
     parser.add_argument("--case", default="cases/case_001", help="Prepared case directory")
     parser.add_argument("--out", default="outputs/case_001", help="Output directory")
     parser.add_argument("--host", default="127.0.0.1")

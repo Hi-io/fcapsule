@@ -1,1 +1,1 @@
-"""P1 objective and baseline evaluation."""
+"""Objective and baseline capsule evaluation."""
