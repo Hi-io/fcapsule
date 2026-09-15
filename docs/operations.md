@@ -18,12 +18,16 @@ Use `--host`, `--port`, and `--state-dir` to change the binding or storage locat
 The Operations view shows:
 
 - an incident queue ordered by severity and capture time;
-- an **Open report** action for each incident with a retained capsule;
+- an **Open report** action for each incident with a retained capsule; the report expands directly below that queue row;
 - incident impact, a verified investigation path, uncertainty, and concrete next checks;
 - FM sequence, PM changes, representative evidence, topology, and trace-source retention context;
 - application coverage across FM, PM, logs, and trace access.
 
-Compression, signal preservation, grounding, runtime, and model-evaluation details are available only inside the collapsed engineering diagnostics section of a report. They support maintainers and evaluation work; they are not the first information presented to an on-call responder.
+The report distinguishes its evidence by domain: FM alert records, PM trend lines with normal/peak values, and expandable anonymized log patterns. Compression, signal preservation, grounding, runtime, and model-evaluation details are available only inside the collapsed engineering diagnostics section. They support maintainers and evaluation work; they are not the first information presented to an on-call responder.
+
+### Optional AI Briefing
+
+After a report is ready, **Generate AI briefing** requests a compact DeepSeek Pro second reading. The request contains only curated incident evidence. A response is displayed and retained only when it cites two to five evidence IDs already present in the report and acknowledges an uncertainty. This action does not block capture, capsule creation, or the report. The resulting `ai_briefing.json` is added to the archive without storing provider prompts or transcripts.
 
 ## Incident Lab
 

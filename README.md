@@ -8,7 +8,7 @@ It is not another root-cause chatbot and it does not replace Prometheus, OpenSea
 
 FCAPSule provides one local control plane with two web views:
 
-- **Operations** (`/console`) starts with an incident queue. Opening a report shows impact, evidence-grounded investigation paths, urgent checks, source-retention context, and application coverage.
+- **Operations** (`/console`) starts with an incident queue. A report expands beneath its incident and separates FM alerts, PM trends, anonymized log patterns, urgent retention actions, exports, and application coverage.
 - **Incident Lab** (`/lab`) runs a controlled multi-service failure and shows each stage as it happens. It exists for testing, demonstrations, and regression evaluation; it is not required for normal capsule generation.
 
 The CLI remains fully usable without the web application.
@@ -91,7 +91,7 @@ python3 -m fcapsule.cli compare-llms \
   --models deepseek-v4-flash deepseek-v4-pro
 ```
 
-Model comparison is an offline evaluation workflow. It does not run in the operator path and does not delay an incident report. The production report is built from deterministic detection, selected evidence, verified hypotheses, and explicit uncertainty; a deployment may add a configured model as a non-blocking enrichment after that report is ready.
+Model comparison is an offline evaluation workflow. It does not run in the operator path and does not delay an incident report. The production report is built from deterministic detection, selected evidence, verified hypotheses, and explicit uncertainty. Operators may request an optional DeepSeek Pro briefing after the report is ready; it is retained only when it cites existing evidence IDs and states an uncertainty.
 
 Re-score stored responses after a rubric change without making provider calls:
 
@@ -123,6 +123,7 @@ An investigation writes:
 ```text
 capsule.json          structured evidence and provenance
 incident_report.json  responder-focused report: impact, actions, evidence, retention
+ai_briefing.json      optional citation-checked operator briefing; no prompt retained
 capsule.md            human-readable investigation capsule
 evidence.json         all candidates with scoring components
 evaluation.json       engineering evaluation, not the primary operator view

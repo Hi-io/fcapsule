@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0 - 2026-09-15
+
+- Expanded reports in place beneath their incident queue rows and clarified application versus captured telemetry context.
+- Added explicit FM alert records, PM trend lines with measurement definitions, and expandable anonymized log patterns.
+- Added direct report/archive exports and moved retention-critical trace retrieval to the first recommended action.
+- Added an optional DeepSeek Pro AI briefing that is accepted only with valid retained-evidence citations and declared uncertainty.
+
 ## 1.1.0 - 2026-09-15
 
 ### Changed

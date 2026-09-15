@@ -41,7 +41,7 @@ Alert trigger or explicit incident window
 
 ## Control Plane
 
-`ControlPlane` coordinates background jobs and exposes an immutable snapshot to the HTTP API. `FCAPSuleStore` persists application, incident, and capsule metadata in SQLite. The simulation lab and Operations UI are two clients of the same state. An incident report is generated from deterministic evidence before the capsule is marked ready; offline model evaluation cannot block that report.
+`ControlPlane` coordinates background jobs and exposes an immutable snapshot to the HTTP API. `FCAPSuleStore` persists application, incident, and capsule metadata in SQLite. The simulation lab and Operations UI are two clients of the same state. An incident report is generated from deterministic evidence before the capsule is marked ready; offline model evaluation cannot block that report. A separately requested AI briefing is a compact, citation-checked derivative that may be archived only after validation.
 
 ## Source Ownership
 

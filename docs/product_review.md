@@ -84,7 +84,9 @@ figures for maintainers without making them the incident response workflow.
 
 The Incident Lab remains optional. It creates a deterministic local failing scenario
 and shows capture progress so the product can be demonstrated and tested without an
-external application. It is not required to run the operations console.
+external application. It is not required to run the operations console. It remains in
+the local interface temporarily for development and demonstrations; a deployment should
+ship the operations console and collectors independently of the lab.
 
 ## Validation Evidence
 
@@ -120,3 +122,38 @@ distributed deployment should add:
 
 These are deployment and integration concerns. They do not change the operator-first
 reporting contract established by this review.
+
+## Report Interaction Review (1.2)
+
+An operator review of the first report view identified that a standalone report below
+the queue broke the investigation flow, raw metric names were too ambiguous, and a
+single generic evidence list required the reader to mentally reconstruct the source
+domains. The updated interaction follows these decisions:
+
+- A report expands directly beneath its incident queue row and can be closed in place.
+- The queue calls its counts **captured context**, not impact. The application column
+  identifies the registered application rather than implying a pod or container name.
+- Impact cards state the measurement meaning and normal comparison. For example, p95
+  explicitly explains the request-latency percentile and counter metrics state that
+  they are interval observations.
+- Evidence is presented through distinct FM alert records, PM trend lines, and
+  expandable anonymized log patterns. CPU and memory are called out as unknown when
+  the connected PM source did not provide them; the UI never pretends they were ruled
+  out.
+- The time-sensitive trace retrieval action is ordered first, ahead of ordinary
+  investigation checks.
+- The retained package is exported directly as a report JSON file or a capsule archive.
+
+### Optional AI Briefing Gate
+
+The report can request a short DeepSeek Pro briefing after it is already available. The
+briefing receives only a compact list of retained FM, PM, and log evidence. It must cite
+two to five existing evidence IDs and must state an uncertainty; otherwise FCAPSule
+rejects it. A successful briefing is retained in `ai_briefing.json` and included in the
+capsule archive, but prompts and provider transcripts are not archived.
+
+In the verified checkout scenario, the model cited the retained pool-exhaustion,
+deadline, and retry log patterns and prioritized failed-request trace retrieval. The
+call completed in about 19.5 seconds. This validates its use as an optional, grounded
+second reading while preserving the deterministic evidence report as the immediate
+operator surface.
