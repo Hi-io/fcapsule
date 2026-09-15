@@ -8,7 +8,7 @@ It is not another root-cause chatbot and it does not replace Prometheus, OpenSea
 
 FCAPSule provides one local control plane with two web views:
 
-- **Operations** (`/console`) lists tracked applications, signal-source status, incidents, retained capsules, storage reduction, and model profiles.
+- **Operations** (`/console`) starts with an incident queue. Opening a report shows impact, evidence-grounded investigation paths, urgent checks, source-retention context, and application coverage.
 - **Incident Lab** (`/lab`) runs a controlled multi-service failure and shows each stage as it happens. It exists for testing, demonstrations, and regression evaluation; it is not required for normal capsule generation.
 
 The CLI remains fully usable without the web application.
@@ -80,7 +80,7 @@ python3 -m fcapsule.cli register \
 python3 -m fcapsule.cli status
 ```
 
-### Compare configured models
+### Evaluate models offline
 
 Place `DEEPSEEK_API_KEY=...` in a local `.env` file. `.env` is ignored by Git.
 
@@ -91,7 +91,7 @@ python3 -m fcapsule.cli compare-llms \
   --models deepseek-v4-flash deepseek-v4-pro
 ```
 
-Model comparison is optional. The deterministic evidence selector and hypothesis verifier work without an API key.
+Model comparison is an offline evaluation workflow. It does not run in the operator path and does not delay an incident report. The production report is built from deterministic detection, selected evidence, verified hypotheses, and explicit uncertainty; a deployment may add a configured model as a non-blocking enrichment after that report is ready.
 
 Re-score stored responses after a rubric change without making provider calls:
 
@@ -122,9 +122,10 @@ An investigation writes:
 
 ```text
 capsule.json          structured evidence and provenance
+incident_report.json  responder-focused report: impact, actions, evidence, retention
 capsule.md            human-readable investigation capsule
 evidence.json         all candidates with scoring components
-evaluation.json       reduction, preservation, grounding, and runtime
+evaluation.json       engineering evaluation, not the primary operator view
 baselines.json        comparison baselines
 dashboard.html        static detailed review
 llm_comparison.json   optional same-input model comparison
@@ -152,7 +153,7 @@ The suite covers validation, processing, domain-balanced selection, hypothesis g
 
 The local control plane is the reference implementation. The intended deployment model is a service or Kubernetes pod configured with read-only access to observability APIs and durable metadata storage. Adapters normalize OpenSearch, Prometheus, Alertmanager, topology, and trace-source responses into the same incident contract used by the local lab.
 
-Raw telemetry remains in the source systems. The pod retains application registrations, incident metadata, capsules, evaluation results, and source references. See `docs/architecture.md` and `ROADMAP.md` for the distributed path.
+Raw telemetry remains in the source systems. The pod retains application registrations, incident metadata, responder reports, capsules, evaluation results, and source references. See `docs/architecture.md`, `docs/production_product_requirements.md`, and `ROADMAP.md` for the distributed path.
 
 ## Documentation
 
@@ -165,5 +166,6 @@ Raw telemetry remains in the source systems. The pod retains application registr
 - `docs/architecture.md`: component and deployment architecture.
 - `docs/data_privacy.md`: collection, anonymization, and retention policy.
 - `docs/design_decisions.md`: important design decisions and tradeoffs.
+- `docs/production_product_requirements.md`: operator-first product requirements and acceptance criteria.
 - `docs/llm_comparison.md`: model profiles, prompts, and scoring.
 - `ROADMAP.md`: remaining work toward distributed operation.

@@ -48,9 +48,9 @@ Use `python3 -m fcapsule.cli rescore-llms --capsule <capsule.json> --out <output
 
 ## Configuration
 
-Use the Operations view to enable models and set maximum tokens. Credentials remain in `.env` or the deployment secret store.
+This workflow is deliberately separate from the Operations view. Run it from the CLI or an evaluation environment after a capsule has been produced; credentials remain in `.env` or the deployment secret store.
 
-If no credential is loaded, the deterministic capsule still completes and the model stage is marked skipped.
+The deterministic incident report is produced without a provider call. A provider failure, timeout, or malformed model response must not delay or invalidate it.
 
 ## Adding Providers
 

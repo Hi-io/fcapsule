@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.0 - 2026-09-15
+
+### Changed
+
+- Reoriented Operations around an incident queue and responder-facing reports.
+- Moved reduction, preservation, grounding, runtime, and model-evaluation data into collapsed engineering diagnostics.
+- Added persisted `incident_report.json` artifacts with impact, hypotheses, ordered signals, actions, evidence coverage, and source-retention context.
+- Removed model comparison and model controls from the operator workflow; model evaluation remains an offline CLI activity.
+- Removed provider calls from the capsule critical path so a report is ready from deterministic evidence without waiting for a model response.
+
 ## 1.0.0 - 2026-08-18
 
 ### Added

@@ -168,14 +168,14 @@ The evidence must support a tentative chain: lock contention may create dependen
 
 The core pipeline must work without an external model.
 
-When model comparison is enabled:
+When offline model comparison is enabled:
 
 - all models receive the same compact capsule and prompt;
 - provider, model, latency, tokens, parse status, and finish reason are recorded;
 - every generated citation is checked against selected evidence;
 - scoring covers JSON validity, citation validity, domain coverage, expected-signal coverage, actionability, evidence breadth, and cautious causal language;
 - a winner is recorded only when the fixed rubric produces a measurable score delta;
-- UI settings must allow model enablement and maximum-token configuration.
+- the evaluation runner may configure model enablement and maximum-token limits outside the operator UI.
 
 The initial comparison profiles are `deepseek-v4-flash` and `deepseek-v4-pro`. The model boundary must remain provider-extensible.
 
@@ -231,4 +231,3 @@ A release is complete when:
 - automated tests pass;
 - both desktop and mobile layouts are visually usable;
 - documentation matches current commands, storage, and behavior.
-

@@ -17,14 +17,13 @@ Use `--host`, `--port`, and `--state-dir` to change the binding or storage locat
 
 The Operations view shows:
 
-- registered applications and current state;
-- FM, PM, log, and trace source availability;
-- incident and capsule counts;
-- raw bytes inspected and capsule bytes retained;
-- capsule reduction, preservation, and model result;
-- model enablement and maximum-token settings;
-- strongest selected evidence for a chosen capsule;
-- links to Markdown and static dashboard artifacts.
+- an incident queue ordered by severity and capture time;
+- an **Open report** action for each incident with a retained capsule;
+- incident impact, a verified investigation path, uncertainty, and concrete next checks;
+- FM sequence, PM changes, representative evidence, topology, and trace-source retention context;
+- application coverage across FM, PM, logs, and trace access.
+
+Compression, signal preservation, grounding, runtime, and model-evaluation details are available only inside the collapsed engineering diagnostics section of a report. They support maintainers and evaluation work; they are not the first information presented to an on-call responder.
 
 ## Incident Lab
 
@@ -35,8 +34,7 @@ The Operations view shows:
 5. Watch services, baseline, injection, and FM stages update.
 6. Review the alert sequence and captured volume.
 7. Select **Build capsule**.
-8. Watch evidence processing and optional model stages.
-9. Open Operations to inspect the retained result.
+8. Open Operations and select **Open report** to inspect the retained result.
 
 Simulation and capsule generation are deliberately separate. This makes the boundary between source telemetry and FCAPSule processing visible.
 
@@ -78,7 +76,7 @@ python3 -m fcapsule.cli register \
 python3 -m fcapsule.cli status
 ```
 
-### Compare models
+### Evaluate models offline
 
 ```bash
 python3 -m fcapsule.cli compare-llms \
@@ -86,9 +84,9 @@ python3 -m fcapsule.cli compare-llms \
   --out .fcapsule/capsules/cli-latest
 ```
 
-## Model Configuration
+## Model Evaluation
 
-The web UI stores enabled state and maximum tokens in SQLite. Credentials are never stored there.
+Model comparison is an offline evaluation activity. It is not part of capsule capture and does not delay the operator report. Credentials are never stored in SQLite.
 
 Place the provider key in `.env`:
 
@@ -96,7 +94,7 @@ Place the provider key in `.env`:
 DEEPSEEK_API_KEY=...
 ```
 
-When no key is available, capsule creation completes with deterministic reasoning and records the model stage as skipped.
+Capsule creation always completes with deterministic detection and evidence-grounded reasoning, whether or not a provider key is available. A configured model may be evaluated or added later as a non-blocking enrichment.
 
 ## Local Files
 
@@ -112,8 +110,6 @@ The directory is ignored by Git. To preserve results outside local development, 
 ## Troubleshooting
 
 - **Port already in use:** start with `--port 8766`.
-- **No model result:** verify `.env`, restart the service, and confirm the model is enabled.
 - **Simulation does not alert:** use at least 20 incident requests and recommended concurrency 16 or higher.
 - **Capsule unavailable:** complete a simulation before selecting **Build capsule**.
 - **Trace shows zero retained spans:** this is expected; only source availability is retained.
-

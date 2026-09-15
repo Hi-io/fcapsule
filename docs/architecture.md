@@ -30,12 +30,10 @@ Alert trigger or explicit incident window
                        |
           grounded reasoning + verifier
                        |
-           optional model comparison
-                       |
                        v
 +------------------------------------------------+
 | Capsule store                                  |
-| JSON | Markdown | evaluation | dashboard | ZIP |
+| report | JSON | Markdown | evaluation | ZIP    |
 +----------------------+-------------------------+
                        |
               Operations / API / CLI
@@ -43,7 +41,7 @@ Alert trigger or explicit incident window
 
 ## Control Plane
 
-`ControlPlane` coordinates background jobs and exposes an immutable snapshot to the HTTP API. `FCAPSuleStore` persists application, incident, capsule, and model metadata in SQLite. The simulation lab and Operations UI are two clients of the same state.
+`ControlPlane` coordinates background jobs and exposes an immutable snapshot to the HTTP API. `FCAPSuleStore` persists application, incident, and capsule metadata in SQLite. The simulation lab and Operations UI are two clients of the same state. An incident report is generated from deterministic evidence before the capsule is marked ready; offline model evaluation cannot block that report.
 
 ## Source Ownership
 
@@ -87,4 +85,3 @@ FCAPSule pod
 ```
 
 Distributed workers and Kafka-triggered scheduling are future scaling work. They do not change the normalized case or capsule contracts.
-
