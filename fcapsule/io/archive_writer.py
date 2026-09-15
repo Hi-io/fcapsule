@@ -15,6 +15,7 @@ def create_archive(output_dir: Path, case_id: str) -> Path:
         "evaluation.json",
         "baselines.json",
         "incident_report.json",
+        "ai_briefing.json",
         "dashboard.html",
     )
     with ZipFile(archive_path, "w", compression=ZIP_DEFLATED) as archive:

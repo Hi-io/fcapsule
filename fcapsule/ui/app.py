@@ -149,7 +149,9 @@ tbody tr:hover { background:#fafbfb; }
 .queue-note { color:var(--muted); font-size:12px; }
 .incident-title { font-weight:700; display:block; }
 .impact-line { color:var(--muted); font-size:12px; margin-top:3px; }
-.report { margin-top:14px; border-top:3px solid var(--green); }
+.incident-row.open > td { background:#f3f8f5; }
+.report-row > td { padding:0; background:#fbfcfc; }
+.report { margin:0; border:0; border-top:3px solid var(--green); }
 .report-banner { padding:18px; border-bottom:1px solid var(--line); background:#f9fbfa; display:flex; justify-content:space-between; align-items:start; gap:16px; }
 .report-banner h2 { margin:4px 0 5px; font-size:20px; }
 .report-banner p { margin:0; color:var(--muted); max-width:760px; }
@@ -162,16 +164,25 @@ tbody tr:hover { background:#fafbfb; }
 .hypothesis { border-left:3px solid var(--amber); background:var(--amber-bg); padding:12px 13px; }
 .hypothesis p { margin:0 0 8px; font-size:15px; }
 .hypothesis small { color:#6d4b22; }
+.ai-briefing { border-left:3px solid var(--green); background:var(--green-bg); padding:12px 13px; }
+.ai-briefing p { margin:0 0 8px; }
+.ai-briefing .briefing-action { font-weight:700; }
+.ai-briefing .citations { color:#386052; font-size:12px; }
 .impact-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); border:1px solid var(--line); }
-.impact-item { padding:11px; border-right:1px solid var(--line); border-bottom:1px solid var(--line); }
+.impact-item { padding:12px; border-right:1px solid var(--line); border-bottom:1px solid var(--line); }
 .impact-item:nth-child(2n) { border-right:0; }
+.impact-item:last-child:nth-child(odd) { border-right:0; }
 .impact-item:nth-last-child(-n + 2) { border-bottom:0; }
 .impact-item span, .timeline-item small { display:block; color:var(--muted); font-size:11px; }
 .impact-item strong { display:block; margin:3px 0; font-size:18px; }
+.impact-item p { color:var(--muted); font-size:12px; margin:6px 0 0; }
 .action-list { margin:0; padding:0; list-style:none; display:grid; gap:7px; }
-.action-list li { border:1px solid var(--line); padding:9px 10px; background:#fff; }
-.action-list li.urgent { border-left:3px solid var(--red); background:#fffafa; }
-.action-list b { display:block; font-size:12px; margin-bottom:3px; }
+.action-list li { border-bottom:1px solid var(--line); padding:0 0 9px 28px; position:relative; background:transparent; }
+.action-list li:last-child { border-bottom:0; }
+.action-list li:before { content:attr(data-step); position:absolute; left:0; top:0; color:var(--muted); font-size:12px; font-weight:750; }
+.action-list li.urgent:before { color:var(--red); }
+.action-list b { display:block; font-size:12px; margin-bottom:3px; color:var(--amber); }
+.action-list li.urgent b { color:var(--red); }
 .timeline { margin:0; padding:0; list-style:none; display:grid; gap:9px; }
 .timeline-item { border-left:2px solid #aab6bd; padding-left:10px; }
 .timeline-item.critical { border-left-color:var(--red); }
@@ -186,6 +197,41 @@ details.engineering summary { cursor:pointer; padding:10px 11px; font-weight:650
 .diagnostics { padding:0 11px 11px; color:var(--muted); font-size:12px; }
 .diagnostics dl { display:grid; grid-template-columns:1fr auto; gap:5px 12px; margin:0; }
 .diagnostics dd { margin:0; color:var(--ink); font-weight:650; }
+.report-tools { display:flex; gap:7px; flex-wrap:wrap; margin-top:11px; }
+.button-link { display:inline-flex; align-items:center; min-height:32px; padding:6px 9px; border:1px solid #aeb8be; background:#fff; color:var(--ink); text-decoration:none; font-size:12px; font-weight:650; }
+.button-link:hover { border-color:#65737d; background:#f5f7f8; }
+.evidence-domain { margin:0 0 23px; }
+.evidence-domain:last-child { margin-bottom:0; }
+.evidence-domain h3 { display:flex; align-items:center; gap:8px; }
+.domain-mark { font-size:10px; color:#53616b; text-transform:uppercase; letter-spacing:.05em; border:1px solid #bdc7cd; padding:2px 5px; font-weight:700; }
+.alert-records { display:grid; gap:7px; }
+.alert-record { border-left:3px solid var(--red); padding:8px 10px; background:#fffafa; }
+.alert-record.warning { border-left-color:var(--amber); background:#fffaf1; }
+.alert-record strong { display:block; }
+.alert-record small { color:var(--muted); display:block; margin-top:2px; }
+.pm-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); border:1px solid var(--line); }
+.pm-signal { padding:12px; border-right:1px solid var(--line); border-bottom:1px solid var(--line); }
+.pm-signal:nth-child(2n) { border-right:0; }
+.pm-signal:nth-last-child(-n + 2) { border-bottom:0; }
+.pm-signal h4 { margin:0; font-size:13px; }
+.pm-signal p { color:var(--muted); font-size:12px; margin:5px 0 7px; }
+.pm-values { display:flex; gap:12px; color:var(--muted); font-size:11px; }
+.pm-values b { display:block; color:var(--ink); font-size:14px; }
+.spark { display:block; width:100%; height:72px; margin:8px 0; overflow:visible; }
+.spark .axis { stroke:#d9e0e3; stroke-width:1; }
+.spark .baseline { stroke:#8da0aa; stroke-dasharray:3 3; stroke-width:1.25; }
+.spark .series { fill:none; stroke:var(--blue); stroke-width:2.5; }
+.spark .incident { stroke:var(--red); stroke-width:1.25; stroke-dasharray:3 3; }
+.log-pattern { border-top:1px solid var(--line); }
+.log-pattern:first-of-type { border-top:0; }
+.log-pattern summary { cursor:pointer; padding:9px 0; list-style:none; }
+.log-pattern summary::-webkit-details-marker { display:none; }
+.log-pattern summary:before { content:'+'; display:inline-block; width:18px; color:var(--blue); font-weight:750; }
+.log-pattern[open] summary:before { content:'−'; }
+.log-pattern strong { font-family:"Cascadia Mono", Consolas, monospace; font-size:12px; overflow-wrap:anywhere; }
+.log-pattern p { margin:0 0 8px 18px; color:var(--muted); font-size:12px; }
+.log-lines { margin:0 0 10px 18px; padding:9px; overflow:auto; background:#171f24; color:#dfe9ed; font:11px/1.5 "Cascadia Mono", Consolas, monospace; white-space:pre-wrap; }
+.report-note { color:var(--muted); font-size:12px; margin:0 0 9px; }
 .boot { color:var(--muted); padding:40px; text-align:center; }
 .mono { font-family:"Cascadia Mono", Consolas, monospace; font-size:12px; }
 .right { text-align:right; }
@@ -227,11 +273,11 @@ function sources(config) {
 function renderConsole(state) {
   const data = state.overview; const apps = data.applications; const incidents = data.incidents;
   app.innerHTML = `
-    <div class="page-head"><div><div class="eyebrow">Incident workspace</div><h1>Operations</h1><p>Open the incident report to understand impact, evidence, and the next safe action.</p></div><a href="/lab"><button class="secondary">Open Test Lab</button></a></div>
+    <div class="page-head"><div><div class="eyebrow">Incident workspace</div><h1>Operations</h1><p>Captured incidents and the evidence needed to investigate them.</p></div><a href="/lab"><button class="secondary">Open Test Lab</button></a></div>
     <section class="sheet"><div class="sheet-head"><h2>Incident queue</h2><span class="queue-note">${incidents.length} captured incident${incidents.length === 1 ? '' : 's'} · reports stay available after source telemetry expires</span></div><div class="table-wrap">${incidentTable(incidents, data.capsules)}</div></section>
-    ${selectedReport ? reportPanel(selectedReport) : ''}
     <section class="sheet" style="margin-top:14px"><div class="sheet-head"><h2>Application coverage</h2><span class="queue-note">FM, PM, logs, and trace access configured per application</span></div><div class="table-wrap">${applicationTable(apps)}</div></section>`;
   document.querySelectorAll('[data-incident-report]').forEach(button => button.addEventListener('click', () => openReport(button.dataset.incidentReport)));
+  document.querySelectorAll('[data-ai-briefing]').forEach(button => button.addEventListener('click', () => generateAiBriefing(button.dataset.aiBriefing)));
 }
 
 function applicationTable(items) {
@@ -242,9 +288,12 @@ function applicationTable(items) {
 function incidentTable(items, capsules) {
   if (!items.length) return '<div class="empty">No incidents have been captured yet.</div>';
   const reports = new Set(capsules.map(item => item.incident_id));
-  return `<table class="incident-table"><thead><tr><th>Severity</th><th>Incident</th><th class="wide-only">Service</th><th class="wide-only">Started</th><th>Observed impact</th><th></th></tr></thead><tbody>${items.map(item => {
+  const openId = selectedReport?.incident?.incident_id || selectedReport?.report?.incident?.incident_id;
+  return `<table class="incident-table"><thead><tr><th>Severity</th><th>Incident</th><th class="wide-only">Application</th><th class="wide-only">Started</th><th>Captured context</th><th></th></tr></thead><tbody>${items.map(item => {
     const ready = reports.has(item.incident_id);
-    return `<tr><td>${status(item.severity)}</td><td><span class="incident-title">${safe(item.summary || item.scenario)}</span><small class="mono">${safe(item.incident_id)}</small></td><td class="wide-only">${safe(item.app_id)}</td><td class="wide-only">${shortTime(item.started_at)}</td><td><span class="impact-line">${safe(item.alert_count)} alerts · ${fmt.format(item.log_count)} logs captured · ${fmt.format(item.metric_series_count)} PM series</span></td><td><button class="secondary" data-incident-report="${safe(item.incident_id)}">${ready ? 'Open report' : 'View incident'}</button></td></tr>`;
+    const isOpen = openId === item.incident_id;
+    const reportRow = isOpen ? `<tr class="report-row"><td colspan="6">${reportPanel(selectedReport)}</td></tr>` : '';
+    return `<tr class="incident-row ${isOpen ? 'open' : ''}"><td>${status(item.severity)}</td><td><span class="incident-title">${safe(item.summary || item.scenario)}</span><small class="mono">${safe(item.incident_id)}</small></td><td class="wide-only">${safe(item.app_id)}</td><td class="wide-only">${shortTime(item.started_at)}</td><td><span class="impact-line">${safe(item.alert_count)} FM alerts · ${fmt.format(item.log_count)} logs captured · ${fmt.format(item.metric_series_count)} PM series</span></td><td><button class="secondary" data-incident-report="${safe(item.incident_id)}" aria-expanded="${isOpen}">${isOpen ? 'Close report' : ready ? 'Open report' : 'View incident'}</button></td></tr>${reportRow}`;
   }).join('')}</tbody></table>`;
 }
 
@@ -253,25 +302,71 @@ function formatDate(value) {
 }
 
 async function openReport(id) {
+  const currentId = selectedReport?.incident?.incident_id || selectedReport?.report?.incident?.incident_id;
+  if (currentId === id) {
+    selectedReport = null;
+    history.replaceState(null, '', '/console');
+    renderConsole(lastState);
+    return;
+  }
   const response = await fetch('/api/incidents/' + encodeURIComponent(id) + '/report'); const data = await response.json();
   if (!response.ok) { alert(data.error || 'Unable to load incident report'); return; }
   selectedReport = data;
   history.replaceState(null, '', '/console?incident=' + encodeURIComponent(id));
   renderConsole(lastState);
-  document.querySelector('#incident-report')?.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+async function generateAiBriefing(id) {
+  window.aiBriefingLoading = true;
+  renderConsole(lastState);
+  try {
+    const response = await fetch('/api/incidents/' + encodeURIComponent(id) + '/briefing', {method:'POST'});
+    const result = await response.json();
+    if (!selectedReport) return;
+    selectedReport.ai_briefing = result;
+  } catch (error) {
+    if (selectedReport) selectedReport.ai_briefing = {status:'unavailable', message:'The AI briefing service could not be reached.'};
+  } finally {
+    window.aiBriefingLoading = false;
+    renderConsole(lastState);
+  }
+}
+
+function sparkline(signal) {
+  const values = signal.values || [];
+  if (values.length < 2) return '';
+  const width = 320; const height = 72; const pad = 5;
+  const numbers = values.map(point => Number(point.value));
+  const floor = Math.min(...numbers, Number(signal.baseline_value || 0));
+  const ceiling = Math.max(...numbers, Number(signal.baseline_value || 0));
+  const range = Math.max(ceiling - floor, 0.01);
+  const point = (value, index) => `${(index / (values.length - 1) * (width - pad * 2) + pad).toFixed(1)},${(height - pad - ((Number(value) - floor) / range * (height - pad * 2))).toFixed(1)}`;
+  const path = values.map((item, index) => `${index ? 'L' : 'M'}${point(item.value, index)}`).join(' ');
+  const baselineY = (height - pad - ((Number(signal.baseline_value || 0) - floor) / range * (height - pad * 2))).toFixed(1);
+  const peakIndex = numbers.indexOf(Math.max(...numbers));
+  const peakX = (peakIndex / (values.length - 1) * (width - pad * 2) + pad).toFixed(1);
+  return `<svg class="spark" viewBox="0 0 ${width} ${height}" role="img" aria-label="${safe(signal.label)} across the incident window"><line class="axis" x1="0" y1="${height - pad}" x2="${width}" y2="${height - pad}"/><line class="baseline" x1="0" y1="${baselineY}" x2="${width}" y2="${baselineY}"/><line class="incident" x1="${peakX}" y1="0" x2="${peakX}" y2="${height}"/><path class="series" d="${path}"/></svg>`;
 }
 
 function reportPanel(payload) {
   if (!payload.report) return `<section id="incident-report" class="sheet report"><div class="sheet-body"><h2>Report is still being prepared</h2><p class="queue-note">The incident is captured. Build its capsule to preserve evidence and produce the responder report.</p></div></section>`;
   const report = payload.report; const incident = report.incident; const hypothesis = report.primary_hypothesis;
-  const impact = report.impact.length ? report.impact.map(item => `<div class="impact-item"><span>${safe(item.label)}</span><strong>${safe(item.value)}</strong><small>baseline ${safe(item.baseline)} · ${safe(item.component || 'service')}</small></div>`).join('') : '<p class="queue-note">No material metric anomalies were retained.</p>';
+  const impact = report.impact.length ? report.impact.map(item => `<div class="impact-item"><span>${safe(item.label)}</span><strong>${safe(item.value)}</strong><small>${safe(item.component || 'service')} · ${safe(item.baseline_text)}</small><p>${safe(item.meaning)}</p></div>`).join('') : '<p class="queue-note">No material metric anomalies were retained.</p>';
   const timeline = report.timeline.length ? report.timeline.map(item => `<li class="timeline-item ${safe(item.severity)}"><strong>${safe(item.title)}</strong><small>${formatDate(item.timestamp)} · ${safe(item.description || '')}</small></li>`).join('') : '<li class="queue-note">No ordered incident events are available.</li>';
-  const actions = report.actions.length ? report.actions.slice(0,6).map(item => `<li class="${safe(item.priority)}"><b>${item.priority === 'urgent' ? 'Do now' : 'Next check'}</b>${safe(item.action)}${item.reason ? `<small>${safe(item.reason)}</small>` : ''}</li>`).join('') : '<li>No follow-up action was generated.</li>';
-  const evidence = report.supporting_evidence.slice(0,8).map(item => `<li><code>${safe(item.evidence_id)}</code> <strong>${safe(item.title)}</strong><br><span class="queue-note">${safe(item.summary)}</span></li>`).join('');
+  const actions = report.actions.length ? report.actions.slice(0,6).map((item, index) => `<li class="${safe(item.priority)}" data-step="${index + 1}"><b>${item.priority === 'urgent' ? 'Preserve now' : index === 0 ? 'Start here' : 'Then'}</b>${safe(item.action)}${item.reason ? `<small class="queue-note">${safe(item.reason)}</small>` : ''}</li>`).join('') : '<li>No follow-up action was generated.</li>';
+  const faultAlerts = report.fault_alerts.map(item => `<div class="alert-record ${safe(item.severity)}"><strong>${safe(item.name)}</strong><small>${formatDate(item.timestamp)}${item.service ? ` · ${safe(item.service)}` : ''}</small><span>${safe(item.description)}</span></div>`).join('');
+  const pmSignals = report.pm_signals.map(item => `<article class="pm-signal"><h4>${safe(item.label)}</h4><p>${safe(item.meaning)}</p>${sparkline(item)}<div class="pm-values"><span>Typical<b>${safe(item.baseline)}</b></span><span>Peak<b>${safe(item.peak)}</b></span></div></article>`).join('');
+  const logPatterns = report.log_patterns.map(item => `<details class="log-pattern"><summary><strong>${safe(item.pattern)}</strong><span class="queue-note"> · ${safe(item.summary)}</span></summary><p>${safe(formatDate(item.first_seen))}${item.last_seen ? ` to ${safe(formatDate(item.last_seen))}` : ''} · retained pattern ${safe(item.evidence_id)}</p>${item.examples?.length ? `<pre class="log-lines">${safe(item.examples.join('\n'))}</pre>` : ''}</details>`).join('');
+  const ai = payload.ai_briefing;
+  const aiBriefing = ai?.status === 'ready' ? `<div class="ai-briefing"><p>${safe(ai.briefing.operator_brief)}</p><p class="briefing-action">First action: ${safe(ai.briefing.first_action)}</p><small>${safe(ai.briefing.why_this_first)}</small><p class="citations">Grounded in ${safe(ai.briefing.evidence_ids.join(', '))} · ${safe(ai.model)}</p></div>` : ai ? `<p class="queue-note">AI briefing unavailable: ${safe(ai.message || 'The response was not accepted.')}</p>` : `<div class="report-tools"><button class="secondary" data-ai-briefing="${safe(incident.incident_id)}" ${window.aiBriefingLoading ? 'disabled' : ''}>${window.aiBriefingLoading ? 'Generating briefing…' : 'Generate AI briefing'}</button></div>`;
   const coverage = report.coverage.map(item => `<div class="coverage-item"><span>${safe(item.domain)}</span><span>${safe(item.detail)}</span></div>`).join('');
   const topology = report.topology.map(item => `${safe(item.from)} → ${safe(item.to)}`).join(' · ');
   const retentionClass = report.retention.trace_available && report.retention.source_retention_seconds ? 'retention urgent' : 'retention';
-  return `<section id="incident-report" class="sheet report"><div class="report-banner"><div><div class="eyebrow">Incident report · ${safe(incident.incident_id)}</div><h2>${safe(incident.title)}</h2><p>${safe(incident.summary)}</p></div><div>${status(incident.severity)}<br><span class="queue-note">${safe(incident.service)} · ${safe(incident.cluster)} / ${safe(incident.namespace)}<br>${formatDate(incident.started_at)}</span></div></div><div class="report-layout"><div class="report-main"><section class="report-section"><h3>Observed impact</h3><div class="impact-grid">${impact}</div></section><section class="report-section"><h3>Likely failure path</h3><div class="hypothesis"><p>${safe(hypothesis.statement)}</p><small>${hypothesis.confidence != null ? `${Math.round(Number(hypothesis.confidence) * 100)}% confidence` : 'Confidence unavailable'} · ${safe(hypothesis.verdict)} · Requires verification</small></div>${hypothesis.uncertainty.length ? `<p class="queue-note" style="margin-top:9px">Still unknown: ${safe(hypothesis.uncertainty.join('; '))}</p>` : ''}</section><section class="report-section"><h3>What changed</h3><ul class="timeline">${timeline}</ul>${topology ? `<p class="queue-note" style="margin-top:10px">Observed path: ${topology}</p>` : ''}</section><section class="report-section"><h3>Supporting evidence</h3><ul class="evidence-list">${evidence || '<li>No retained evidence items.</li>'}</ul></section></div><aside class="report-side"><section class="report-section"><h3>Do next</h3><ul class="action-list">${actions}</ul></section><section class="report-section"><h3>Evidence availability</h3><div class="${retentionClass}"><strong>${report.retention.trace_available ? 'Trace window available' : 'Trace window unavailable'}</strong><br><span>${safe(report.retention.message)}</span>${report.retention.source_retention_seconds ? `<br><small>Source window: ${safe(report.retention.source_retention_seconds)} seconds · raw traces retained by FCAPSule: no</small>` : ''}</div></section><section class="report-section"><h3>Coverage</h3><div class="coverage-list">${coverage}</div></section><details class="engineering"><summary>Engineering diagnostics</summary><div class="diagnostics"><dl><dt>Derived evidence retained</dt><dd>${report.engineering_diagnostics.selected_evidence}</dd><dt>Log reduction</dt><dd>${pct(report.engineering_diagnostics.log_compression_ratio)}</dd><dt>Signal preservation</dt><dd>${pct(report.engineering_diagnostics.important_signal_preservation)}</dd><dt>Hypothesis grounding</dt><dd>${pct(report.engineering_diagnostics.hypothesis_grounding_score)}</dd><dt>Pipeline runtime</dt><dd>${Number(report.engineering_diagnostics.runtime_seconds || 0).toFixed(2)}s</dd></dl></div></details></aside></div></section>`;
+  const capsuleId = payload.record?.capsule_id;
+  const archiveName = `fcapsule_${incident.incident_id}.zip`;
+  const archiveUrl = capsuleId ? `/artifacts/${encodeURIComponent(capsuleId)}/${encodeURIComponent(archiveName)}` : '';
+  const reportUrl = capsuleId ? `/artifacts/${encodeURIComponent(capsuleId)}/incident_report.json` : '';
+  return `<section id="incident-report" class="report"><div class="report-banner"><div><div class="eyebrow">Incident report · ${safe(incident.incident_id)}</div><h2>${safe(incident.title)}</h2><p>${safe(incident.summary)}</p></div><div>${status(incident.severity)}<br><span class="queue-note">${safe(incident.service)} · ${safe(incident.cluster)} / ${safe(incident.namespace)}<br>${formatDate(incident.started_at)}</span></div></div><div class="report-layout"><div class="report-main"><section class="report-section"><h3>Observed impact</h3><div class="impact-grid">${impact}</div></section><section class="report-section"><h3>FCAPSule assessment <span class="domain-mark">FM + PM + logs</span></h3><div class="hypothesis"><p>${safe(hypothesis.statement)}</p><small>${hypothesis.confidence != null ? `${Math.round(Number(hypothesis.confidence) * 100)}% confidence` : 'Confidence unavailable'} · ${safe(hypothesis.verdict)} · investigation path, not final root cause</small></div>${hypothesis.uncertainty.length ? `<p class="queue-note" style="margin-top:9px">To confirm: ${safe(hypothesis.uncertainty.join('; '))}</p>` : ''}</section><section class="report-section"><h3>AI incident briefing <span class="domain-mark">Cited response</span></h3>${aiBriefing}</section><section class="evidence-domain"><h3>Fault management <span class="domain-mark">FM alerts</span></h3><p class="report-note">Alerts that established the incident window and user impact.</p><div class="alert-records">${faultAlerts || '<span class="queue-note">No fault events were retained.</span>'}</div></section><section class="evidence-domain"><h3>Performance management <span class="domain-mark">PM time series</span></h3><p class="report-note">Trend lines compare normal behaviour with the incident window. The red marker identifies the observed peak.</p><div class="pm-grid">${pmSignals || '<span class="queue-note">No relevant performance series were retained.</span>'}</div>${report.pm_coverage_note ? `<p class="queue-note" style="margin-top:8px">${safe(report.pm_coverage_note)}</p>` : ''}</section><section class="evidence-domain"><h3>Log evidence <span class="domain-mark">Anonymized patterns</span></h3><p class="report-note">Only the selected patterns and representative lines are retained. Expand a pattern to inspect the examples used in the assessment.</p>${logPatterns || '<span class="queue-note">No selected log patterns were retained.</span>'}</section><section class="report-section"><h3>Incident sequence</h3><ul class="timeline">${timeline}</ul>${topology ? `<p class="queue-note" style="margin-top:10px">Observed dependency path: ${topology}</p>` : ''}</section></div><aside class="report-side"><section class="report-section"><h3>Recommended follow-up</h3><ul class="action-list">${actions}</ul></section><section class="report-section"><h3>Trace availability</h3><div class="${retentionClass}"><strong>${report.retention.trace_available ? 'Trace window available' : 'Trace window unavailable'}</strong><br><span>${safe(report.retention.message)}</span>${report.retention.source_retention_seconds ? `<br><small>Source window: ${safe(report.retention.source_retention_seconds)} seconds · raw traces retained by FCAPSule: no</small>` : ''}</div></section><section class="report-section"><h3>Incident package</h3><p class="report-note">The report and curated evidence are retained in the FCAPSule archive. Raw logs and traces remain in their source systems.</p><div class="report-tools">${reportUrl ? `<a class="button-link" href="${reportUrl}" download>Report JSON</a>` : ''}${archiveUrl ? `<a class="button-link" href="${archiveUrl}" download>Capsule archive</a>` : ''}</div></section><section class="report-section"><h3>Coverage</h3><div class="coverage-list">${coverage}</div></section><details class="engineering"><summary>Engineering diagnostics</summary><div class="diagnostics"><dl><dt>Derived evidence retained</dt><dd>${report.engineering_diagnostics.selected_evidence}</dd><dt>Log reduction</dt><dd>${pct(report.engineering_diagnostics.log_compression_ratio)}</dd><dt>Signal preservation</dt><dd>${pct(report.engineering_diagnostics.important_signal_preservation)}</dd><dt>Hypothesis grounding</dt><dd>${pct(report.engineering_diagnostics.hypothesis_grounding_score)}</dd><dt>Pipeline runtime</dt><dd>${Number(report.engineering_diagnostics.runtime_seconds || 0).toFixed(2)}s</dd></dl></div></details></aside></div></section>`;
 }
 
 function renderLab(state) {
@@ -466,6 +561,12 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             if path == "/api/reset":
                 self.server.control_plane.reset_live()
                 self._json({"ok": True})
+                return
+            if path.startswith("/api/incidents/") and path.endswith("/briefing"):
+                incident_id = unquote(path.removeprefix("/api/incidents/").removesuffix("/briefing").rstrip("/"))
+                result = self.server.control_plane.generate_ai_briefing(incident_id)
+                status = HTTPStatus.OK if result.get("status") == "ready" else HTTPStatus.SERVICE_UNAVAILABLE
+                self._json(result, status)
                 return
             if path.startswith("/api/models/"):
                 model_id = unquote(path.removeprefix("/api/models/"))

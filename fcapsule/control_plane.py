@@ -13,8 +13,10 @@ from demo.incident_lab import SimulationConfig, run_simulation
 from fcapsule.env import load_env_file
 from fcapsule.incident_report import build_incident_report
 from fcapsule.io.archive_writer import create_archive
+from fcapsule.io.case_loader import load_case
 from fcapsule.io.output_writer import write_json
 from fcapsule.pipeline import investigate_case
+from fcapsule.reasoning.incident_briefing import generate_incident_briefing
 from fcapsule.store import FCAPSuleStore
 from fcapsule.ui.dashboard import render_dashboard
 
@@ -261,7 +263,8 @@ class ControlPlane:
             capsule_id = f"capsule-{incident_id}"
             capsule_path = output_dir / "capsule.json"
             capsule_data = json.loads(capsule_path.read_text(encoding="utf-8"))
-            write_json(output_dir / "incident_report.json", build_incident_report(capsule_data, incident))
+            source_metrics = load_case(incident["case_dir"]).metrics
+            write_json(output_dir / "incident_report.json", build_incident_report(capsule_data, incident, source_metrics))
             archive = create_archive(output_dir, incident_id)
             capsule = self.store.record_capsule(
                 {
@@ -341,15 +344,32 @@ class ControlPlane:
             return {"incident": incident, "report": None}
         report_path = Path(capsule_record["output_dir"]) / "incident_report.json"
         capsule = json.loads(capsule_path.read_text(encoding="utf-8"))
+        source_metrics = load_case(incident["case_dir"]).metrics
+        report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.is_file() else None
+        if not report or report.get("report_version") != "1.2":
+            report = build_incident_report(capsule, incident, source_metrics)
+            write_json(report_path, report)
+            create_archive(Path(capsule_record["output_dir"]), incident_id)
+        briefing_path = Path(capsule_record["output_dir"]) / "ai_briefing.json"
         return {
             "incident": incident,
             "record": capsule_record,
-            "report": (
-                json.loads(report_path.read_text(encoding="utf-8"))
-                if report_path.is_file()
-                else build_incident_report(capsule, incident)
-            ),
+            "report": report,
+            "ai_briefing": json.loads(briefing_path.read_text(encoding="utf-8")) if briefing_path.is_file() else None,
         }
+
+    def generate_ai_briefing(self, incident_id: str) -> dict[str, Any]:
+        """Generate an optional LLM briefing without delaying evidence capture."""
+
+        payload = self.incident_report_payload(incident_id)
+        if not payload or not payload.get("report") or not payload.get("record"):
+            raise ValueError("Build an incident report before requesting an AI briefing")
+        result = generate_incident_briefing(payload["report"])
+        if result.get("status") == "ready":
+            output_dir = Path(payload["record"]["output_dir"])
+            write_json(output_dir / "ai_briefing.json", result)
+            create_archive(output_dir, incident_id)
+        return result
 
     @staticmethod
     def _compact_comparison(comparison: dict[str, Any] | None) -> dict[str, Any] | None:

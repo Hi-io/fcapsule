@@ -15,6 +15,44 @@ _METRIC_ORDER = (
     "slow_queries",
 )
 
+_METRIC_CONTEXT = {
+    "checkout_request_error_rate": {
+        "label": "Checkout API failure rate",
+        "meaning": "Share of checkout API requests that failed during the peak interval.",
+    },
+    "checkout_http_errors_total": {
+        "label": "Checkout API failed requests",
+        "meaning": "Failed checkout API requests recorded during one collection interval.",
+    },
+    "checkout_request_latency_p95_ms": {
+        "label": "Checkout API p95 response time",
+        "meaning": "95% of checkout API requests completed within this time during the peak interval.",
+    },
+    "checkout_retry_amplification_ratio": {
+        "label": "Inventory attempts per checkout",
+        "meaning": "Average inventory attempts made for each checkout request.",
+    },
+    "inventory_db_pool_peak_utilization_ratio": {
+        "label": "Inventory database pool usage",
+        "meaning": "Share of available inventory database connections in use.",
+    },
+    "inventory_db_pool_exhausted_total": {
+        "label": "Inventory database pool exhaustion",
+        "meaning": "Intervals in which reservation work could not obtain a database connection.",
+    },
+    "inventory_slow_queries_total": {
+        "label": "Slow reservation queries",
+        "meaning": "Reservation database queries that exceeded their expected duration during one collection interval.",
+    },
+}
+
+_PM_CHART_METRICS = (
+    "checkout_request_error_rate",
+    "checkout_request_latency_p95_ms",
+    "checkout_retry_amplification_ratio",
+    "inventory_db_pool_peak_utilization_ratio",
+)
+
 
 def _metric_rank(metric: dict[str, Any]) -> tuple[int, float]:
     name = str(metric.get("metric", ""))
@@ -23,6 +61,8 @@ def _metric_rank(metric: dict[str, Any]) -> tuple[int, float]:
 
 
 def _metric_label(name: str) -> str:
+    if name in _METRIC_CONTEXT:
+        return str(_METRIC_CONTEXT[name]["label"])
     labels = {
         "checkout_request_error_rate": "Checkout error rate",
         "checkout_http_errors_total": "Checkout errors",
@@ -53,7 +93,94 @@ def _dedupe(values: list[str]) -> list[str]:
     return list(dict.fromkeys(value for value in values if value))
 
 
-def build_incident_report(capsule: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:
+def _impact_context(name: str, value: Any, baseline: Any) -> tuple[str, str]:
+    context = _METRIC_CONTEXT.get(name, {})
+    meaning = str(context.get("meaning", "Observed during the peak incident interval."))
+    if name.endswith("_total"):
+        baseline_text = f"Typical interval: {_display_value(name, baseline)}"
+    elif "amplification_ratio" in name:
+        baseline_text = f"Normal: {_display_value(name, baseline)}"
+    else:
+        baseline_text = f"Normal: {_display_value(name, baseline)}"
+    return meaning, baseline_text
+
+
+def _pm_signals(source_metrics: list[dict[str, Any]] | None, anomalies: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep a small, chartable PM view beside the retained explanation."""
+
+    if not source_metrics:
+        return []
+    anomaly_by_metric = {item.get("metric"): item for item in anomalies}
+    by_name = {item.get("metric"): item for item in source_metrics}
+    signals = []
+    for name in _PM_CHART_METRICS:
+        series = by_name.get(name)
+        anomaly = anomaly_by_metric.get(name)
+        if not series or not anomaly:
+            continue
+        values = [
+            {"timestamp": str(point[0]), "value": round(float(point[1]), 4)}
+            for point in series.get("values", [])
+            if isinstance(point, list) and len(point) == 2
+        ]
+        if len(values) < 2:
+            continue
+        context = _METRIC_CONTEXT[name]
+        signals.append(
+            {
+                "evidence_id": f"ev_{anomaly.get('metric_id')}",
+                "metric": name,
+                "label": context["label"],
+                "meaning": context["meaning"],
+                "component": series.get("labels", {}).get("component"),
+                "baseline": _display_value(name, anomaly.get("baseline_median")),
+                "peak": _display_value(name, anomaly.get("incident_peak")),
+                "baseline_value": round(float(anomaly.get("baseline_median", 0)), 4),
+                "peak_value": round(float(anomaly.get("incident_peak", 0)), 4),
+                "alert_timestamp": anomaly.get("peak_timestamp"),
+                "values": values,
+            }
+        )
+    return signals
+
+
+def _fault_alerts(capsule: dict[str, Any]) -> list[dict[str, Any]]:
+    alerts = []
+    for index, item in enumerate(capsule.get("alerts", []), start=1):
+        labels = item.get("labels", {})
+        alerts.append(
+            {
+                "evidence_id": f"ev_alert_{index:03d}",
+                "name": item.get("alertname", "Alert"),
+                "severity": item.get("severity", "warning"),
+                "timestamp": item.get("startsAt"),
+                "description": item.get("annotations", {}).get("description", "Alert fired."),
+                "service": labels.get("service") or labels.get("component"),
+            }
+        )
+    return sorted(alerts, key=lambda item: str(item.get("timestamp", "")))
+
+
+def _log_patterns(selected: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "evidence_id": item.get("evidence_id"),
+            "pattern": item.get("title"),
+            "summary": item.get("summary"),
+            "first_seen": item.get("time_range", {}).get("start"),
+            "last_seen": item.get("time_range", {}).get("end"),
+            "examples": item.get("representative_lines", []),
+        }
+        for item in selected
+        if item.get("type") == "log_template"
+    ]
+
+
+def build_incident_report(
+    capsule: dict[str, Any],
+    record: dict[str, Any],
+    source_metrics: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Create a concise, evidence-attributable view for incident responders.
 
     This deliberately keeps evaluation and model experimentation out of the
@@ -71,18 +198,21 @@ def build_incident_report(capsule: dict[str, Any], record: dict[str, Any]) -> di
         if not any(term in name for term in _METRIC_ORDER):
             continue
         evidence = evidence_by_source.get(metric.get("metric_id"), {})
+        meaning, baseline_text = _impact_context(name, metric.get("incident_peak"), metric.get("baseline_median"))
         impact.append(
             {
                 "label": _metric_label(name),
                 "value": _display_value(name, metric.get("incident_peak")),
                 "baseline": _display_value(name, metric.get("baseline_median")),
+                "meaning": meaning,
+                "baseline_text": baseline_text,
                 "change_percent": round(float(metric.get("percentage_change", 0)), 1),
                 "timestamp": metric.get("peak_timestamp"),
                 "component": metric.get("labels", {}).get("component"),
                 "evidence_id": evidence.get("evidence_id"),
             }
         )
-        if len(impact) == 4:
+        if len(impact) == 6:
             break
 
     hypotheses = capsule.get("hypotheses", [])
@@ -95,6 +225,7 @@ def build_incident_report(capsule: dict[str, Any], record: dict[str, Any]) -> di
     for item in _dedupe(list(primary.get("next_checks", [])) + list(capsule.get("next_steps", []))):
         urgent = "trace" in item.lower() and retention_seconds > 0
         actions.append({"action": item, "priority": "urgent" if urgent else "next", "reason": "Source traces expire" if urgent else None})
+    actions.sort(key=lambda item: 0 if item["priority"] == "urgent" else 1)
 
     domains = capsule.get("domain_summary", {})
     coverage = []
@@ -120,8 +251,10 @@ def build_incident_report(capsule: dict[str, Any], record: dict[str, Any]) -> di
         )
 
     evaluation = capsule.get("evaluation", {})
+    metric_names = {str(item.get("metric", "")).lower() for item in source_metrics or []}
+    missing_pm = [label for label, terms in (("CPU", ("cpu",)), ("memory", ("memory", "mem_"))) if not any(term in name for name in metric_names for term in terms)]
     return {
-        "report_version": "1.0",
+        "report_version": "1.2",
         "incident": {
             "incident_id": record.get("incident_id", case.get("case_id")),
             "title": case.get("case_title", record.get("summary", "Incident report")),
@@ -144,6 +277,14 @@ def build_incident_report(capsule: dict[str, Any], record: dict[str, Any]) -> di
         },
         "timeline": sorted(capsule.get("timeline", []), key=lambda item: item.get("timestamp", "")),
         "topology": case.get("topology", []),
+        "fault_alerts": _fault_alerts(capsule),
+        "pm_signals": _pm_signals(source_metrics, anomalies),
+        "pm_coverage_note": (
+            f"No {', '.join(missing_pm)} series were received for this incident, so FCAPSule cannot rule out host-level pressure."
+            if missing_pm
+            else None
+        ),
+        "log_patterns": _log_patterns(selected),
         "actions": actions,
         "retention": {
             "trace_available": bool(trace_access.get("available")),

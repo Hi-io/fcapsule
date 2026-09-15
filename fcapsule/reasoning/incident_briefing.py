@@ -1,0 +1,123 @@
+"""Non-blocking, citation-checked LLM briefing for a retained incident report."""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from typing import Any
+
+from fcapsule.reasoning.llm_client import ChatRequest, DeepSeekChatClient, LLMUnavailableError
+
+
+def _available_evidence(report: dict[str, Any]) -> dict[str, str]:
+    evidence: dict[str, str] = {}
+    for alert in report.get("fault_alerts", []):
+        evidence[str(alert.get("evidence_id"))] = f"FM alert: {alert.get('name')} - {alert.get('description')}"
+    for signal in report.get("pm_signals", []):
+        evidence[str(signal.get("evidence_id"))] = (
+            f"PM signal: {signal.get('label')} typical {signal.get('baseline')}, peak {signal.get('peak')}"
+        )
+    for pattern in report.get("log_patterns", []):
+        evidence[str(pattern.get("evidence_id"))] = f"Log pattern: {pattern.get('pattern')} - {pattern.get('summary')}"
+    return {key: value for key, value in evidence.items() if key and key != "None"}
+
+
+def build_briefing_prompt(report: dict[str, Any]) -> list[dict[str, str]]:
+    """Use a constrained input so the model improves prioritisation, not data volume."""
+
+    evidence = _available_evidence(report)
+    incident = report.get("incident", {})
+    payload = {
+        "incident": {
+            "title": incident.get("title"),
+            "service": incident.get("service"),
+            "summary": incident.get("summary"),
+        },
+        "assessment": report.get("primary_hypothesis", {}).get("statement"),
+        "uncertainty": report.get("primary_hypothesis", {}).get("uncertainty", []),
+        "available_evidence": evidence,
+        "actions": [item.get("action") for item in report.get("actions", [])],
+    }
+    schema = {
+        "operator_brief": "At most 55 words. State the likely investigation path, not a root cause.",
+        "first_action": "One specific action that best reduces investigation risk now.",
+        "why_this_first": "At most 35 words, tied to evidence and retention urgency if relevant.",
+        "evidence_ids": ["At least 2, at most 5 IDs from available_evidence."],
+        "uncertainty": "One concise limit that prevents a final root-cause claim.",
+    }
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are an incident-response assistant. Use only the provided retained evidence. "
+                "Do not invent telemetry, do not claim a final root cause, and return valid JSON only. "
+                "Every response must cite at least two evidence IDs exactly as supplied."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Return this exact JSON shape:\n{json.dumps(schema, ensure_ascii=True)}\n\n"
+                f"Incident report:\n{json.dumps(payload, ensure_ascii=True)}"
+            ),
+        },
+    ]
+
+
+def _parse_json(text: str) -> dict[str, Any] | None:
+    candidate = text.strip()
+    if candidate.startswith("```"):
+        candidate = candidate.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    try:
+        value = json.loads(candidate)
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _validated_briefing(value: dict[str, Any] | None, report: dict[str, Any]) -> dict[str, Any] | None:
+    if not value:
+        return None
+    required = ("operator_brief", "first_action", "why_this_first", "evidence_ids", "uncertainty")
+    if any(not value.get(key) for key in required):
+        return None
+    evidence_ids = value.get("evidence_ids")
+    if not isinstance(evidence_ids, list) or not 2 <= len(evidence_ids) <= 5:
+        return None
+    available = set(_available_evidence(report))
+    citations = list(dict.fromkeys(str(item) for item in evidence_ids))
+    if len(citations) < 2 or any(item not in available for item in citations):
+        return None
+    result = {key: str(value[key]).strip() for key in required if key != "evidence_ids"}
+    if any(len(result[key]) > 520 for key in result):
+        return None
+    result["evidence_ids"] = citations
+    return result
+
+
+def generate_incident_briefing(
+    report: dict[str, Any],
+    model: str = "deepseek-v4-pro",
+    timeout_seconds: int = 45,
+) -> dict[str, Any]:
+    """Generate a safe enhancement; callers keep the deterministic report on failure."""
+
+    try:
+        client = DeepSeekChatClient(timeout_seconds=timeout_seconds)
+        # Reasoning-capable models may spend tokens before emitting the compact JSON.
+        response = client.chat(ChatRequest(model=model, messages=build_briefing_prompt(report), max_tokens=1500))
+    except LLMUnavailableError as exc:
+        return {"status": "unavailable", "message": str(exc)}
+    briefing = _validated_briefing(_parse_json(str(response.get("content", ""))), report)
+    if not briefing:
+        return {
+            "status": "rejected",
+            "message": "The model response did not satisfy FCAPSule's evidence-citation contract.",
+        }
+    return {
+        "status": "ready",
+        "model": model,
+        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "latency_seconds": response.get("latency_seconds"),
+        "briefing": briefing,
+    }
