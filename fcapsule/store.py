@@ -14,7 +14,7 @@ from typing import Any
 
 
 DEFAULT_MODEL_PROFILES = (
-    ("deepseek-v4-flash", "deepseek", 2400, True),
+    ("deepseek-v4-flash", "deepseek", 2400, False),
     ("deepseek-v4-pro", "deepseek", 3600, True),
 )
 

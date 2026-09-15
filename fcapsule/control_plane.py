@@ -11,9 +11,10 @@ from typing import Any
 
 from demo.incident_lab import SimulationConfig, run_simulation
 from fcapsule.env import load_env_file
+from fcapsule.incident_report import build_incident_report
+from fcapsule.io.archive_writer import create_archive
+from fcapsule.io.output_writer import write_json
 from fcapsule.pipeline import investigate_case
-from fcapsule.reasoning.llm_client import LLMUnavailableError
-from fcapsule.reasoning.model_comparator import compare_models
 from fcapsule.store import FCAPSuleStore
 from fcapsule.ui.dashboard import render_dashboard
 
@@ -84,26 +85,15 @@ class ControlPlane:
             }
             output_dir = Path(capsule_record["output_dir"])
             evaluation_path = output_dir / "evaluation.json"
-            comparison_path = output_dir / "llm_comparison.json"
             if evaluation_path.is_file():
                 self.live["evaluation"] = json.loads(evaluation_path.read_text(encoding="utf-8"))
                 self.live["selected_evidence"] = capsule_record["selected_evidence"]
-            if comparison_path.is_file():
-                comparison = json.loads(comparison_path.read_text(encoding="utf-8"))
-                self.live["comparison"] = self._compact_comparison(comparison)
-                self.phases["models"] = {
-                    "status": "done",
-                    "message": "Model comparison complete",
-                    "details": {},
-                    "updated_at": time.time(),
-                }
-            else:
-                self.phases["models"] = {
-                    "status": "skipped",
-                    "message": "No model comparison recorded",
-                    "details": {},
-                    "updated_at": time.time(),
-                }
+            self.phases["models"] = {
+                "status": "skipped",
+                "message": "Offline model evaluation only",
+                "details": {},
+                "updated_at": time.time(),
+            }
 
     @staticmethod
     def _empty_phases() -> dict[str, dict[str, Any]]:
@@ -254,7 +244,7 @@ class ControlPlane:
             return False
         with self.lock:
             self.phases["capsule"] = {"status": "running", "message": "Loading incident evidence"}
-            self.phases["models"] = {"status": "waiting", "message": "Waiting for capsule"}
+            self.phases["models"] = {"status": "skipped", "message": "Offline model evaluation only"}
         thread = threading.Thread(target=self._run_capsule, args=(incident_id,), daemon=True)
         thread.start()
         return True
@@ -267,52 +257,26 @@ class ControlPlane:
             output_dir = self.output_root / incident_id
             result = investigate_case(incident["case_dir"], output_dir, self._pipeline_progress)
             render_dashboard(output_dir)
-            comparison = None
-            enabled_models = [item for item in self.store.list_model_profiles() if item["enabled"]]
-            if enabled_models and os.environ.get("DEEPSEEK_API_KEY"):
-                models = [item["model_id"] for item in enabled_models]
-                max_tokens = max(int(item["max_tokens"]) for item in enabled_models)
-
-                def model_progress(status: str, message: str, details: dict[str, Any]) -> None:
-                    self._event(
-                        "models",
-                        "done" if status == "done" and "comparison" in message.lower() else "running",
-                        message,
-                        details,
-                        update_live=False,
-                    )
-
-                try:
-                    comparison = compare_models(
-                        output_dir / "capsule.json",
-                        output_dir,
-                        models,
-                        max_tokens=max_tokens,
-                        progress=model_progress,
-                    )
-                except LLMUnavailableError as exc:
-                    self._event("models", "error", str(exc), {})
-            else:
-                reason = "No enabled model" if not enabled_models else "API key not configured"
-                self._event("models", "skipped", reason, {})
-
             evaluation = result["evaluation"]
             capsule_id = f"capsule-{incident_id}"
             capsule_path = output_dir / "capsule.json"
+            capsule_data = json.loads(capsule_path.read_text(encoding="utf-8"))
+            write_json(output_dir / "incident_report.json", build_incident_report(capsule_data, incident))
+            archive = create_archive(output_dir, incident_id)
             capsule = self.store.record_capsule(
                 {
                     "capsule_id": capsule_id,
                     "incident_id": incident_id,
                     "app_id": incident["app_id"],
                     "output_dir": output_dir,
-                    "archive_path": result["archive"],
+                    "archive_path": archive,
                     "size_bytes": capsule_path.stat().st_size,
                     "selected_evidence": result["selected_evidence"],
                     "compression": evaluation["log_compression_ratio"],
                     "signal_preservation": evaluation["important_signal_preservation"],
                     "grounding": evaluation["hypothesis_grounding_score"],
                     "runtime_seconds": evaluation["runtime_seconds"],
-                    "model_winner": comparison.get("winner") if comparison else None,
+                    "model_winner": None,
                 }
             )
             with self.lock:
@@ -322,7 +286,6 @@ class ControlPlane:
                         "capsule": capsule,
                         "evaluation": evaluation,
                         "selected_evidence": result["selected_evidence"],
-                        "comparison": self._compact_comparison(comparison),
                     }
                 )
             self._event("capsule", "done", "Capsule ready", {"selected_evidence": result["selected_evidence"], "compression": evaluation["log_compression_ratio"], "signal_preservation": evaluation["important_signal_preservation"]})
@@ -359,6 +322,33 @@ class ControlPlane:
             "record": record,
             "capsule": json.loads(path.read_text(encoding="utf-8")),
             "comparison": self._compact_comparison(comparison),
+        }
+
+    def incident_report_payload(self, incident_id: str) -> dict[str, Any] | None:
+        """Return the responder-facing report for an incident when a capsule exists."""
+
+        incident = self.store.get_incident(incident_id)
+        if not incident:
+            return None
+        capsule_record = next(
+            (item for item in self.store.list_capsules() if item["incident_id"] == incident_id),
+            None,
+        )
+        if not capsule_record:
+            return {"incident": incident, "report": None}
+        capsule_path = Path(capsule_record["output_dir"]) / "capsule.json"
+        if not capsule_path.is_file():
+            return {"incident": incident, "report": None}
+        report_path = Path(capsule_record["output_dir"]) / "incident_report.json"
+        capsule = json.loads(capsule_path.read_text(encoding="utf-8"))
+        return {
+            "incident": incident,
+            "record": capsule_record,
+            "report": (
+                json.loads(report_path.read_text(encoding="utf-8"))
+                if report_path.is_file()
+                else build_incident_report(capsule, incident)
+            ),
         }
 
     @staticmethod

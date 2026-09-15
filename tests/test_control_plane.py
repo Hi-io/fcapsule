@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from urllib.request import urlopen
+from zipfile import ZipFile
 
 from fcapsule.control_plane import ControlPlane
 from fcapsule.ui.app import create_app_server
@@ -47,6 +48,21 @@ class ControlPlaneTests(unittest.TestCase):
             self.assertEqual(state["phases"]["capsule"]["status"], "done")
             self.assertEqual(state["live"]["evaluation"]["important_signal_preservation"], 1.0)
             self.assertEqual(state["phases"]["models"]["status"], "skipped")
+            report_payload = control_plane.incident_report_payload(state["current_incident_id"])
+            self.assertIsNotNone(report_payload)
+            report = report_payload["report"]
+            self.assertEqual(report["incident"]["service"], "checkout-platform")
+            self.assertTrue(report["impact"])
+            self.assertTrue(report["actions"])
+            self.assertTrue(report["retention"]["trace_available"])
+            self.assertFalse(report["retention"]["raw_traces_retained"])
+            trace_coverage = next(item for item in report["coverage"] if item["domain"] == "On-demand traces")
+            self.assertEqual(trace_coverage["detail"], "available on demand")
+            capsule = state["overview"]["capsules"][0]
+            self.assertTrue((Path(capsule["output_dir"]) / "incident_report.json").is_file())
+            with ZipFile(capsule["archive_path"]) as archive:
+                self.assertIn("incident_report.json", archive.namelist())
+                self.assertNotIn("llm_comparison.json", archive.namelist())
             restored = ControlPlane(Path(directory) / "state").snapshot()
             self.assertEqual(restored["current_incident_id"], state["current_incident_id"])
             self.assertGreater(restored["live"]["log_count"], 100)

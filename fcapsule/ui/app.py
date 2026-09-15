@@ -116,7 +116,7 @@ tbody tr:hover { background:#fafbfb; }
 .field small { display:block; color:var(--muted); margin-top:4px; }
 .form-pair { display:grid; grid-template-columns:1fr 1fr; gap:9px; }
 .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:15px; }
-.phase-strip { display:grid; grid-template-columns:repeat(6, 1fr); border:1px solid var(--line); background:#fff; margin-bottom:14px; }
+.phase-strip { display:grid; grid-template-columns:repeat(5, 1fr); border:1px solid var(--line); background:#fff; margin-bottom:14px; }
 .phase { min-height:92px; padding:12px; border-right:1px solid var(--line); border-top:3px solid #b7c0c6; }
 .phase:last-child { border-right:0; }
 .phase.running { border-top-color:var(--blue); background:#f8fbfd; }
@@ -146,11 +146,51 @@ tbody tr:hover { background:#fafbfb; }
 .evidence-list { margin:8px 0 0; padding:0; list-style:none; }
 .evidence-list li { padding:7px 0; border-bottom:1px solid #e8ecef; }
 .evidence-list code { color:var(--blue); }
+.queue-note { color:var(--muted); font-size:12px; }
+.incident-title { font-weight:700; display:block; }
+.impact-line { color:var(--muted); font-size:12px; margin-top:3px; }
+.report { margin-top:14px; border-top:3px solid var(--green); }
+.report-banner { padding:18px; border-bottom:1px solid var(--line); background:#f9fbfa; display:flex; justify-content:space-between; align-items:start; gap:16px; }
+.report-banner h2 { margin:4px 0 5px; font-size:20px; }
+.report-banner p { margin:0; color:var(--muted); max-width:760px; }
+.report-layout { display:grid; grid-template-columns:minmax(0, 1.35fr) minmax(300px, .75fr); gap:0; }
+.report-main { padding:18px; border-right:1px solid var(--line); }
+.report-side { padding:18px; background:#fbfcfc; }
+.report-section { margin-bottom:23px; }
+.report-section:last-child { margin-bottom:0; }
+.report-section h3 { margin:0 0 9px; font-size:15px; }
+.hypothesis { border-left:3px solid var(--amber); background:var(--amber-bg); padding:12px 13px; }
+.hypothesis p { margin:0 0 8px; font-size:15px; }
+.hypothesis small { color:#6d4b22; }
+.impact-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); border:1px solid var(--line); }
+.impact-item { padding:11px; border-right:1px solid var(--line); border-bottom:1px solid var(--line); }
+.impact-item:nth-child(2n) { border-right:0; }
+.impact-item:nth-last-child(-n + 2) { border-bottom:0; }
+.impact-item span, .timeline-item small { display:block; color:var(--muted); font-size:11px; }
+.impact-item strong { display:block; margin:3px 0; font-size:18px; }
+.action-list { margin:0; padding:0; list-style:none; display:grid; gap:7px; }
+.action-list li { border:1px solid var(--line); padding:9px 10px; background:#fff; }
+.action-list li.urgent { border-left:3px solid var(--red); background:#fffafa; }
+.action-list b { display:block; font-size:12px; margin-bottom:3px; }
+.timeline { margin:0; padding:0; list-style:none; display:grid; gap:9px; }
+.timeline-item { border-left:2px solid #aab6bd; padding-left:10px; }
+.timeline-item.critical { border-left-color:var(--red); }
+.timeline-item.warning { border-left-color:var(--amber); }
+.coverage-list { display:grid; gap:7px; }
+.coverage-item { display:flex; justify-content:space-between; gap:10px; border-bottom:1px solid #e8ecef; padding-bottom:7px; }
+.coverage-item:last-child { border-bottom:0; }
+.retention { border-left:3px solid var(--blue); background:var(--blue-bg); padding:11px; color:#234e6b; }
+.retention.urgent { border-left-color:var(--amber); background:var(--amber-bg); color:#65491e; }
+details.engineering { border:1px solid var(--line); background:#fafbfb; }
+details.engineering summary { cursor:pointer; padding:10px 11px; font-weight:650; }
+.diagnostics { padding:0 11px 11px; color:var(--muted); font-size:12px; }
+.diagnostics dl { display:grid; grid-template-columns:1fr auto; gap:5px 12px; margin:0; }
+.diagnostics dd { margin:0; color:var(--ink); font-weight:650; }
 .boot { color:var(--muted); padding:40px; text-align:center; }
 .mono { font-family:"Cascadia Mono", Consolas, monospace; font-size:12px; }
 .right { text-align:right; }
-@media (max-width:1050px) { .grid-2, .lab-grid { grid-template-columns:1fr; } .control-panel { position:static; } .phase-strip { grid-template-columns:repeat(3, 1fr); } .metrics-line { grid-template-columns:repeat(3, 1fr); } }
-@media (max-width:700px) { .product-bar { height:auto; min-height:58px; padding:10px 14px; grid-template-columns:1fr auto; } nav { grid-column:1/-1; order:3; margin-top:8px; } nav a { min-height:40px; } .system-state { justify-self:end; } main { width:calc(100% - 18px); margin-top:12px; } .page-head { align-items:start; flex-direction:column; } .kpis, .phase-strip, .metrics-line { grid-template-columns:1fr 1fr; } .kpi:nth-child(2) { border-right:0; } .kpi { border-bottom:1px solid var(--line); } .event { grid-template-columns:62px 1fr; } .event span { display:none; } .form-pair, .model-compare { grid-template-columns:1fr; } }
+@media (max-width:1050px) { .grid-2, .lab-grid, .report-layout { grid-template-columns:1fr; } .control-panel { position:static; } .phase-strip { grid-template-columns:repeat(3, 1fr); } .metrics-line { grid-template-columns:repeat(3, 1fr); } .report-main { border-right:0; border-bottom:1px solid var(--line); } }
+@media (max-width:700px) { .product-bar { height:auto; min-height:58px; padding:10px 14px; grid-template-columns:1fr auto; } nav { grid-column:1/-1; order:3; margin-top:8px; } nav a { min-height:40px; } .system-state { justify-self:end; } main { width:calc(100% - 18px); margin-top:12px; } .page-head, .report-banner { align-items:start; flex-direction:column; } .kpis, .phase-strip, .metrics-line, .impact-grid { grid-template-columns:1fr 1fr; } .kpi:nth-child(2) { border-right:0; } .kpi { border-bottom:1px solid var(--line); } .impact-item:nth-child(2n) { border-right:0; } .event { grid-template-columns:62px 1fr; } .event span { display:none; } .form-pair, .model-compare { grid-template-columns:1fr; } .incident-table .wide-only { display:none; } .incident-table td, .incident-table th { padding:9px 7px; } .incident-table button { padding:6px 8px; font-size:12px; } }
 """
 
 
@@ -169,7 +209,8 @@ const safe = value => String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&am
 const shortTime = value => value ? new Date(value).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '--';
 document.querySelector(`[data-nav="${view}"]`)?.classList.add('active');
 let lastState = null;
-let inspectedCapsule = null;
+let selectedReport = null;
+const requestedReportId = new URLSearchParams(location.search).get('incident');
 
 function setSystem(state) {
   const node = document.querySelector('.system-state');
@@ -184,67 +225,53 @@ function sources(config) {
 }
 
 function renderConsole(state) {
-  const data = state.overview; const totals = data.totals; const apps = data.applications; const capsules = data.capsules;
+  const data = state.overview; const apps = data.applications; const incidents = data.incidents;
   app.innerHTML = `
-    <div class="page-head"><div><div class="eyebrow">Control plane</div><h1>Operations</h1><p>Tracked applications and retained incident evidence.</p></div><a href="/lab"><button>Open Incident Lab</button></a></div>
-    <section class="kpis">
-      <div class="kpi"><span>Applications</span><strong>${fmt.format(totals.applications)}</strong><small>${totals.degraded_applications} degraded</small></div>
-      <div class="kpi"><span>Incidents observed</span><strong>${fmt.format(totals.incidents)}</strong><small>FM-triggered windows</small></div>
-      <div class="kpi"><span>Raw data inspected</span><strong>${bytes(totals.raw_bytes_observed)}</strong><small>Referenced at source</small></div>
-      <div class="kpi"><span>Capsule data retained</span><strong>${bytes(totals.capsule_bytes_retained)}</strong><small>Derived evidence only</small></div>
-    </section>
-    <div class="grid-2">
-      <div class="stack">
-        <section class="sheet"><div class="sheet-head"><h2>Application inventory</h2><span class="eyebrow">${apps.length} registered</span></div><div class="table-wrap">${applicationTable(apps)}</div></section>
-        <section class="sheet"><div class="sheet-head"><h2>Evidence capsules</h2><span class="eyebrow">Latest first</span></div><div class="table-wrap">${capsuleTable(capsules)}</div></section>
-      </div>
-      <div class="stack">
-        <section class="sheet"><div class="sheet-head"><h2>Model profiles</h2><span class="eyebrow">${state.api_key_available ? 'Provider ready' : 'Key not loaded'}</span></div><div class="sheet-body" id="models">${modelProfiles(data.models)}</div></section>
-        <section class="sheet"><div class="sheet-head"><h2>Capsule inspector</h2></div><div class="sheet-body capsule-detail" id="capsule-detail">${inspectedCapsule ? capsuleDetail(inspectedCapsule.data, inspectedCapsule.id) : '<p>Select a capsule to inspect its strongest evidence.</p>'}</div></section>
-        <div class="notice">Trace sources are checked on demand. FCAPSule records availability and derived evidence, not raw spans.</div>
-      </div>
-    </div>`;
-  document.querySelectorAll('[data-capsule]').forEach(button => button.addEventListener('click', () => inspectCapsule(button.dataset.capsule)));
-  document.querySelectorAll('[data-save-model]').forEach(button => button.addEventListener('click', () => saveModel(button.dataset.saveModel)));
+    <div class="page-head"><div><div class="eyebrow">Incident workspace</div><h1>Operations</h1><p>Open the incident report to understand impact, evidence, and the next safe action.</p></div><a href="/lab"><button class="secondary">Open Test Lab</button></a></div>
+    <section class="sheet"><div class="sheet-head"><h2>Incident queue</h2><span class="queue-note">${incidents.length} captured incident${incidents.length === 1 ? '' : 's'} · reports stay available after source telemetry expires</span></div><div class="table-wrap">${incidentTable(incidents, data.capsules)}</div></section>
+    ${selectedReport ? reportPanel(selectedReport) : ''}
+    <section class="sheet" style="margin-top:14px"><div class="sheet-head"><h2>Application coverage</h2><span class="queue-note">FM, PM, logs, and trace access configured per application</span></div><div class="table-wrap">${applicationTable(apps)}</div></section>`;
+  document.querySelectorAll('[data-incident-report]').forEach(button => button.addEventListener('click', () => openReport(button.dataset.incidentReport)));
 }
 
 function applicationTable(items) {
-  if (!items.length) return '<div class="empty">No applications registered. Use Incident Lab to create the first source.</div>';
-  return `<table><thead><tr><th>State</th><th>Application</th><th>Environment</th><th>Signal sources</th><th>Last incident</th><th class="right">Capsules</th></tr></thead><tbody>${items.map(item => `<tr><td>${status(item.status)}</td><td><strong>${safe(item.name)}</strong><br><span class="mono">${safe(item.app_id)}</span></td><td>${safe(item.environment)}<br><small>${safe(item.cluster)} / ${safe(item.namespace)}</small></td><td><div class="source-row">${sources(item.source_config)}</div></td><td>${item.last_incident_at ? shortTime(item.last_incident_at) : '--'}</td><td class="right">${item.capsule_count || 0}</td></tr>`).join('')}</tbody></table>`;
+  if (!items.length) return '<div class="empty">No applications are registered yet.</div>';
+  return `<table><thead><tr><th>State</th><th>Application</th><th>Environment</th><th>Coverage</th><th>Latest incident</th><th class="right">Reports</th></tr></thead><tbody>${items.map(item => `<tr><td>${status(item.status)}</td><td><strong>${safe(item.name)}</strong><br><span class="mono">${safe(item.app_id)}</span></td><td>${safe(item.environment)}<br><small>${safe(item.cluster)} / ${safe(item.namespace)}</small></td><td><div class="source-row">${sources(item.source_config)}</div></td><td>${item.last_incident_at ? shortTime(item.last_incident_at) : '--'}</td><td class="right">${item.capsule_count || 0}</td></tr>`).join('')}</tbody></table>`;
 }
 
-function capsuleTable(items) {
-  if (!items.length) return '<div class="empty">No capsules retained yet.</div>';
-  return `<table><thead><tr><th>Status</th><th>Incident</th><th>Size</th><th>Log reduction</th><th>Signal retained</th><th>Model</th><th></th></tr></thead><tbody>${items.map(item => `<tr><td>${status(item.status)}</td><td><span class="mono">${safe(item.incident_id)}</span><br><small>${shortTime(item.created_at)}</small></td><td>${bytes(item.size_bytes)}</td><td>${pct(item.compression)}</td><td>${pct(item.signal_preservation)}</td><td>${safe(item.model_winner || 'Deterministic')}</td><td><button class="secondary" data-capsule="${safe(item.capsule_id)}">Inspect</button></td></tr>`).join('')}</tbody></table>`;
+function incidentTable(items, capsules) {
+  if (!items.length) return '<div class="empty">No incidents have been captured yet.</div>';
+  const reports = new Set(capsules.map(item => item.incident_id));
+  return `<table class="incident-table"><thead><tr><th>Severity</th><th>Incident</th><th class="wide-only">Service</th><th class="wide-only">Started</th><th>Observed impact</th><th></th></tr></thead><tbody>${items.map(item => {
+    const ready = reports.has(item.incident_id);
+    return `<tr><td>${status(item.severity)}</td><td><span class="incident-title">${safe(item.summary || item.scenario)}</span><small class="mono">${safe(item.incident_id)}</small></td><td class="wide-only">${safe(item.app_id)}</td><td class="wide-only">${shortTime(item.started_at)}</td><td><span class="impact-line">${safe(item.alert_count)} alerts · ${fmt.format(item.log_count)} logs captured · ${fmt.format(item.metric_series_count)} PM series</span></td><td><button class="secondary" data-incident-report="${safe(item.incident_id)}">${ready ? 'Open report' : 'View incident'}</button></td></tr>`;
+  }).join('')}</tbody></table>`;
 }
 
-function modelProfiles(items) {
-  return items.map(item => `<div class="model-row"><div><strong>${safe(item.model_id)}</strong><small>${safe(item.provider)}</small></div><label class="toggle"><input id="enabled-${safe(item.model_id)}" type="checkbox" ${item.enabled ? 'checked' : ''}> Enabled</label><div><input id="tokens-${safe(item.model_id)}" type="number" min="256" max="16000" value="${item.max_tokens}"><button class="secondary" data-save-model="${safe(item.model_id)}" style="margin-top:5px;width:100%">Save</button></div></div>`).join('');
+function formatDate(value) {
+  return value ? new Date(value).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : '--';
 }
 
-async function inspectCapsule(id) {
-  const response = await fetch('/api/capsules/' + encodeURIComponent(id)); const data = await response.json();
-  const node = document.querySelector('#capsule-detail');
-  if (!response.ok) { node.innerHTML = `<p>${safe(data.error)}</p>`; return; }
-  inspectedCapsule = {id, data};
-  node.innerHTML = capsuleDetail(data, id);
+async function openReport(id) {
+  const response = await fetch('/api/incidents/' + encodeURIComponent(id) + '/report'); const data = await response.json();
+  if (!response.ok) { alert(data.error || 'Unable to load incident report'); return; }
+  selectedReport = data;
+  history.replaceState(null, '', '/console?incident=' + encodeURIComponent(id));
+  renderConsole(lastState);
+  document.querySelector('#incident-report')?.scrollIntoView({behavior:'smooth', block:'start'});
 }
 
-function capsuleDetail(data, id) {
-  const capsule = data.capsule; const evaluation = capsule.evaluation || {}; const evidence = capsule.selected_evidence || [];
-  return `<div class="eyebrow">${safe(capsule.case.case_id)}</div><h3>${safe(capsule.case.case_title)}</h3><p>${evidence.length} evidence items, ${pct(evaluation.log_compression_ratio)} log reduction, ${pct(evaluation.important_signal_preservation)} signal retained.</p>${modelComparison(data.comparison)}<h3>Strongest evidence</h3><ul class="evidence-list">${evidence.slice(0,5).map(item => `<li><code>${safe(item.evidence_id)}</code> ${safe(item.title)}</li>`).join('')}</ul><div class="actions"><a href="/artifacts/${encodeURIComponent(id)}/capsule.md" target="_blank"><button class="secondary">Open report</button></a><a href="/artifacts/${encodeURIComponent(id)}/dashboard.html" target="_blank"><button class="secondary">Open dashboard</button></a></div>`;
-}
-
-function modelComparison(comparison) {
-  if (!comparison?.results?.length) return '';
-  return `<h3>Model comparison</h3><p>${safe(comparison.interpretation || 'Same capsule and rubric.')}</p><div class="model-compare">${comparison.results.map(item => `<div class="model-result ${item.model === comparison.winner ? 'winner' : ''}"><h3>${safe(item.model)} ${item.model === comparison.winner ? '<span class="eyebrow">best observed</span>' : ''}</h3><dl><div><dt>Quality</dt><dd>${Number(item.total_score || 0).toFixed(3)}</dd></div><div><dt>Latency</dt><dd>${Number(item.latency_seconds || 0).toFixed(1)}s</dd></div><div><dt>Tokens</dt><dd>${fmt.format(item.total_tokens || 0)}</dd></div></dl></div>`).join('')}</div>`;
-}
-
-async function saveModel(id) {
-  const payload = {enabled: document.querySelector('#enabled-' + CSS.escape(id)).checked, max_tokens: Number(document.querySelector('#tokens-' + CSS.escape(id)).value)};
-  const response = await fetch('/api/models/' + encodeURIComponent(id), {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
-  if (!response.ok) { const data = await response.json(); alert(data.error); }
-  await refresh();
+function reportPanel(payload) {
+  if (!payload.report) return `<section id="incident-report" class="sheet report"><div class="sheet-body"><h2>Report is still being prepared</h2><p class="queue-note">The incident is captured. Build its capsule to preserve evidence and produce the responder report.</p></div></section>`;
+  const report = payload.report; const incident = report.incident; const hypothesis = report.primary_hypothesis;
+  const impact = report.impact.length ? report.impact.map(item => `<div class="impact-item"><span>${safe(item.label)}</span><strong>${safe(item.value)}</strong><small>baseline ${safe(item.baseline)} · ${safe(item.component || 'service')}</small></div>`).join('') : '<p class="queue-note">No material metric anomalies were retained.</p>';
+  const timeline = report.timeline.length ? report.timeline.map(item => `<li class="timeline-item ${safe(item.severity)}"><strong>${safe(item.title)}</strong><small>${formatDate(item.timestamp)} · ${safe(item.description || '')}</small></li>`).join('') : '<li class="queue-note">No ordered incident events are available.</li>';
+  const actions = report.actions.length ? report.actions.slice(0,6).map(item => `<li class="${safe(item.priority)}"><b>${item.priority === 'urgent' ? 'Do now' : 'Next check'}</b>${safe(item.action)}${item.reason ? `<small>${safe(item.reason)}</small>` : ''}</li>`).join('') : '<li>No follow-up action was generated.</li>';
+  const evidence = report.supporting_evidence.slice(0,8).map(item => `<li><code>${safe(item.evidence_id)}</code> <strong>${safe(item.title)}</strong><br><span class="queue-note">${safe(item.summary)}</span></li>`).join('');
+  const coverage = report.coverage.map(item => `<div class="coverage-item"><span>${safe(item.domain)}</span><span>${safe(item.detail)}</span></div>`).join('');
+  const topology = report.topology.map(item => `${safe(item.from)} → ${safe(item.to)}`).join(' · ');
+  const retentionClass = report.retention.trace_available && report.retention.source_retention_seconds ? 'retention urgent' : 'retention';
+  return `<section id="incident-report" class="sheet report"><div class="report-banner"><div><div class="eyebrow">Incident report · ${safe(incident.incident_id)}</div><h2>${safe(incident.title)}</h2><p>${safe(incident.summary)}</p></div><div>${status(incident.severity)}<br><span class="queue-note">${safe(incident.service)} · ${safe(incident.cluster)} / ${safe(incident.namespace)}<br>${formatDate(incident.started_at)}</span></div></div><div class="report-layout"><div class="report-main"><section class="report-section"><h3>Observed impact</h3><div class="impact-grid">${impact}</div></section><section class="report-section"><h3>Likely failure path</h3><div class="hypothesis"><p>${safe(hypothesis.statement)}</p><small>${hypothesis.confidence != null ? `${Math.round(Number(hypothesis.confidence) * 100)}% confidence` : 'Confidence unavailable'} · ${safe(hypothesis.verdict)} · Requires verification</small></div>${hypothesis.uncertainty.length ? `<p class="queue-note" style="margin-top:9px">Still unknown: ${safe(hypothesis.uncertainty.join('; '))}</p>` : ''}</section><section class="report-section"><h3>What changed</h3><ul class="timeline">${timeline}</ul>${topology ? `<p class="queue-note" style="margin-top:10px">Observed path: ${topology}</p>` : ''}</section><section class="report-section"><h3>Supporting evidence</h3><ul class="evidence-list">${evidence || '<li>No retained evidence items.</li>'}</ul></section></div><aside class="report-side"><section class="report-section"><h3>Do next</h3><ul class="action-list">${actions}</ul></section><section class="report-section"><h3>Evidence availability</h3><div class="${retentionClass}"><strong>${report.retention.trace_available ? 'Trace window available' : 'Trace window unavailable'}</strong><br><span>${safe(report.retention.message)}</span>${report.retention.source_retention_seconds ? `<br><small>Source window: ${safe(report.retention.source_retention_seconds)} seconds · raw traces retained by FCAPSule: no</small>` : ''}</div></section><section class="report-section"><h3>Coverage</h3><div class="coverage-list">${coverage}</div></section><details class="engineering"><summary>Engineering diagnostics</summary><div class="diagnostics"><dl><dt>Derived evidence retained</dt><dd>${report.engineering_diagnostics.selected_evidence}</dd><dt>Log reduction</dt><dd>${pct(report.engineering_diagnostics.log_compression_ratio)}</dd><dt>Signal preservation</dt><dd>${pct(report.engineering_diagnostics.important_signal_preservation)}</dd><dt>Hypothesis grounding</dt><dd>${pct(report.engineering_diagnostics.hypothesis_grounding_score)}</dd><dt>Pipeline runtime</dt><dd>${Number(report.engineering_diagnostics.runtime_seconds || 0).toFixed(2)}s</dd></dl></div></details></aside></div></section>`;
 }
 
 function renderLab(state) {
@@ -263,7 +290,7 @@ function renderLab(state) {
       </div></section>
       <div class="stack">
         <section class="phase-strip">${phaseStrip(phases)}</section>
-        <section class="sheet"><div class="sheet-head"><h2>Live incident</h2><span class="eyebrow">${state.running ? 'Updating' : incident ? 'Captured' : 'No run'}</span></div><div class="metrics-line">${metricTiles(live)}</div><div class="sheet-body"><div class="grid-2"><div><h2 style="font-size:14px;margin-top:0">Fault sequence</h2>${alertSequence(live)}</div><div><h2 style="font-size:14px;margin-top:0">Data policy</h2><p>FM events, PM series and logs are captured for analysis. Trace access is probed during the incident; raw spans remain in the source buffer and are not retained.</p>${live.trace_access ? `<div class="source-row"><span class="source on">TRACE ${safe(live.trace_access.probe_status)}</span><span class="source">${live.trace_access.source_retention_seconds}s source window</span><span class="source">0 spans retained</span></div>` : ''}</div></div>${modelComparison(live.comparison)}</div></section>
+        <section class="sheet"><div class="sheet-head"><h2>Live incident</h2><span class="eyebrow">${state.running ? 'Updating' : incident ? 'Captured' : 'No run'}</span></div><div class="metrics-line">${metricTiles(live)}</div><div class="sheet-body"><div class="grid-2"><div><h2 style="font-size:14px;margin-top:0">Fault sequence</h2>${alertSequence(live)}</div><div><h2 style="font-size:14px;margin-top:0">Data policy</h2><p>FM events, PM series and logs are captured for analysis. Trace access is probed during the incident; raw spans remain in the source buffer and are not retained.</p>${live.trace_access ? `<div class="source-row"><span class="source on">TRACE ${safe(live.trace_access.probe_status)}</span><span class="source">${live.trace_access.source_retention_seconds}s source window</span><span class="source">0 spans retained</span></div>` : ''}</div></div></div></section>
         <section class="sheet"><div class="sheet-head"><h2>Activity</h2><span class="eyebrow">Newest first</span></div><div class="event-list">${eventList(state.events)}</div></section>
       </div>
     </div>`;
@@ -273,7 +300,7 @@ function renderLab(state) {
 }
 
 function phaseStrip(phases) {
-  const defs = [['services','Services'],['baseline','Baseline'],['injection','Injection'],['alerts','FM alerts'],['capsule','Capsule'],['models','Models']];
+  const defs = [['services','Services'],['baseline','Baseline'],['injection','Injection'],['alerts','FM alerts'],['capsule','Capsule']];
   return defs.map(([id,label]) => { const phase = phases[id] || {status:'waiting',message:'Waiting'}; return `<div class="phase ${safe(phase.status)}"><b>${label}</b><span>${safe(phase.message)}</span></div>`; }).join('');
 }
 function metricTiles(live) {
@@ -306,10 +333,18 @@ async function resetLive() { const response = await fetch('/api/reset', {method:
 
 async function refresh() {
   try {
-    const response = await fetch('/api/state', {cache:'no-store'}); const state = await response.json(); lastState = state; setSystem(state); view === 'lab' ? renderLab(state) : renderConsole(state);
+    const response = await fetch('/api/state', {cache:'no-store'}); const state = await response.json(); lastState = state; setSystem(state);
+    if (view === 'console' && requestedReportId && !selectedReport) {
+      const reportResponse = await fetch('/api/incidents/' + encodeURIComponent(requestedReportId) + '/report');
+      if (reportResponse.ok) selectedReport = await reportResponse.json();
+    }
+    view === 'lab' ? renderLab(state) : renderConsole(state);
   } catch (error) { document.querySelector('#system-state').textContent = 'Disconnected'; }
 }
-refresh(); setInterval(refresh, 1000);
+refresh();
+setInterval(() => {
+  if (view === 'lab' || lastState?.running) refresh();
+}, 1000);
 """
 
 
@@ -369,6 +404,14 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/state":
             self._json(self.server.control_plane.snapshot())
+            return
+        if path.startswith("/api/incidents/") and path.endswith("/report"):
+            incident_id = unquote(path.removeprefix("/api/incidents/").removesuffix("/report").rstrip("/"))
+            payload = self.server.control_plane.incident_report_payload(incident_id)
+            if payload is None:
+                self._json({"error": "Incident not found"}, HTTPStatus.NOT_FOUND)
+            else:
+                self._json(payload)
             return
         if path.startswith("/api/capsules/"):
             capsule_id = unquote(path.removeprefix("/api/capsules/"))
