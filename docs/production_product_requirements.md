@@ -77,7 +77,9 @@ For a deployed integration, source adapters must additionally provide a stable s
 
 FCAPSule should run as a pod or service alongside existing observability systems. It receives incident triggers, resolves the configured application identity, gathers a bounded investigation window from FM, PM, logs, topology/configuration, and optional trace access, then writes a capsule and report to durable storage.
 
-The local Incident Lab remains optional. It exists to validate adapters, demonstrate the workflow, and produce reproducible sample data. It is not part of the operator workflow in production.
+FCAPSule Lab remains an optional, separate Compose repository. It validates adapters and
+produces reproducible sample data, but is not part of the FCAPSule operator workflow or
+deployment artifact.
 
 ## Acceptance Criteria
 

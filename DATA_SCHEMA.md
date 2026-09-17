@@ -53,7 +53,7 @@ A single object or list:
     "service": "checkout-platform",
     "component": "inventory-api",
     "namespace": "commerce",
-    "cluster": "local-lab"
+    "cluster": "local-compose"
   },
   "annotations": {
     "summary": "Inventory database pool is saturated",
@@ -181,4 +181,3 @@ The derived ZIP contains:
 - optional comparison outputs.
 
 It excludes normalized raw input files and raw traces.
-

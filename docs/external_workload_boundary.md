@@ -1,0 +1,58 @@
+# External Workload Boundary
+
+## Decision
+
+FCAPSule is an incident evidence product, not a workload generator, traffic tool,
+container orchestrator, database simulator, or Prometheus replacement. A user operates
+their applications and observability stack independently. FCAPSule observes the bounded
+incident context, preserves the selected evidence, and produces an investigation report.
+
+The local Docker workload used for demonstrations and adapter validation therefore lives
+in the separate `fcapsule-lab` repository. It contains exactly five Compose services:
+PostgreSQL, inventory API, orders API, traffic generator, and Prometheus. Its failure
+controls belong to the lab terminal workflow rather than the FCAPSule operator console.
+
+## User Value
+
+An SRE needs FCAPSule to answer operational questions quickly:
+
+- Which incident needs attention and which application is affected?
+- What user impact and alert sequence established the incident window?
+- Which PM trend and log patterns support the likely investigation path?
+- What should be preserved or checked before source retention expires?
+- Where is the derived incident package, and can it be exported?
+
+The Operations console is designed around those questions. Engineering quality metrics,
+model comparisons, and simulator controls are intentionally absent from the primary
+workflow. Deterministic evidence selection creates the report first; the optional cited
+AI briefing provides a second reading only after that evidence is retained.
+
+## Integration Contract
+
+The hand-off is a normalized case directory. The producer owns collection from its
+sources and writes `metadata.yaml`, `alert.json`, `prometheus_metrics.json`, and
+`opensearch_logs.json` for one bounded window. FCAPSule validates that contract and
+records the incident with `fcapsule ingest-case`. It does not copy source retention
+systems or keep a permanent raw log/trace mirror.
+
+For local verification, FCAPSule Lab queries its independent Prometheus instance and
+Docker's structured stdout logs to export a case. A future production adapter should
+replace this export with read-only bounded API queries and source references while
+preserving the same normalized contract.
+
+## AI Configuration Boundary
+
+The AI model is a local optional enrichment setting. `.fcapsule/ai-settings.json` holds
+the selected provider, model ID, and completion budget; `.env` holds the provider secret
+and is Git-ignored. The console reports only whether a key is configured. It never
+returns, renders, archives, or stores the key in SQLite. The current runtime implements
+the DeepSeek-compatible client; another provider requires an explicit adapter, not merely
+an unverified model name.
+
+## Open-source Readiness
+
+The separation makes each repository independently useful and testable. FCAPSule can be
+deployed beside real observability systems without shipping demo services. FCAPSule Lab
+can evolve as a reproducible adapter fixture without acquiring product state or access to
+production credentials. Future contributors can add source adapters, authentication,
+durable object storage, RBAC, and Kubernetes deployment without altering this boundary.

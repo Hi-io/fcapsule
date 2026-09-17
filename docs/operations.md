@@ -9,7 +9,7 @@ python3 -m fcapsule.cli serve
 Default URLs:
 
 - `http://127.0.0.1:8765/console`
-- `http://127.0.0.1:8765/lab`
+- `http://127.0.0.1:8765/settings`
 
 Use `--host`, `--port`, and `--state-dir` to change the binding or storage location.
 
@@ -29,39 +29,39 @@ The report distinguishes its evidence by domain: FM alert records, PM trend line
 
 After a report is ready, **Generate AI briefing** requests a compact DeepSeek Pro second reading. The request contains only curated incident evidence. A response is displayed and retained only when it cites two to five evidence IDs already present in the report and acknowledges an uncertainty. This action does not block capture, capsule creation, or the report. The resulting `ai_briefing.json` is added to the archive without storing provider prompts or transcripts.
 
-## Incident Lab
+## Ingest an External Incident
 
-1. Set the application name and identifier.
-2. Select the failure scenario.
-3. Choose baseline requests, incident requests, and concurrency.
-4. Select **Run simulation**.
-5. Watch services, baseline, injection, and FM stages update.
-6. Review the alert sequence and captured volume.
-7. Select **Build capsule**.
-8. Open Operations and select **Open report** to inspect the retained result.
-
-Simulation and capsule generation are deliberately separate. This makes the boundary between source telemetry and FCAPSule processing visible.
-
-## CLI
-
-### Simulate
+Use `ingest-case` when a source adapter, export job, or workload lab has prepared a
+normalized bounded case directory:
 
 ```bash
-python3 -m fcapsule.cli simulate --output .fcapsule/cases/cli-latest
+python3 -m fcapsule.cli ingest-case \
+  --case ../fcapsule-lab/artifacts/<case-directory> \
+  --app-id checkout-lab \
+  --app-name "Checkout Lab"
 ```
+
+The command validates the case and records metadata without copying raw telemetry into
+`.fcapsule`. In Operations, select **Build report** for that incident, wait for the
+background evidence job to finish, and then select **Open report**.
+
+FCAPSule Lab is a separate Docker Compose project for local source-adapter validation
+and demonstrations. It is not served by FCAPSule or required in deployment.
+
+## CLI
 
 ### Investigate
 
 ```bash
 python3 -m fcapsule.cli investigate \
-  --case .fcapsule/cases/cli-latest \
-  --out .fcapsule/capsules/cli-latest
+  --case cases/case_001 \
+  --out .fcapsule/capsules/case_001
 ```
 
 ### Inspect a normalized case
 
 ```bash
-python3 -m fcapsule.cli inspect --case .fcapsule/cases/cli-latest
+python3 -m fcapsule.cli inspect --case cases/case_001
 ```
 
 ### Register an application
@@ -71,7 +71,7 @@ python3 -m fcapsule.cli register \
   --app-id checkout-platform \
   --name "Checkout Platform" \
   --namespace commerce \
-  --cluster local-lab
+  --cluster local-compose
 ```
 
 ### Control-plane status
@@ -84,8 +84,8 @@ python3 -m fcapsule.cli status
 
 ```bash
 python3 -m fcapsule.cli compare-llms \
-  --capsule .fcapsule/capsules/cli-latest/capsule.json \
-  --out .fcapsule/capsules/cli-latest
+  --capsule .fcapsule/capsules/case_001/capsule.json \
+  --out .fcapsule/capsules/case_001
 ```
 
 ## Model Evaluation
@@ -100,12 +100,19 @@ DEEPSEEK_API_KEY=...
 
 Capsule creation always completes with deterministic detection and evidence-grounded reasoning, whether or not a provider key is available. A configured model may be evaluated or added later as a non-blocking enrichment.
 
+## AI Settings
+
+Open **AI settings** in the console to choose the DeepSeek-compatible model and
+completion budget for an optional cited briefing. Paste a replacement API key only when
+necessary. It is saved to the local `.env` file and never returned to the browser or
+written to SQLite. The non-secret selection is persisted in `.fcapsule/ai-settings.json`.
+
 ## Local Files
 
 ```text
 .fcapsule/
   fcapsule.db
-  cases/<incident-id>/
+  ai-settings.json
   capsules/<incident-id>/
 ```
 
@@ -114,6 +121,6 @@ The directory is ignored by Git. To preserve results outside local development, 
 ## Troubleshooting
 
 - **Port already in use:** start with `--port 8766`.
-- **Simulation does not alert:** use at least 20 incident requests and recommended concurrency 16 or higher.
-- **Capsule unavailable:** complete a simulation before selecting **Build capsule**.
+- **No incidents appear:** validate and ingest a normalized external case first.
+- **Build report is unavailable:** wait for the active capsule job to finish before starting another one.
 - **Trace shows zero retained spans:** this is expected; only source availability is retained.

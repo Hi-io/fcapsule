@@ -2,11 +2,11 @@
 
 ## Design Summary
 
-FCAPSule is implemented as a dependency-light Python control plane with a normalized evidence pipeline, local SQLite metadata, CLI commands, and two web views. Raw telemetry is not treated as product storage. The system queries a bounded window, derives evidence, retains the capsule, and leaves raw data in the source platform.
+FCAPSule is implemented as a dependency-light Python control plane with a normalized evidence pipeline, local SQLite metadata, CLI commands, and two operator views. Raw telemetry is not treated as product storage. The system receives a bounded normalized incident window, derives evidence, retains the capsule, and leaves raw data in the source platform.
 
 The architecture deliberately separates four responsibilities:
 
-1. **Collection:** source adapters or the incident lab create a normalized case.
+1. **Collection:** source adapters or an external workload export create a normalized case.
 2. **Attention:** deterministic processors score and select cross-domain evidence.
 3. **Reasoning:** deterministic and optional pretrained models produce grounded investigation paths.
 4. **Control plane:** applications, incidents, capsules, settings, and review state are persisted and displayed.
@@ -21,9 +21,8 @@ The architecture deliberately separates four responsibilities:
 | `fcapsule/reasoning/` | deterministic hypotheses, verification, DeepSeek comparison |
 | `fcapsule/evaluation/` | baselines, reduction, preservation, grounding, retention metrics |
 | `fcapsule/store.py` | SQLite application/incident/capsule/model metadata |
-| `fcapsule/control_plane.py` | asynchronous simulation and capsule jobs |
-| `fcapsule/ui/app.py` | Operations and Incident Lab web application |
-| `demo/incident_lab.py` | real local checkout/inventory failure scenario |
+| `fcapsule/control_plane.py` | external-case ingestion, capsule jobs, and local AI configuration |
+| `fcapsule/ui/app.py` | Operations and AI settings web application |
 | `fcapsule/cli.py` | operator and automation entry point |
 
 ## Evidence Selection
@@ -73,12 +72,11 @@ The web application uses the Python standard library HTTP server. This keeps loc
 
 - `GET /api/state`;
 - `GET /api/capsules/<id>`;
-- `POST /api/simulations`;
 - `POST /api/capsules`;
-- `POST /api/models/<id>`;
-- `POST /api/reset`.
+- `GET /api/settings/ai`;
+- `POST /api/settings/ai`.
 
-Long-running simulation, pipeline, and model work executes on background threads. The client polls current state and renders phase progress.
+Long-running pipeline work executes on background threads. The client polls current state while a report is being built. Source simulation remains outside this repository.
 
 ## Trace Policy
 
@@ -92,21 +90,13 @@ The lab exposes an ephemeral trace probe. FCAPSule records:
 
 A production adapter may fetch trace-derived facts during the incident window, but raw span payloads must not enter the capsule archive.
 
-## Failure Scenario
+## Workload Validation Boundary
 
-The simulator runs two independent HTTP servers.
-
-1. Healthy checkout requests reserve inventory quickly.
-2. A configuration reload introduces partition lock contention in inventory.
-3. Affected reservations exceed the checkout client deadline.
-4. Checkout retries up to three times while the circuit breaker remains closed.
-5. Concurrent retries amplify inventory calls.
-6. The eight-slot database pool saturates.
-7. Inventory acquisition errors and checkout failures grow.
-8. Retry amplification, pool saturation, and error-budget alerts fire.
-9. FCAPSule captures logs, PM series, FM events, topology, configuration context, and trace availability.
-
-The scenario is deterministic in structure but keeps real scheduling, HTTP deadlines, and concurrency behavior.
+The separate FCAPSule Lab project owns a realistic checkout/inventory workload,
+PostgreSQL, traffic, Prometheus, and controlled lock-contention failures. It exports
+bounded Prometheus alerts/metrics and Docker JSON logs using the normalized case
+contract. The product neither embeds the lab nor controls its containers. This lets the
+same FCAPSule pipeline exercise lab exports and future production adapters.
 
 ## Extension Boundaries
 
@@ -129,4 +119,3 @@ A Kubernetes deployment should add authentication, durable SQL, job workers, hea
 - PM analysis uses robust explainable statistics rather than a pretrained forecasting model.
 - The reference scenario is synthetic and cannot establish production root-cause accuracy.
 - Model quality scores evaluate grounded use of known evidence, not whether a model discovered definitive causality.
-

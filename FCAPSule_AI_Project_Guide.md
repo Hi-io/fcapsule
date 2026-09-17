@@ -116,7 +116,7 @@ The local control plane uses SQLite and must track:
 - capsule metadata, retained size, and evaluation;
 - model profiles, enablement, and token limits.
 
-The control plane must support multiple applications and multiple incidents. Generated lab state lives under `.fcapsule/` and must remain outside Git.
+The control plane must support multiple applications and multiple incidents. Generated control-plane state lives under `.fcapsule/` and must remain outside Git.
 
 ## 8. User Interfaces
 
@@ -133,18 +133,13 @@ The Operations view must make these questions answerable at a glance:
 - Which models are enabled?
 - What is the strongest evidence in a selected capsule?
 
-### Incident Lab
+### External Workload Integration
 
-The lab must:
-
-- start empty;
-- allow application name, identifier, scenario, request volume, and concurrency configuration;
-- run real local traffic;
-- expose baseline, injection, alert, capsule, and model stages;
-- show progress without blocking the UI;
-- keep simulation and capsule creation as separate actions;
-- register the simulated application and incident in Operations;
-- clearly state that traces are queried on demand and not retained.
+The product must accept a normalized bounded incident case from a source adapter or
+external workload project. The ingestion flow must validate the input, register incident
+metadata without retaining raw source telemetry, and expose a **Build report** action in
+Operations. The FCAPSule Lab Compose workload is intentionally separate and owns its
+traffic, failures, Prometheus instance, and Docker logs.
 
 ## 9. Incident Scenario Requirements
 
@@ -212,7 +207,7 @@ Regression cases must define expected diagnostic signal groups without treating 
 
 The local version is a reference control plane. A pod deployment should mount configuration and durable metadata storage, expose the web/API port, and receive read-only credentials for configured adapters.
 
-Future live adapters must normalize to the same case contract. Pipeline behavior must not depend on whether the source is a file export, direct HTTP API, webhook trigger, or simulator.
+Future live adapters must normalize to the same case contract. Pipeline behavior must not depend on whether the source is a file export, direct HTTP API, webhook trigger, or external workload exporter.
 
 The service may later use PostgreSQL and distributed workers, but SQLite and in-process jobs are the supported local mode.
 
@@ -220,10 +215,10 @@ The service may later use PostgreSQL and distributed workers, but SQLite and in-
 
 A release is complete when:
 
-- CLI and both web views start from one command;
-- a user can register or simulate an application;
-- the complex scenario triggers all expected alerts;
-- the incident appears in Operations;
+- CLI and both operator views start from one command;
+- a user can register an application or ingest a bounded external case;
+- a workload exporter can trigger and capture expected alerts outside the product runtime;
+- the ingested incident appears in Operations;
 - a capsule can be built without an API key;
 - enabled models can run over identical input when credentials are available;
 - artifacts exclude raw telemetry;

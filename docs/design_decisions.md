@@ -10,7 +10,10 @@ SQLite is sufficient for one local process and makes multi-application state dur
 
 ## Two Views, One Control Plane
 
-Operations and Incident Lab share the same state and APIs. The lab is a source/test harness; Operations is the product surface. Keeping them together ensures simulated incidents follow the same lifecycle as future live-source incidents.
+Operations is the product surface. The source/test harness is now the separate FCAPSule
+Lab project, which exports the same normalized incident contract used by future
+live-source adapters. Keeping the contract shared while keeping runtime ownership
+separate prevents the product from becoming a simulator or container controller.
 
 ## Deterministic Core
 
@@ -30,7 +33,9 @@ Raw spans are high-volume and short-lived. FCAPSule verifies that they can be qu
 
 ## Cautious Causality
 
-The simulator knows which fault was injected, but the capsule is evaluated as an investigator would see it. Hypotheses remain tentative and request database or trace evidence before calling a final root cause.
+The external workload may know which fault it injected, but the capsule is evaluated as
+an investigator would see it. Hypotheses remain tentative and request database or trace
+evidence before calling a final root cause.
 
 ## Background Jobs and Polling
 
@@ -39,4 +44,3 @@ Simulation and model calls cannot block HTTP requests. The control plane runs jo
 ## No Autonomous Remediation
 
 FCAPSule produces evidence and next checks. System changes require a separate, explicitly authorized control boundary.
-

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Moved the incident workload and fault controls out of FCAPSule into the separate
+  FCAPSule Lab Compose project.
+- Replaced simulator controls with external normalized-case ingestion and per-incident
+  **Build report** actions in Operations.
+- Added local AI settings for a selected DeepSeek-compatible briefing model and token
+  budget; provider secrets remain in Git-ignored `.env`.
+
 ## 1.2.0 - 2026-09-15
 
 - Expanded reports in place beneath their incident queue rows and clarified application versus captured telemetry context.

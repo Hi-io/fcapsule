@@ -6,12 +6,17 @@ It is not another root-cause chatbot and it does not replace Prometheus, OpenSea
 
 ## Product Surfaces
 
-FCAPSule provides one local control plane with two web views:
+FCAPSule provides one local control plane with two operator views:
 
 - **Operations** (`/console`) starts with an incident queue. A report expands beneath its incident and separates FM alerts, PM trends, anonymized log patterns, urgent retention actions, exports, and application coverage.
-- **Incident Lab** (`/lab`) runs a controlled multi-service failure and shows each stage as it happens. It exists for testing, demonstrations, and regression evaluation; it is not required for normal capsule generation.
+- **AI settings** (`/settings`) selects the optional cited-briefing model. The provider key remains local in `.env` and is never returned through the console or stored in SQLite.
 
 The CLI remains fully usable without the web application.
+
+Workload simulation is deliberately outside this repository. The sibling
+[`fcapsule-lab`](../fcapsule-lab) project runs a five-container Compose workload with
+PostgreSQL, application services, traffic, Prometheus, and failure injection. It exports
+a bounded normalized case for FCAPSule; it is not a product screen or runtime dependency.
 
 ## Operational Domains
 
@@ -39,28 +44,29 @@ python3 -m fcapsule.cli serve
 Open:
 
 - Operations: `http://127.0.0.1:8765/console`
-- Incident Lab: `http://127.0.0.1:8765/lab`
+- AI settings: `http://127.0.0.1:8765/settings`
 
 The control plane stores local metadata under `.fcapsule/`. That directory is ignored by Git.
 
-### Run the incident from the CLI
+### Ingest an externally captured case
 
 ```bash
-python3 -m fcapsule.cli simulate \
-  --output ./.fcapsule/cases/cli-latest \
-  --baseline-requests 180 \
-  --incident-requests 240 \
-  --concurrency 24
+python3 -m fcapsule.cli ingest-case \
+  --case ../fcapsule-lab/artifacts/<case-directory> \
+  --app-id checkout-lab \
+  --app-name "Checkout Lab"
 ```
 
-The scenario starts live checkout and inventory HTTP services. A runtime configuration change creates inventory partition lock contention. Checkout retries continue while the circuit breaker remains closed, amplifying dependency calls until database-pool saturation and user-facing failures trigger three alerts.
+`ingest-case` validates the normalized case and records its metadata without copying raw
+telemetry into FCAPSule storage. In Operations, select **Build report** for the captured
+incident. The existing `cases/case_001` remains a small checked-in test fixture.
 
 ### Build a capsule directly
 
 ```bash
 python3 -m fcapsule.cli investigate \
-  --case ./.fcapsule/cases/cli-latest \
-  --out ./.fcapsule/capsules/cli-latest
+  --case ./cases/case_001 \
+  --out ./.fcapsule/capsules/case_001
 ```
 
 ### Register an application
@@ -70,7 +76,7 @@ python3 -m fcapsule.cli register \
   --app-id checkout-platform \
   --name "Checkout Platform" \
   --namespace commerce \
-  --cluster local-lab \
+  --cluster local-compose \
   --environment development
 ```
 
@@ -86,8 +92,8 @@ Place `DEEPSEEK_API_KEY=...` in a local `.env` file. `.env` is ignored by Git.
 
 ```bash
 python3 -m fcapsule.cli compare-llms \
-  --capsule ./.fcapsule/capsules/cli-latest/capsule.json \
-  --out ./.fcapsule/capsules/cli-latest \
+  --capsule ./.fcapsule/capsules/case_001/capsule.json \
+  --out ./.fcapsule/capsules/case_001 \
   --models deepseek-v4-flash deepseek-v4-pro
 ```
 
@@ -97,24 +103,9 @@ Re-score stored responses after a rubric change without making provider calls:
 
 ```bash
 python3 -m fcapsule.cli rescore-llms \
-  --capsule ./.fcapsule/capsules/cli-latest/capsule.json \
-  --out ./.fcapsule/capsules/cli-latest
+  --capsule ./.fcapsule/capsules/case_001/capsule.json \
+  --out ./.fcapsule/capsules/case_001
 ```
-
-## Incident Lab Output
-
-The default lab workload produces:
-
-- two live local services and concurrent HTTP traffic;
-- a healthy baseline followed by a controlled degradation;
-- thousands of structured logs from checkout and inventory components;
-- more than twenty PM series;
-- a three-stage FM alert sequence;
-- topology and configuration-change context;
-- a verified on-demand trace probe with zero raw spans retained;
-- an evidence capsule, objective evaluation, dashboard, and derived-only archive.
-
-The exact counts vary slightly with thread scheduling. The causal structure and required signal groups are deterministic and covered by regression tests.
 
 ## Capsule Outputs
 
@@ -148,11 +139,13 @@ fcapsule_<id>.zip     derived evidence only; no raw telemetry
 python3 -m unittest discover -s tests -v
 ```
 
-The suite covers validation, processing, domain-balanced selection, hypothesis grounding, model comparison scoring, the real incident simulation, SQLite control-plane state, HTTP routes, and the full capsule pipeline.
+The suite covers validation, processing, domain-balanced selection, hypothesis grounding,
+model comparison scoring, external-case ingestion, SQLite control-plane state, HTTP
+routes, and the full capsule pipeline.
 
 ## Deployment Direction
 
-The local control plane is the reference implementation. The intended deployment model is a service or Kubernetes pod configured with read-only access to observability APIs and durable metadata storage. Adapters normalize OpenSearch, Prometheus, Alertmanager, topology, and trace-source responses into the same incident contract used by the local lab.
+The local control plane is the reference implementation. The intended deployment model is a service or Kubernetes pod configured with read-only access to observability APIs and durable metadata storage. Adapters normalize OpenSearch, Prometheus, Alertmanager, topology, and trace-source responses into the same incident contract used by `ingest-case`.
 
 Raw telemetry remains in the source systems. The pod retains application registrations, incident metadata, responder reports, capsules, evaluation results, and source references. See `docs/architecture.md`, `docs/production_product_requirements.md`, and `ROADMAP.md` for the distributed path.
 
@@ -164,6 +157,7 @@ Raw telemetry remains in the source systems. The pod retains application registr
 - `DATA_SCHEMA.md`: normalized case, store, and capsule contracts.
 - `EVALUATION_PLAN.md`: objective metrics and model-comparison protocol.
 - `docs/operations.md`: CLI and web operating guide.
+- `docs/external_workload_boundary.md`: boundary between FCAPSule and workloads such as FCAPSule Lab.
 - `docs/architecture.md`: component and deployment architecture.
 - `docs/data_privacy.md`: collection, anonymization, and retention policy.
 - `docs/design_decisions.md`: important design decisions and tradeoffs.

@@ -76,7 +76,8 @@ For the reference scenario:
 - citation grounding is 100%;
 - retention completeness is 100%;
 - the archive contains no raw telemetry;
-- the Operations and Incident Lab HTTP routes respond;
+- the Operations and AI settings HTTP routes respond;
+- an externally exported normalized case can be ingested and processed;
 - application, incident, and capsule records persist in SQLite;
 - the automated suite passes.
 

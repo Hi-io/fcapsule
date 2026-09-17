@@ -73,7 +73,7 @@ Score each item from 1 (strongly negative) to 5 (strongly positive).
 | Are next checks actionable? | 1-5 |
 | Does the capsule appear meaningfully smaller than raw telemetry? | 1-5 |
 | Is the Operations view understandable without project context? | 1-5 |
-| Is the Incident Lab progression easy to follow? | 1-5 |
+| Is the external-workload to FCAPSule hand-off clear? | 1-5 |
 
 Record:
 

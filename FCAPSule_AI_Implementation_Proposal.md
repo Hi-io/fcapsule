@@ -14,7 +14,7 @@ Implement FCAPSule as a source-neutral telemetry attention service with:
 - compact evidence selection;
 - grounded deterministic and optional pretrained-model reasoning;
 - durable capsule metadata;
-- CLI, API, Operations, and Incident Lab surfaces.
+- CLI, API, Operations, and AI settings surfaces.
 
 ## Implemented Local Stack
 
@@ -32,7 +32,7 @@ This stack is intentionally small. The component boundaries support migration to
 
 ```bash
 python3 -m fcapsule.cli serve
-python3 -m fcapsule.cli simulate
+python3 -m fcapsule.cli ingest-case --case <case> --app-id <id>
 python3 -m fcapsule.cli investigate --case <case> --out <output>
 python3 -m fcapsule.cli compare-llms --capsule <capsule.json> --out <output>
 python3 -m fcapsule.cli register --app-id <id> --name <name> --namespace <ns> --cluster <cluster>
@@ -66,9 +66,9 @@ Live adapters should query source APIs directly and may use an in-memory normali
 
 ## Control Plane
 
-The control plane stores applications, incidents, capsules, and model profiles. It provides background simulation and capsule jobs to the web API.
+The control plane stores applications, incidents, capsules, and non-secret model preferences. It provides external-case ingestion and background capsule jobs to the web API.
 
-Operations and Incident Lab are separate views over this shared state. A simulated incident is registered exactly like a future live incident, so the lab exercises the product lifecycle instead of a parallel demo path.
+Operations and AI settings are the product views. The FCAPSule Lab workload is a separate Compose project that exports the normalized case contract, so it exercises the same lifecycle without becoming a product dependency.
 
 ## Trace Approach
 
@@ -104,4 +104,3 @@ Replace local implementation details without changing the normalized contracts:
 4. Keep deterministic behavior available without external credentials.
 5. Evaluate model changes on identical evidence.
 6. Scale through adapters and workers rather than coupling the pipeline to infrastructure.
-

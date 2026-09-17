@@ -82,11 +82,10 @@ opens a retained incident workspace with these sections:
 Engineering diagnostics are collapsible. They contain capsule-efficiency and validation
 figures for maintainers without making them the incident response workflow.
 
-The Incident Lab remains optional. It creates a deterministic local failing scenario
-and shows capture progress so the product can be demonstrated and tested without an
-external application. It is not required to run the operations console. It remains in
-the local interface temporarily for development and demonstrations; a deployment should
-ship the operations console and collectors independently of the lab.
+FCAPSule Lab remains optional and separate. It creates a deterministic local failing
+scenario, then exports a bounded normalized case through the same ingestion contract
+used by future source adapters. It is not required to run the operations console, and a
+deployment ships FCAPSule independently of the lab containers.
 
 ## Validation Evidence
 
