@@ -36,9 +36,9 @@ normalized bounded case directory:
 
 ```bash
 python3 -m fcapsule.cli ingest-case \
-  --case ../fcapsule-lab/artifacts/<case-directory> \
-  --app-id checkout-lab \
-  --app-name "Checkout Lab"
+  --case /path/to/normalized-case \
+  --app-id payments-api \
+  --app-name "Payments API"
 ```
 
 The command validates the case and records metadata without copying raw telemetry into
@@ -54,14 +54,14 @@ and demonstrations. It is not served by FCAPSule or required in deployment.
 
 ```bash
 python3 -m fcapsule.cli investigate \
-  --case cases/case_001 \
-  --out .fcapsule/capsules/case_001
+  --case /path/to/normalized-case \
+  --out .fcapsule/capsules/<incident-id>
 ```
 
 ### Inspect a normalized case
 
 ```bash
-python3 -m fcapsule.cli inspect --case cases/case_001
+python3 -m fcapsule.cli inspect --case /path/to/normalized-case
 ```
 
 ### Register an application
@@ -84,8 +84,8 @@ python3 -m fcapsule.cli status
 
 ```bash
 python3 -m fcapsule.cli compare-llms \
-  --capsule .fcapsule/capsules/case_001/capsule.json \
-  --out .fcapsule/capsules/case_001
+  --capsule .fcapsule/capsules/<incident-id>/capsule.json \
+  --out .fcapsule/capsules/<incident-id>
 ```
 
 ## Model Evaluation

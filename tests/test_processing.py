@@ -5,13 +5,13 @@ from fcapsule.processing.anonymizer import anonymize_text, template_for_message
 from fcapsule.processing.entity_resolver import resolve_entities
 from fcapsule.processing.log_reducer import reduce_logs
 from fcapsule.processing.metrics_analyzer import analyze_metrics
-from tests.common import CASE_001
+from tests.common import REFERENCE_CASE
 
 
 class ProcessingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.bundle = load_case(CASE_001)
+        cls.bundle = load_case(REFERENCE_CASE)
 
     def test_anonymizer_masks_sensitive_values(self):
         text = "user=a@example.com host=10.0.0.3 token=abc123 duration=42"

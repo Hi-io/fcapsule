@@ -13,8 +13,8 @@ FCAPSule provides one local control plane with two operator views:
 
 The CLI remains fully usable without the web application.
 
-Workload simulation is deliberately outside this repository. The sibling
-[`fcapsule-lab`](../fcapsule-lab) project runs a five-container Compose workload with
+Workload simulation is deliberately outside this repository. The separate FCAPSule Lab
+project runs a five-container Compose workload with
 PostgreSQL, application services, traffic, Prometheus, and failure injection. It exports
 a bounded normalized case for FCAPSule; it is not a product screen or runtime dependency.
 
@@ -52,21 +52,22 @@ The control plane stores local metadata under `.fcapsule/`. That directory is ig
 
 ```bash
 python3 -m fcapsule.cli ingest-case \
-  --case ../fcapsule-lab/artifacts/<case-directory> \
-  --app-id checkout-lab \
-  --app-name "Checkout Lab"
+  --case /path/to/normalized-case \
+  --app-id payments-api \
+  --app-name "Payments API"
 ```
 
 `ingest-case` validates the normalized case and records its metadata without copying raw
 telemetry into FCAPSule storage. In Operations, select **Build report** for the captured
-incident. The existing `cases/case_001` remains a small checked-in test fixture.
+incident. FCAPSule does not ship an operator-facing sample case. The synthetic fixture
+used by the test suite is isolated under `tests/fixtures/`.
 
 ### Build a capsule directly
 
 ```bash
 python3 -m fcapsule.cli investigate \
-  --case ./cases/case_001 \
-  --out ./.fcapsule/capsules/case_001
+  --case /path/to/normalized-case \
+  --out ./.fcapsule/capsules/<incident-id>
 ```
 
 ### Register an application
@@ -92,8 +93,8 @@ Place `DEEPSEEK_API_KEY=...` in a local `.env` file. `.env` is ignored by Git.
 
 ```bash
 python3 -m fcapsule.cli compare-llms \
-  --capsule ./.fcapsule/capsules/case_001/capsule.json \
-  --out ./.fcapsule/capsules/case_001 \
+  --capsule ./.fcapsule/capsules/<incident-id>/capsule.json \
+  --out ./.fcapsule/capsules/<incident-id> \
   --models deepseek-v4-flash deepseek-v4-pro
 ```
 
@@ -103,8 +104,8 @@ Re-score stored responses after a rubric change without making provider calls:
 
 ```bash
 python3 -m fcapsule.cli rescore-llms \
-  --capsule ./.fcapsule/capsules/case_001/capsule.json \
-  --out ./.fcapsule/capsules/case_001
+  --capsule ./.fcapsule/capsules/<incident-id>/capsule.json \
+  --out ./.fcapsule/capsules/<incident-id>
 ```
 
 ## Capsule Outputs

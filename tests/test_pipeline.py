@@ -5,14 +5,14 @@ from pathlib import Path
 from zipfile import ZipFile
 
 from fcapsule.pipeline import investigate_case
-from tests.common import CASE_001
+from tests.common import REFERENCE_CASE
 
 
 class PipelineRegressionTests(unittest.TestCase):
     def test_reference_case_generates_complete_grounded_capsule(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output"
-            result = investigate_case(CASE_001, output)
+            result = investigate_case(REFERENCE_CASE, output)
             expected = {"capsule.md", "capsule.json", "evidence.json", "evaluation.json", "baselines.json", "fcapsule_case_001.zip"}
             self.assertTrue(expected.issubset({path.name for path in output.iterdir()}))
             self.assertEqual(result["verified_hypotheses"], result["hypotheses"])
@@ -30,7 +30,7 @@ class PipelineRegressionTests(unittest.TestCase):
     def test_archive_excludes_raw_telemetry(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output"
-            investigate_case(CASE_001, output)
+            investigate_case(REFERENCE_CASE, output)
             with ZipFile(output / "fcapsule_case_001.zip") as archive:
                 names = set(archive.namelist())
             self.assertNotIn("opensearch_logs.json", names)

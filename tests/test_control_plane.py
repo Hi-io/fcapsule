@@ -13,7 +13,7 @@ from fcapsule.control_plane import ControlPlane
 from fcapsule.ui.app import create_app_server
 
 
-CASE_001 = Path(__file__).resolve().parents[1] / "cases" / "case_001"
+REFERENCE_CASE = Path(__file__).resolve().parent / "fixtures" / "checkout_dependency_failure"
 
 
 def wait_for_idle(control_plane: ControlPlane, timeout: float = 15) -> None:
@@ -28,7 +28,7 @@ class ControlPlaneTests(unittest.TestCase):
     def test_external_case_and_capsule_are_persisted(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
             control_plane = ControlPlane(Path(directory) / "state")
-            incident = control_plane.ingest_case(CASE_001, "checkout-platform", "Checkout Platform")
+            incident = control_plane.ingest_case(REFERENCE_CASE, "checkout-platform", "Checkout Platform")
             state = control_plane.snapshot()
             self.assertIsNone(state["error"])
             self.assertEqual(state["overview"]["totals"]["incidents"], 1)

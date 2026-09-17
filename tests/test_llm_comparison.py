@@ -6,14 +6,14 @@ from pathlib import Path
 from fcapsule.pipeline import investigate_case
 from fcapsule.reasoning.model_comparator import _extract_json, _score_response, build_model_prompt
 from fcapsule.ui.dashboard import render_dashboard
-from tests.common import CASE_001
+from tests.common import REFERENCE_CASE
 
 
 class LLMComparisonTests(unittest.TestCase):
     def test_prompt_and_scoring_require_domains_and_valid_citations(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output"
-            investigate_case(CASE_001, output)
+            investigate_case(REFERENCE_CASE, output)
             capsule = json.loads((output / "capsule.json").read_text(encoding="utf-8"))
             prompt = build_model_prompt(capsule)
             self.assertIn("fault_events", prompt[1]["content"])
@@ -49,7 +49,7 @@ class LLMComparisonTests(unittest.TestCase):
         self.assertEqual(parsed, {"ok": True})
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output"
-            investigate_case(CASE_001, output)
+            investigate_case(REFERENCE_CASE, output)
             dashboard = render_dashboard(output)
             self.assertTrue(dashboard.exists())
             self.assertIn("Operational Signal Domains", dashboard.read_text(encoding="utf-8"))

@@ -7,13 +7,13 @@ from fcapsule.processing.log_reducer import reduce_logs
 from fcapsule.processing.metrics_analyzer import analyze_metrics
 from fcapsule.reasoning.hypothesis_generator import generate_hypotheses
 from fcapsule.reasoning.hypothesis_verifier import verify_hypotheses
-from tests.common import CASE_001
+from tests.common import REFERENCE_CASE
 
 
 class AttentionReasoningTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.bundle = load_case(CASE_001)
+        cls.bundle = load_case(REFERENCE_CASE)
         cls.candidates = score_evidence(cls.bundle, reduce_logs(cls.bundle), analyze_metrics(cls.bundle))
         cls.selected, _ = select_evidence(cls.candidates)
 

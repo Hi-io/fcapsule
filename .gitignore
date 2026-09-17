@@ -8,8 +8,7 @@ build/
 *.egg-info/
 .env
 .fcapsule/
-outputs/*
-!outputs/.gitkeep
+outputs/
 demo/runtime/
 *:Zone.Identifier
 local_reports/
