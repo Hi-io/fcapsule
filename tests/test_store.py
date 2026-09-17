@@ -60,6 +60,17 @@ class StoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 store.update_model_profile("deepseek-v4-flash", True, 100)
 
+    def test_custom_deepseek_profile_and_settings_are_persisted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = FCAPSuleStore(Path(directory) / "state.db")
+            profile = store.upsert_model_profile("deepseek-v4-experimental", "deepseek", True, 2200)
+            self.assertTrue(profile["enabled"])
+            self.assertEqual(profile["max_tokens"], 2200)
+            store.set_setting("ai_active_model", profile["model_id"])
+            self.assertEqual(store.get_setting("ai_active_model"), "deepseek-v4-experimental")
+            with self.assertRaises(ValueError):
+                store.upsert_model_profile("other-model", "unsupported", True, 1200)
+
 
 if __name__ == "__main__":
     unittest.main()

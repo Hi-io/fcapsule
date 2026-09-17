@@ -1,4 +1,4 @@
-"""Dependency-light local web application for FCAPSule operations and testing."""
+"""Dependency-light local web application for FCAPSule operations."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ HTML = """<!doctype html>
     <a class="wordmark" href="/console"><span>FC</span>APSule</a>
     <nav aria-label="Primary">
       <a href="/console" data-nav="console">Operations</a>
-      <a href="/lab" data-nav="lab">Incident Lab</a>
+      <a href="/settings" data-nav="settings">AI settings</a>
     </nav>
     <div class="system-state"><i></i><span id="system-state">Ready</span></div>
   </header>
@@ -109,37 +109,11 @@ tbody tr:hover { background:#fafbfb; }
 .model-result dl { display:grid; grid-template-columns:repeat(3, 1fr); gap:7px; margin:0; }
 .model-result dt { color:var(--muted); font-size:10px; text-transform:uppercase; }
 .model-result dd { margin:2px 0 0; font-weight:700; }
-.lab-grid { display:grid; grid-template-columns:320px minmax(0, 1fr); gap:14px; align-items:start; }
-.control-panel { position:sticky; top:14px; }
 .field { margin-bottom:12px; }
 .field label { display:block; font-size:12px; font-weight:650; margin-bottom:5px; }
 .field small { display:block; color:var(--muted); margin-top:4px; }
 .form-pair { display:grid; grid-template-columns:1fr 1fr; gap:9px; }
 .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:15px; }
-.phase-strip { display:grid; grid-template-columns:repeat(5, 1fr); border:1px solid var(--line); background:#fff; margin-bottom:14px; }
-.phase { min-height:92px; padding:12px; border-right:1px solid var(--line); border-top:3px solid #b7c0c6; }
-.phase:last-child { border-right:0; }
-.phase.running { border-top-color:var(--blue); background:#f8fbfd; }
-.phase.done { border-top-color:var(--green); }
-.phase.error { border-top-color:var(--red); background:#fffafa; }
-.phase.skipped { border-top-color:#929da4; }
-.phase b { display:block; font-size:12px; margin-bottom:7px; }
-.phase span { color:var(--muted); font-size:11px; line-height:1.35; display:block; }
-.metrics-line { display:grid; grid-template-columns:repeat(6, 1fr); border-bottom:1px solid var(--line); }
-.metric { min-height:86px; padding:12px; border-right:1px solid var(--line); }
-.metric:last-child { border-right:0; }
-.metric span { display:block; color:var(--muted); font-size:11px; text-transform:uppercase; }
-.metric strong { display:block; font-size:22px; margin-top:7px; font-weight:680; overflow-wrap:anywhere; }
-.event-list { max-height:340px; overflow:auto; }
-.event { display:grid; grid-template-columns:74px 92px minmax(0, 1fr); gap:10px; padding:8px 11px; border-bottom:1px solid #e8ecef; }
-.event time, .event span { color:var(--muted); font-size:12px; }
-.event b { font-size:12px; text-transform:uppercase; }
-.alert-sequence { position:relative; padding-left:24px; display:grid; gap:14px; }
-.alert-sequence:before { content:""; position:absolute; left:7px; top:6px; bottom:6px; width:2px; background:#d7dde1; }
-.alert-item { position:relative; }
-.alert-item:before { content:""; position:absolute; left:-22px; top:5px; width:10px; height:10px; background:var(--red); border:2px solid #fff; box-shadow:0 0 0 1px #c86f6f; }
-.alert-item strong { display:block; }
-.alert-item small { color:var(--muted); }
 .notice { border-left:3px solid var(--blue); background:var(--blue-bg); padding:10px 12px; color:#234e6b; }
 .capsule-detail h3 { font-size:14px; margin:14px 0 6px; }
 .capsule-detail p { color:var(--muted); margin:0; }
@@ -235,13 +209,13 @@ details.engineering summary { cursor:pointer; padding:10px 11px; font-weight:650
 .boot { color:var(--muted); padding:40px; text-align:center; }
 .mono { font-family:"Cascadia Mono", Consolas, monospace; font-size:12px; }
 .right { text-align:right; }
-@media (max-width:1050px) { .grid-2, .lab-grid, .report-layout { grid-template-columns:1fr; } .control-panel { position:static; } .phase-strip { grid-template-columns:repeat(3, 1fr); } .metrics-line { grid-template-columns:repeat(3, 1fr); } .report-main { border-right:0; border-bottom:1px solid var(--line); } }
-@media (max-width:700px) { .product-bar { height:auto; min-height:58px; padding:10px 14px; grid-template-columns:1fr auto; } nav { grid-column:1/-1; order:3; margin-top:8px; } nav a { min-height:40px; } .system-state { justify-self:end; } main { width:calc(100% - 18px); margin-top:12px; } .page-head, .report-banner { align-items:start; flex-direction:column; } .kpis, .phase-strip, .metrics-line, .impact-grid { grid-template-columns:1fr 1fr; } .kpi:nth-child(2) { border-right:0; } .kpi { border-bottom:1px solid var(--line); } .impact-item:nth-child(2n) { border-right:0; } .event { grid-template-columns:62px 1fr; } .event span { display:none; } .form-pair, .model-compare { grid-template-columns:1fr; } .incident-table .wide-only { display:none; } .incident-table td, .incident-table th { padding:9px 7px; } .incident-table button { padding:6px 8px; font-size:12px; } }
+@media (max-width:1050px) { .grid-2, .report-layout { grid-template-columns:1fr; } .report-main { border-right:0; border-bottom:1px solid var(--line); } }
+@media (max-width:700px) { .product-bar { height:auto; min-height:58px; padding:10px 14px; grid-template-columns:1fr auto; } nav { grid-column:1/-1; order:3; margin-top:8px; } nav a { min-height:40px; } .system-state { justify-self:end; } main { width:calc(100% - 18px); margin-top:12px; } .page-head, .report-banner { align-items:start; flex-direction:column; } .kpis, .impact-grid { grid-template-columns:1fr 1fr; } .kpi:nth-child(2) { border-right:0; } .kpi { border-bottom:1px solid var(--line); } .impact-item:nth-child(2n) { border-right:0; } .form-pair, .model-compare { grid-template-columns:1fr; } .incident-table .wide-only { display:none; } .incident-table td, .incident-table th { padding:9px 7px; } .incident-table button { padding:6px 8px; font-size:12px; } }
 """
 
 
 JS = r"""
-const view = location.pathname.startsWith('/lab') ? 'lab' : 'console';
+const view = location.pathname.startsWith('/settings') ? 'settings' : 'console';
 const app = document.querySelector('#app');
 const fmt = new Intl.NumberFormat('en-US');
 const pct = value => typeof value === 'number' ? (value * 100).toFixed(1) + '%' : '--';
@@ -273,11 +247,29 @@ function sources(config) {
 function renderConsole(state) {
   const data = state.overview; const apps = data.applications; const incidents = data.incidents;
   app.innerHTML = `
-    <div class="page-head"><div><div class="eyebrow">Incident workspace</div><h1>Operations</h1><p>Captured incidents and the evidence needed to investigate them.</p></div><a href="/lab"><button class="secondary">Open Test Lab</button></a></div>
+    <div class="page-head"><div><div class="eyebrow">Incident workspace</div><h1>Operations</h1><p>Captured incidents and the evidence needed to investigate them.</p></div><a href="/settings"><button class="secondary">AI settings</button></a></div>
     <section class="sheet"><div class="sheet-head"><h2>Incident queue</h2><span class="queue-note">${incidents.length} captured incident${incidents.length === 1 ? '' : 's'} · reports stay available after source telemetry expires</span></div><div class="table-wrap">${incidentTable(incidents, data.capsules)}</div></section>
     <section class="sheet" style="margin-top:14px"><div class="sheet-head"><h2>Application coverage</h2><span class="queue-note">FM, PM, logs, and trace access configured per application</span></div><div class="table-wrap">${applicationTable(apps)}</div></section>`;
   document.querySelectorAll('[data-incident-report]').forEach(button => button.addEventListener('click', () => openReport(button.dataset.incidentReport)));
+  document.querySelectorAll('[data-build-capsule]').forEach(button => button.addEventListener('click', () => buildCapsule(button.dataset.buildCapsule)));
   document.querySelectorAll('[data-ai-briefing]').forEach(button => button.addEventListener('click', () => generateAiBriefing(button.dataset.aiBriefing)));
+}
+
+function renderSettings(state) {
+  const ai = state.ai;
+  const options = ai.models.map(item => `<option value="${safe(item.model_id)}">${safe(item.model_id)}</option>`).join('');
+  const keyState = ai.api_key_configured ? 'Configured locally' : 'Not configured';
+  app.innerHTML = `
+    <div class="page-head"><div><div class="eyebrow">Runtime configuration</div><h1>AI settings</h1><p>Choose the optional briefing model used after a report is ready.</p></div></div>
+    <section class="sheet" style="max-width:720px"><div class="sheet-head"><h2>Provider connection</h2><span class="queue-note">${safe(keyState)}</span></div><div class="sheet-body">
+      <div class="field"><label for="ai-provider">Provider</label><input id="ai-provider" value="DeepSeek-compatible" disabled></div>
+      <div class="field"><label for="ai-model">Model ID</label><input id="ai-model" list="ai-model-options" value="${safe(ai.model)}"><datalist id="ai-model-options">${options}</datalist><small>Configured models are available here; a compatible model ID may also be entered.</small></div>
+      <div class="field"><label for="ai-max-tokens">Maximum completion tokens</label><input id="ai-max-tokens" type="number" min="256" max="16000" value="${safe(ai.max_tokens)}"></div>
+      <div class="field"><label for="ai-key">API key</label><input id="ai-key" type="password" autocomplete="new-password" placeholder="${ai.api_key_configured ? 'Leave blank to keep the saved key' : 'Paste a key to enable briefings'}"><small>Saved only to the local .env file. It is never shown in this console or saved in the database.</small></div>
+      ${window.settingsNotice ? `<p class="notice">${safe(window.settingsNotice)}</p>` : ''}
+      <div class="actions"><button id="save-ai-settings">Save settings</button><a class="button-link" href="/console">Back to operations</a></div>
+    </div></section>`;
+  document.querySelector('#save-ai-settings').addEventListener('click', saveAiSettings);
 }
 
 function applicationTable(items) {
@@ -293,7 +285,8 @@ function incidentTable(items, capsules) {
     const ready = reports.has(item.incident_id);
     const isOpen = openId === item.incident_id;
     const reportRow = isOpen ? `<tr class="report-row"><td colspan="6">${reportPanel(selectedReport)}</td></tr>` : '';
-    return `<tr class="incident-row ${isOpen ? 'open' : ''}"><td>${status(item.severity)}</td><td><span class="incident-title">${safe(item.summary || item.scenario)}</span><small class="mono">${safe(item.incident_id)}</small></td><td class="wide-only">${safe(item.app_id)}</td><td class="wide-only">${shortTime(item.started_at)}</td><td><span class="impact-line">${safe(item.alert_count)} FM alerts · ${fmt.format(item.log_count)} logs captured · ${fmt.format(item.metric_series_count)} PM series</span></td><td><button class="secondary" data-incident-report="${safe(item.incident_id)}" aria-expanded="${isOpen}">${isOpen ? 'Close report' : ready ? 'Open report' : 'View incident'}</button></td></tr>${reportRow}`;
+    const action = ready ? `<button class="secondary" data-incident-report="${safe(item.incident_id)}" aria-expanded="${isOpen}">${isOpen ? 'Close report' : 'Open report'}</button>` : `<button data-build-capsule="${safe(item.incident_id)}" ${lastState?.running ? 'disabled' : ''}>Build report</button>`;
+    return `<tr class="incident-row ${isOpen ? 'open' : ''}"><td>${status(item.severity)}</td><td><span class="incident-title">${safe(item.summary || item.scenario)}</span><small class="mono">${safe(item.incident_id)}</small></td><td class="wide-only">${safe(item.app_id)}</td><td class="wide-only">${shortTime(item.started_at)}</td><td><span class="impact-line">${safe(item.alert_count)} FM alerts · ${fmt.format(item.log_count)} logs captured · ${fmt.format(item.metric_series_count)} PM series</span></td><td>${action}</td></tr>${reportRow}`;
   }).join('')}</tbody></table>`;
 }
 
@@ -332,6 +325,23 @@ async function generateAiBriefing(id) {
   }
 }
 
+async function buildCapsule(id) {
+  const response = await fetch('/api/capsules', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({incident_id:id})});
+  const result = await response.json();
+  if (!response.ok) { alert(result.error || 'Unable to build report'); return; }
+  await refresh();
+}
+
+async function saveAiSettings() {
+  const payload = {model:document.querySelector('#ai-model').value, max_tokens:Number(document.querySelector('#ai-max-tokens').value), api_key:document.querySelector('#ai-key').value};
+  const response = await fetch('/api/settings/ai', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+  const result = await response.json();
+  if (!response.ok) { alert(result.error || 'Unable to save settings'); return; }
+  window.settingsNotice = 'Settings saved locally.';
+  lastState.ai = result;
+  renderSettings(lastState);
+}
+
 function sparkline(signal) {
   const values = signal.values || [];
   if (values.length < 2) return '';
@@ -349,7 +359,7 @@ function sparkline(signal) {
 }
 
 function reportPanel(payload) {
-  if (!payload.report) return `<section id="incident-report" class="sheet report"><div class="sheet-body"><h2>Report is still being prepared</h2><p class="queue-note">The incident is captured. Build its capsule to preserve evidence and produce the responder report.</p></div></section>`;
+  if (!payload.report) return `<section id="incident-report" class="sheet report"><div class="sheet-body"><h2>Report is not built yet</h2><p class="queue-note">The incident is captured. Build the report to preserve the selected evidence before source telemetry expires.</p><div class="report-tools"><button data-build-capsule="${safe(payload.incident.incident_id)}" ${lastState?.running ? 'disabled' : ''}>Build report</button></div></div></section>`;
   const report = payload.report; const incident = report.incident; const hypothesis = report.primary_hypothesis;
   const impact = report.impact.length ? report.impact.map(item => `<div class="impact-item"><span>${safe(item.label)}</span><strong>${safe(item.value)}</strong><small>${safe(item.component || 'service')} · ${safe(item.baseline_text)}</small><p>${safe(item.meaning)}</p></div>`).join('') : '<p class="queue-note">No material metric anomalies were retained.</p>';
   const timeline = report.timeline.length ? report.timeline.map(item => `<li class="timeline-item ${safe(item.severity)}"><strong>${safe(item.title)}</strong><small>${formatDate(item.timestamp)} · ${safe(item.description || '')}</small></li>`).join('') : '<li class="queue-note">No ordered incident events are available.</li>';
@@ -366,65 +376,8 @@ function reportPanel(payload) {
   const archiveName = `fcapsule_${incident.incident_id}.zip`;
   const archiveUrl = capsuleId ? `/artifacts/${encodeURIComponent(capsuleId)}/${encodeURIComponent(archiveName)}` : '';
   const reportUrl = capsuleId ? `/artifacts/${encodeURIComponent(capsuleId)}/incident_report.json` : '';
-  return `<section id="incident-report" class="report"><div class="report-banner"><div><div class="eyebrow">Incident report · ${safe(incident.incident_id)}</div><h2>${safe(incident.title)}</h2><p>${safe(incident.summary)}</p></div><div>${status(incident.severity)}<br><span class="queue-note">${safe(incident.service)} · ${safe(incident.cluster)} / ${safe(incident.namespace)}<br>${formatDate(incident.started_at)}</span></div></div><div class="report-layout"><div class="report-main"><section class="report-section"><h3>Observed impact</h3><div class="impact-grid">${impact}</div></section><section class="report-section"><h3>FCAPSule assessment <span class="domain-mark">FM + PM + logs</span></h3><div class="hypothesis"><p>${safe(hypothesis.statement)}</p><small>${hypothesis.confidence != null ? `${Math.round(Number(hypothesis.confidence) * 100)}% confidence` : 'Confidence unavailable'} · ${safe(hypothesis.verdict)} · investigation path, not final root cause</small></div>${hypothesis.uncertainty.length ? `<p class="queue-note" style="margin-top:9px">To confirm: ${safe(hypothesis.uncertainty.join('; '))}</p>` : ''}</section><section class="report-section"><h3>AI incident briefing <span class="domain-mark">Cited response</span></h3>${aiBriefing}</section><section class="evidence-domain"><h3>Fault management <span class="domain-mark">FM alerts</span></h3><p class="report-note">Alerts that established the incident window and user impact.</p><div class="alert-records">${faultAlerts || '<span class="queue-note">No fault events were retained.</span>'}</div></section><section class="evidence-domain"><h3>Performance management <span class="domain-mark">PM time series</span></h3><p class="report-note">Trend lines compare normal behaviour with the incident window. The red marker identifies the observed peak.</p><div class="pm-grid">${pmSignals || '<span class="queue-note">No relevant performance series were retained.</span>'}</div>${report.pm_coverage_note ? `<p class="queue-note" style="margin-top:8px">${safe(report.pm_coverage_note)}</p>` : ''}</section><section class="evidence-domain"><h3>Log evidence <span class="domain-mark">Anonymized patterns</span></h3><p class="report-note">Only the selected patterns and representative lines are retained. Expand a pattern to inspect the examples used in the assessment.</p>${logPatterns || '<span class="queue-note">No selected log patterns were retained.</span>'}</section><section class="report-section"><h3>Incident sequence</h3><ul class="timeline">${timeline}</ul>${topology ? `<p class="queue-note" style="margin-top:10px">Observed dependency path: ${topology}</p>` : ''}</section></div><aside class="report-side"><section class="report-section"><h3>Recommended follow-up</h3><ul class="action-list">${actions}</ul></section><section class="report-section"><h3>Trace availability</h3><div class="${retentionClass}"><strong>${report.retention.trace_available ? 'Trace window available' : 'Trace window unavailable'}</strong><br><span>${safe(report.retention.message)}</span>${report.retention.source_retention_seconds ? `<br><small>Source window: ${safe(report.retention.source_retention_seconds)} seconds · raw traces retained by FCAPSule: no</small>` : ''}</div></section><section class="report-section"><h3>Incident package</h3><p class="report-note">The report and curated evidence are retained in the FCAPSule archive. Raw logs and traces remain in their source systems.</p><div class="report-tools">${reportUrl ? `<a class="button-link" href="${reportUrl}" download>Report JSON</a>` : ''}${archiveUrl ? `<a class="button-link" href="${archiveUrl}" download>Capsule archive</a>` : ''}</div></section><section class="report-section"><h3>Coverage</h3><div class="coverage-list">${coverage}</div></section><details class="engineering"><summary>Engineering diagnostics</summary><div class="diagnostics"><dl><dt>Derived evidence retained</dt><dd>${report.engineering_diagnostics.selected_evidence}</dd><dt>Log reduction</dt><dd>${pct(report.engineering_diagnostics.log_compression_ratio)}</dd><dt>Signal preservation</dt><dd>${pct(report.engineering_diagnostics.important_signal_preservation)}</dd><dt>Hypothesis grounding</dt><dd>${pct(report.engineering_diagnostics.hypothesis_grounding_score)}</dd><dt>Pipeline runtime</dt><dd>${Number(report.engineering_diagnostics.runtime_seconds || 0).toFixed(2)}s</dd></dl></div></details></aside></div></section>`;
+  return `<section id="incident-report" class="report"><div class="report-banner"><div><div class="eyebrow">Incident report · ${safe(incident.incident_id)}</div><h2>${safe(incident.title)}</h2><p>${safe(incident.summary)}</p></div><div>${status(incident.severity)}<br><span class="queue-note">${safe(incident.service)} · ${safe(incident.cluster)} / ${safe(incident.namespace)}<br>${formatDate(incident.started_at)}</span></div></div><div class="report-layout"><div class="report-main"><section class="report-section"><h3>Observed impact</h3><div class="impact-grid">${impact}</div></section><section class="report-section"><h3>FCAPSule assessment <span class="domain-mark">FM + PM + logs</span></h3><div class="hypothesis"><p>${safe(hypothesis.statement)}</p><small>${hypothesis.confidence != null ? `${Math.round(Number(hypothesis.confidence) * 100)}% confidence` : 'Confidence unavailable'} · ${safe(hypothesis.verdict)} · investigation path, not final root cause</small></div>${hypothesis.uncertainty.length ? `<p class="queue-note" style="margin-top:9px">To confirm: ${safe(hypothesis.uncertainty.join('; '))}</p>` : ''}</section><section class="report-section"><h3>AI incident briefing <span class="domain-mark">Cited response</span></h3>${aiBriefing}</section><section class="evidence-domain"><h3>Fault management <span class="domain-mark">FM alerts</span></h3><p class="report-note">Alerts that established the incident window and user impact.</p><div class="alert-records">${faultAlerts || '<span class="queue-note">No fault events were retained.</span>'}</div></section><section class="evidence-domain"><h3>Performance management <span class="domain-mark">PM time series</span></h3><p class="report-note">Trend lines compare normal behaviour with the incident window. The red marker identifies the observed peak.</p><div class="pm-grid">${pmSignals || '<span class="queue-note">No PM trend qualified for chart display. Retained PM evidence is reflected in Observed impact.</span>'}</div>${report.pm_coverage_note ? `<p class="queue-note" style="margin-top:8px">${safe(report.pm_coverage_note)}</p>` : ''}</section><section class="evidence-domain"><h3>Log evidence <span class="domain-mark">Anonymized patterns</span></h3><p class="report-note">Only the selected patterns and representative lines are retained. Expand a pattern to inspect the examples used in the assessment.</p>${logPatterns || '<span class="queue-note">No selected log patterns were retained.</span>'}</section><section class="report-section"><h3>Incident sequence</h3><ul class="timeline">${timeline}</ul>${topology ? `<p class="queue-note" style="margin-top:10px">Observed dependency path: ${topology}</p>` : ''}</section></div><aside class="report-side"><section class="report-section"><h3>Recommended follow-up</h3><ul class="action-list">${actions}</ul></section><section class="report-section"><h3>Trace availability</h3><div class="${retentionClass}"><strong>${report.retention.trace_available ? 'Trace window available' : 'Trace window unavailable'}</strong><br><span>${safe(report.retention.message)}</span>${report.retention.source_retention_seconds ? `<br><small>Source window: ${safe(report.retention.source_retention_seconds)} seconds · raw traces retained by FCAPSule: no</small>` : ''}</div></section><section class="report-section"><h3>Incident package</h3><p class="report-note">The report and curated evidence are retained in the FCAPSule archive. Raw logs and traces remain in their source systems.</p><div class="report-tools">${reportUrl ? `<a class="button-link" href="${reportUrl}" download>Report JSON</a>` : ''}${archiveUrl ? `<a class="button-link" href="${archiveUrl}" download>Capsule archive</a>` : ''}</div></section><section class="report-section"><h3>Coverage</h3><div class="coverage-list">${coverage}</div></section><details class="engineering"><summary>Engineering diagnostics</summary><div class="diagnostics"><dl><dt>Derived evidence retained</dt><dd>${report.engineering_diagnostics.selected_evidence}</dd><dt>Log reduction</dt><dd>${pct(report.engineering_diagnostics.log_compression_ratio)}</dd><dt>Signal preservation</dt><dd>${pct(report.engineering_diagnostics.important_signal_preservation)}</dd><dt>Hypothesis grounding</dt><dd>${pct(report.engineering_diagnostics.hypothesis_grounding_score)}</dd><dt>Pipeline runtime</dt><dd>${Number(report.engineering_diagnostics.runtime_seconds || 0).toFixed(2)}s</dd></dl></div></details></aside></div></section>`;
 }
-
-function renderLab(state) {
-  const live = state.live || {}; const phases = state.phases; const incident = state.current_incident_id;
-  app.innerHTML = `
-    <div class="page-head"><div><div class="eyebrow">Controlled test environment</div><h1>Incident Lab</h1><p>Run a real local failure and feed its evidence into FCAPSule.</p></div><span>${state.running ? status('running') : incident ? status('captured') : status('ready')}</span></div>
-    <div class="lab-grid">
-      <section class="sheet control-panel"><div class="sheet-head"><h2>Simulation</h2><span class="eyebrow">Local</span></div><div class="sheet-body">
-        <div class="field"><label for="app-name">Application name</label><input id="app-name" value="Checkout Platform"></div>
-        <div class="field"><label for="app-id">Application ID</label><input id="app-id" value="checkout-platform"></div>
-        <div class="field"><label for="scenario">Failure scenario</label><select id="scenario"><option value="inventory-lock-contention">Inventory lock contention + retry storm</option></select><small>Two HTTP services, database-pool pressure and a closed circuit breaker.</small></div>
-        <div class="form-pair"><div class="field"><label for="baseline">Baseline requests</label><input id="baseline" type="number" min="20" max="5000" value="180"></div><div class="field"><label for="incident">Incident requests</label><input id="incident" type="number" min="20" max="5000" value="240"></div></div>
-        <div class="field"><label for="concurrency">Concurrency</label><input id="concurrency" type="number" min="1" max="64" value="24"></div>
-        <div class="actions"><button id="run-simulation" ${state.running ? 'disabled' : ''}>Run simulation</button><button class="secondary" id="build-capsule" ${!incident || state.running ? 'disabled' : ''}>Build capsule</button><button class="secondary" id="reset-live" ${state.running ? 'disabled' : ''}>Reset view</button></div>
-        ${state.error ? `<p class="notice" style="border-color:var(--red);background:var(--red-bg);color:var(--red)">${safe(state.error)}</p>` : ''}
-      </div></section>
-      <div class="stack">
-        <section class="phase-strip">${phaseStrip(phases)}</section>
-        <section class="sheet"><div class="sheet-head"><h2>Live incident</h2><span class="eyebrow">${state.running ? 'Updating' : incident ? 'Captured' : 'No run'}</span></div><div class="metrics-line">${metricTiles(live)}</div><div class="sheet-body"><div class="grid-2"><div><h2 style="font-size:14px;margin-top:0">Fault sequence</h2>${alertSequence(live)}</div><div><h2 style="font-size:14px;margin-top:0">Data policy</h2><p>FM events, PM series and logs are captured for analysis. Trace access is probed during the incident; raw spans remain in the source buffer and are not retained.</p>${live.trace_access ? `<div class="source-row"><span class="source on">TRACE ${safe(live.trace_access.probe_status)}</span><span class="source">${live.trace_access.source_retention_seconds}s source window</span><span class="source">0 spans retained</span></div>` : ''}</div></div></div></section>
-        <section class="sheet"><div class="sheet-head"><h2>Activity</h2><span class="eyebrow">Newest first</span></div><div class="event-list">${eventList(state.events)}</div></section>
-      </div>
-    </div>`;
-  document.querySelector('#run-simulation').addEventListener('click', runSimulation);
-  document.querySelector('#build-capsule').addEventListener('click', buildCapsule);
-  document.querySelector('#reset-live').addEventListener('click', resetLive);
-}
-
-function phaseStrip(phases) {
-  const defs = [['services','Services'],['baseline','Baseline'],['injection','Injection'],['alerts','FM alerts'],['capsule','Capsule']];
-  return defs.map(([id,label]) => { const phase = phases[id] || {status:'waiting',message:'Waiting'}; return `<div class="phase ${safe(phase.status)}"><b>${label}</b><span>${safe(phase.message)}</span></div>`; }).join('');
-}
-function metricTiles(live) {
-  const values = [
-    ['Requests', live.baseline_requests || live.total || '--'],
-    ['Incident requests', live.incident_requests || '--'],
-    ['Logs', live.log_count || live.captured_logs || '--'],
-    ['PM series', live.metric_series_count || '--'],
-    ['Retry factor', typeof live.retry_amplification === 'number' ? live.retry_amplification.toFixed(2) + 'x' : live.retry_amplification || '--'],
-    ['Error rate', typeof live.error_rate === 'number' ? pct(live.error_rate) : '--']
-  ];
-  return values.map(([label,value]) => `<div class="metric"><span>${label}</span><strong>${safe(value)}</strong></div>`).join('');
-}
-function alertSequence(live) {
-  const alerts = live.alerts || [];
-  if (!alerts.length) return '<p class="empty" style="padding:18px 0;text-align:left">Alert sequence will appear after thresholds are crossed.</p>';
-  const labels = {CheckoutRetryAmplification:'Retry amplification',InventoryPoolSaturation:'Pool saturation',CheckoutErrorBudgetBurn:'Error budget burn'};
-  return `<div class="alert-sequence">${alerts.map((name,index) => `<div class="alert-item"><strong>${safe(labels[name] || name)}</strong><small>${index === 0 ? 'Upstream symptom detected' : index === 1 ? 'Dependency capacity exhausted' : 'User impact confirmed'}</small></div>`).join('')}</div>`;
-}
-function eventList(events) {
-  if (!events.length) return '<div class="empty">No activity yet.</div>';
-  return events.slice().reverse().map(item => `<div class="event"><time>${shortTime(item.time * 1000)}</time><b>${safe(item.phase)}</b><span>${safe(item.message)}</span></div>`).join('');
-}
-async function runSimulation() {
-  const payload = {app_name:document.querySelector('#app-name').value,app_id:document.querySelector('#app-id').value,scenario:document.querySelector('#scenario').value,baseline_requests:Number(document.querySelector('#baseline').value),incident_requests:Number(document.querySelector('#incident').value),concurrency:Number(document.querySelector('#concurrency').value)};
-  const response = await fetch('/api/simulations', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); if (!response.ok) { alert((await response.json()).error); } await refresh();
-}
-async function buildCapsule() { const response = await fetch('/api/capsules', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({incident_id:lastState.current_incident_id})}); if (!response.ok) alert((await response.json()).error); await refresh(); }
-async function resetLive() { const response = await fetch('/api/reset', {method:'POST'}); if (!response.ok) alert((await response.json()).error); await refresh(); }
 
 async function refresh() {
   try {
@@ -433,12 +386,12 @@ async function refresh() {
       const reportResponse = await fetch('/api/incidents/' + encodeURIComponent(requestedReportId) + '/report');
       if (reportResponse.ok) selectedReport = await reportResponse.json();
     }
-    view === 'lab' ? renderLab(state) : renderConsole(state);
+    view === 'settings' ? renderSettings(state) : renderConsole(state);
   } catch (error) { document.querySelector('#system-state').textContent = 'Disconnected'; }
 }
 refresh();
 setInterval(() => {
-  if (view === 'lab' || lastState?.running) refresh();
+  if (lastState?.running) refresh();
 }, 1000);
 """
 
@@ -488,7 +441,7 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             self.send_header("Location", "/console")
             self.end_headers()
             return
-        if path in {"/console", "/lab"}:
+        if path in {"/console", "/settings"}:
             self._text(HTML, "text/html; charset=utf-8")
             return
         if path == "/assets/app.css":
@@ -499,6 +452,9 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/state":
             self._json(self.server.control_plane.snapshot())
+            return
+        if path == "/api/settings/ai":
+            self._json(self.server.control_plane.ai_configuration())
             return
         if path.startswith("/api/incidents/") and path.endswith("/report"):
             incident_id = unquote(path.removeprefix("/api/incidents/").removesuffix("/report").rstrip("/"))
@@ -545,12 +501,6 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         try:
-            if path == "/api/simulations":
-                if not self.server.control_plane.start_simulation(self._payload()):
-                    self._json({"error": "Another job is already running"}, HTTPStatus.CONFLICT)
-                else:
-                    self._json({"ok": True}, HTTPStatus.ACCEPTED)
-                return
             if path == "/api/capsules":
                 payload = self._payload()
                 if not self.server.control_plane.start_capsule(payload.get("incident_id")):
@@ -558,25 +508,14 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
                 else:
                     self._json({"ok": True}, HTTPStatus.ACCEPTED)
                 return
-            if path == "/api/reset":
-                self.server.control_plane.reset_live()
-                self._json({"ok": True})
+            if path == "/api/settings/ai":
+                self._json(self.server.control_plane.update_ai_configuration(self._payload()))
                 return
             if path.startswith("/api/incidents/") and path.endswith("/briefing"):
                 incident_id = unquote(path.removeprefix("/api/incidents/").removesuffix("/briefing").rstrip("/"))
                 result = self.server.control_plane.generate_ai_briefing(incident_id)
                 status = HTTPStatus.OK if result.get("status") == "ready" else HTTPStatus.SERVICE_UNAVAILABLE
                 self._json(result, status)
-                return
-            if path.startswith("/api/models/"):
-                model_id = unquote(path.removeprefix("/api/models/"))
-                payload = self._payload()
-                profile = self.server.control_plane.store.update_model_profile(
-                    model_id,
-                    bool(payload.get("enabled")),
-                    int(payload.get("max_tokens", 2400)),
-                )
-                self._json({"ok": True, "profile": profile})
                 return
             self._json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
         except (ValueError, KeyError, json.JSONDecodeError) as exc:
@@ -594,7 +533,7 @@ def create_app_server(
 def serve_app(host: str = "127.0.0.1", port: int = 8765, state_dir: str | Path = ".fcapsule") -> None:
     server = create_app_server(host, port, state_dir)
     print(f"FCAPSule is running at http://{host}:{server.server_port}/console")
-    print(f"Incident Lab: http://{host}:{server.server_port}/lab")
+    print(f"AI settings: http://{host}:{server.server_port}/settings")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

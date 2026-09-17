@@ -1,4 +1,4 @@
-"""Application service coordinating simulations, capsules, and stored metadata."""
+"""Application service coordinating incident capsules and stored metadata."""
 
 from __future__ import annotations
 
@@ -9,8 +9,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from demo.incident_lab import SimulationConfig, run_simulation
-from fcapsule.env import load_env_file
+from fcapsule.env import load_env_file, write_env_value
 from fcapsule.incident_report import build_incident_report
 from fcapsule.io.archive_writer import create_archive
 from fcapsule.io.case_loader import load_case
@@ -22,13 +21,12 @@ from fcapsule.ui.dashboard import render_dashboard
 
 
 class ControlPlane:
-    """Thread-safe coordinator shared by the API and both web views."""
+    """Thread-safe coordinator shared by the API, Operations, and AI settings."""
 
     def __init__(self, state_dir: str | Path = ".fcapsule") -> None:
         self.state_dir = Path(state_dir).resolve()
-        self.case_root = self.state_dir / "cases"
         self.output_root = self.state_dir / "capsules"
-        self.case_root.mkdir(parents=True, exist_ok=True)
+        self.ai_config_path = self.state_dir / "ai-settings.json"
         self.output_root.mkdir(parents=True, exist_ok=True)
         self.store = FCAPSuleStore(self.state_dir / "fcapsule.db")
         self.lock = threading.Lock()
@@ -41,41 +39,11 @@ class ControlPlane:
         self.phases = self._empty_phases()
         self.live: dict[str, Any] = {}
         load_env_file()
+        self._persist_ai_settings()
         existing = self.store.overview()
         if existing["incidents"]:
             incident = existing["incidents"][0]
             self.current_incident_id = incident["incident_id"]
-            self.phases.update(
-                {
-                    "services": {"status": "done", "message": "Services started", "details": {}, "updated_at": time.time()},
-                    "baseline": {"status": "done", "message": "Baseline captured", "details": {}, "updated_at": time.time()},
-                    "injection": {"status": "done", "message": "Failure injected", "details": {}, "updated_at": time.time()},
-                    "alerts": {"status": "done", "message": "Alerts captured", "details": {}, "updated_at": time.time()},
-                }
-            )
-            self.live.update(
-                {
-                    "incident_id": incident["incident_id"],
-                    "app_id": incident["app_id"],
-                    "log_count": incident["log_count"],
-                    "metric_series_count": incident["metric_series_count"],
-                    "alert_count": incident["alert_count"],
-                    "trace_access": incident["trace_access"],
-                }
-            )
-            case_dir = Path(incident["case_dir"])
-            alerts_path = case_dir / "alert.json"
-            metadata_path = case_dir / "metadata.yaml"
-            if alerts_path.is_file():
-                alerts = json.loads(alerts_path.read_text(encoding="utf-8"))
-                alerts = alerts if isinstance(alerts, list) else [alerts]
-                self.live["alerts"] = [item.get("alertname") for item in alerts]
-            if metadata_path.is_file():
-                import yaml
-
-                metadata = yaml.safe_load(metadata_path.read_text(encoding="utf-8")) or {}
-                self.live.update(metadata.get("workload", {}))
-                self.live.update(metadata.get("incident_metrics", {}))
         if existing["capsules"]:
             capsule_record = existing["capsules"][0]
             self.current_capsule_id = capsule_record["capsule_id"]
@@ -90,34 +58,114 @@ class ControlPlane:
             if evaluation_path.is_file():
                 self.live["evaluation"] = json.loads(evaluation_path.read_text(encoding="utf-8"))
                 self.live["selected_evidence"] = capsule_record["selected_evidence"]
-            self.phases["models"] = {
-                "status": "skipped",
-                "message": "Offline model evaluation only",
-                "details": {},
-                "updated_at": time.time(),
-            }
 
     @staticmethod
     def _empty_phases() -> dict[str, dict[str, Any]]:
+        return {"capsule": {"status": "waiting", "message": "Waiting"}}
+
+    def ai_configuration(self) -> dict[str, Any]:
+        """Return local AI settings without ever returning the credential."""
+
+        profiles = self.store.list_model_profiles()
+        default = next((item for item in profiles if item["model_id"] == "deepseek-v4-pro"), profiles[0])
+        model = self.store.get_setting("ai_active_model", str(default["model_id"])) or str(default["model_id"])
+        try:
+            max_tokens = int(self.store.get_setting("ai_max_tokens", str(default["max_tokens"])) or default["max_tokens"])
+        except ValueError:
+            max_tokens = int(default["max_tokens"])
         return {
-            "services": {"status": "waiting", "message": "Waiting"},
-            "baseline": {"status": "waiting", "message": "Waiting"},
-            "injection": {"status": "waiting", "message": "Waiting"},
-            "alerts": {"status": "waiting", "message": "Waiting"},
-            "capsule": {"status": "waiting", "message": "Waiting"},
-            "models": {"status": "waiting", "message": "Waiting"},
+            "provider": "deepseek",
+            "model": model,
+            "max_tokens": max_tokens,
+            "api_key_configured": bool(os.environ.get("DEEPSEEK_API_KEY")),
+            "models": profiles,
+            "config_path": str(self.ai_config_path),
         }
 
-    def reset_live(self) -> None:
+    def _persist_ai_settings(self) -> None:
+        config = self.ai_configuration()
+        # The local config makes the selected runtime explicit; the secret stays in .env only.
+        write_json(
+            self.ai_config_path,
+            {
+                "provider": config["provider"],
+                "model": config["model"],
+                "max_tokens": config["max_tokens"],
+            },
+        )
+
+    def update_ai_configuration(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Update a supported model selection and optionally save a local API key."""
+
+        model = str(payload.get("model", "")).strip()
+        if not model or any(character.isspace() for character in model):
+            raise ValueError("Model ID must be a non-empty identifier without spaces")
+        max_tokens = int(payload.get("max_tokens", 1500))
+        api_key = str(payload.get("api_key", "")).strip()
+        if api_key and len(api_key) < 12:
+            raise ValueError("API key appears too short")
+        self.store.upsert_model_profile(model, "deepseek", True, max_tokens)
+        self.store.set_setting("ai_active_model", model)
+        self.store.set_setting("ai_max_tokens", str(max_tokens))
+        if api_key:
+            write_env_value(Path.cwd() / ".env", "DEEPSEEK_API_KEY", api_key)
+        self._persist_ai_settings()
+        return self.ai_configuration()
+
+    def ingest_case(
+        self,
+        case_dir: str | Path,
+        app_id: str,
+        app_name: str | None = None,
+        environment: str = "development",
+    ) -> dict[str, Any]:
+        """Register an externally captured normalized incident without copying raw telemetry."""
+
+        bundle = load_case(case_dir)
+        metadata = bundle.metadata
+        if not self.store.get_application(app_id):
+            self.store.upsert_application(
+                app_id,
+                app_name or str(metadata["service"]),
+                str(metadata["namespace"]),
+                str(metadata["cluster"]),
+                environment,
+                source_config={
+                    "faults": {"adapter": "external", "status": "connected"},
+                    "metrics": {"adapter": "external", "status": "connected"},
+                    "logs": {"adapter": "external", "status": "connected"},
+                    "traces": {"adapter": "on_demand", "status": "available", "retain_raw_spans": False},
+                },
+            )
+        first_alert = bundle.alerts[0]
+        annotation = first_alert.get("annotations", {}) if isinstance(first_alert.get("annotations"), dict) else {}
+        raw_bytes = sum(
+            path.stat().st_size
+            for path in bundle.case_dir.iterdir()
+            if path.is_file() and path.name in {"alert.json", "prometheus_metrics.json", "opensearch_logs.json"}
+        )
+        incident = self.store.record_incident(
+            {
+                "incident_id": bundle.case_id,
+                "app_id": app_id,
+                "scenario": str(metadata.get("case_title", bundle.case_id)),
+                "status": str(first_alert.get("status", "firing")),
+                "severity": str(first_alert.get("severity", "warning")),
+                "started_at": str(first_alert.get("startsAt", metadata["window"]["start"])),
+                "ended_at": first_alert.get("endsAt") or metadata["window"]["end"],
+                "case_dir": bundle.case_dir,
+                "alert_count": len(bundle.alerts),
+                "log_count": len(bundle.logs),
+                "metric_series_count": len(bundle.metrics),
+                "raw_bytes": raw_bytes,
+                "trace_access": metadata.get("trace_access", {"available": False, "raw_spans_retained": False}),
+                "summary": str(annotation.get("summary") or metadata["case_title"]),
+            }
+        )
         with self.lock:
-            if self.running:
-                raise RuntimeError("A job is running")
-            self.current_incident_id = None
-            self.current_capsule_id = None
-            self.error = None
-            self.events = []
-            self.phases = self._empty_phases()
-            self.live = {}
+            self.current_incident_id = incident["incident_id"]
+        self._event("capsule", "waiting", "Incident captured; report not built", {"incident_id": incident["incident_id"]}, update_live=False)
+        return incident
 
     def _begin(self, job: str) -> bool:
         with self.lock:
@@ -154,89 +202,8 @@ class ControlPlane:
             if update_live:
                 self.live.update(details)
 
-    def _simulation_progress(self, status: str, message: str, details: dict[str, Any]) -> None:
-        lower = message.lower()
-        if "running baseline" in lower:
-            self._event("services", "done", "Services healthy", {}, update_live=False)
-            phase = "baseline"
-        elif "starting" in lower or "healthy" in lower:
-            phase = "services"
-        elif "baseline" in lower:
-            phase = "baseline"
-        elif "injected" in lower:
-            phase = "injection"
-        elif "incident traffic" in lower or "trace access" in lower or "case captured" in lower:
-            phase = "alerts"
-        else:
-            phase = "services"
-        phase_status = "done" if status == "done" or "captured" in lower or "injected" in lower else "running"
-        if phase == "baseline" and details.get("completed") == details.get("total"):
-            phase_status = "done"
-        self._event(phase, phase_status, message, details)
-
     def _pipeline_progress(self, status: str, message: str, details: dict[str, Any]) -> None:
         self._event("capsule", "done" if status == "done" else "running", message, details, update_live=False)
-
-    def start_simulation(self, payload: dict[str, Any]) -> bool:
-        if not self._begin("simulation"):
-            return False
-        with self.lock:
-            self.phases = self._empty_phases()
-            self.current_incident_id = None
-            self.current_capsule_id = None
-            self.live = {}
-        thread = threading.Thread(target=self._run_simulation, args=(payload,), daemon=True)
-        thread.start()
-        return True
-
-    def _run_simulation(self, payload: dict[str, Any]) -> None:
-        try:
-            config = SimulationConfig(
-                app_id=str(payload.get("app_id", "checkout-platform")).strip(),
-                app_name=str(payload.get("app_name", "Checkout Platform")).strip(),
-                baseline_requests=int(payload.get("baseline_requests", 180)),
-                incident_requests=int(payload.get("incident_requests", 240)),
-                concurrency=int(payload.get("concurrency", 24)),
-                scenario=str(payload.get("scenario", "inventory-lock-contention")),
-            )
-            config.validate()
-            with self.lock:
-                self.live.update(
-                    {
-                        "app_id": config.app_id,
-                        "app_name": config.app_name,
-                        "baseline_requests": config.baseline_requests,
-                        "incident_requests": config.incident_requests,
-                        "concurrency": config.concurrency,
-                    }
-                )
-            self.store.upsert_application(
-                config.app_id,
-                config.app_name,
-                "commerce",
-                "local-lab",
-                environment="simulation",
-                status="healthy",
-                source_config={
-                    "faults": {"adapter": "alertmanager-compatible", "status": "connected"},
-                    "metrics": {"adapter": "prometheus-compatible", "status": "connected"},
-                    "logs": {"adapter": "opensearch-compatible", "status": "connected"},
-                    "traces": {"adapter": "on-demand", "status": "available", "retain_raw_spans": False},
-                },
-            )
-            pending_dir = self.case_root / f"pending-{int(time.time())}"
-            result = run_simulation(pending_dir, config, self._simulation_progress)
-            final_dir = self.case_root / result["incident_id"]
-            pending_dir.rename(final_dir)
-            result["case_dir"] = str(final_dir)
-            self.store.record_incident(result)
-            with self.lock:
-                self.current_incident_id = result["incident_id"]
-                self.live.update(result)
-            self._event("alerts", "done", "Fault sequence captured", {"alert_count": result["alert_count"], "log_count": result["log_count"], "metric_series_count": result["metric_series_count"]})
-            self._finish()
-        except Exception as exc:  # pragma: no cover - surfaced through API and UI
-            self._finish(exc)
 
     def start_capsule(self, incident_id: str | None = None) -> bool:
         incident_id = incident_id or self.current_incident_id
@@ -246,7 +213,6 @@ class ControlPlane:
             return False
         with self.lock:
             self.phases["capsule"] = {"status": "running", "message": "Loading incident evidence"}
-            self.phases["models"] = {"status": "skipped", "message": "Offline model evaluation only"}
         thread = threading.Thread(target=self._run_capsule, args=(incident_id,), daemon=True)
         thread.start()
         return True
@@ -307,7 +273,7 @@ class ControlPlane:
                 "events": json.loads(json.dumps(self.events)),
                 "phases": json.loads(json.dumps(self.phases)),
                 "live": json.loads(json.dumps(self.live)),
-                "api_key_available": bool(os.environ.get("DEEPSEEK_API_KEY")),
+                "ai": self.ai_configuration(),
             }
         state["overview"] = self.store.overview()
         return state
@@ -364,7 +330,8 @@ class ControlPlane:
         payload = self.incident_report_payload(incident_id)
         if not payload or not payload.get("report") or not payload.get("record"):
             raise ValueError("Build an incident report before requesting an AI briefing")
-        result = generate_incident_briefing(payload["report"])
+        config = self.ai_configuration()
+        result = generate_incident_briefing(payload["report"], model=config["model"], max_tokens=config["max_tokens"])
         if result.get("status") == "ready":
             output_dir = Path(payload["record"]["output_dir"])
             write_json(output_dir / "ai_briefing.json", result)

@@ -98,6 +98,7 @@ def _validated_briefing(value: dict[str, Any] | None, report: dict[str, Any]) ->
 def generate_incident_briefing(
     report: dict[str, Any],
     model: str = "deepseek-v4-pro",
+    max_tokens: int = 1500,
     timeout_seconds: int = 45,
 ) -> dict[str, Any]:
     """Generate a safe enhancement; callers keep the deterministic report on failure."""
@@ -105,7 +106,7 @@ def generate_incident_briefing(
     try:
         client = DeepSeekChatClient(timeout_seconds=timeout_seconds)
         # Reasoning-capable models may spend tokens before emitting the compact JSON.
-        response = client.chat(ChatRequest(model=model, messages=build_briefing_prompt(report), max_tokens=1500))
+        response = client.chat(ChatRequest(model=model, messages=build_briefing_prompt(report), max_tokens=max_tokens))
     except LLMUnavailableError as exc:
         return {"status": "unavailable", "message": str(exc)}
     briefing = _validated_briefing(_parse_json(str(response.get("content", ""))), report)

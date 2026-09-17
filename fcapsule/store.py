@@ -345,6 +345,48 @@ class FCAPSuleStore:
                 raise KeyError(f"Unknown model profile: {model_id}")
         return next(item for item in self.list_model_profiles() if item["model_id"] == model_id)
 
+    def upsert_model_profile(self, model_id: str, provider: str, enabled: bool, max_tokens: int) -> dict[str, Any]:
+        if not model_id or any(character.isspace() for character in model_id):
+            raise ValueError("model_id must be a non-empty identifier without spaces")
+        if provider != "deepseek":
+            raise ValueError("Only the configured DeepSeek-compatible provider is supported by this runtime")
+        if max_tokens < 256 or max_tokens > 16000:
+            raise ValueError("max_tokens must be between 256 and 16000")
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO model_profiles (model_id, provider, max_tokens, enabled, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(model_id) DO UPDATE SET
+                    provider=excluded.provider,
+                    max_tokens=excluded.max_tokens,
+                    enabled=excluded.enabled,
+                    updated_at=excluded.updated_at
+                """,
+                (model_id, provider, max_tokens, int(enabled), utc_now()),
+            )
+        return next(item for item in self.list_model_profiles() if item["model_id"] == model_id)
+
+    def get_setting(self, setting_key: str, fallback: str | None = None) -> str | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT setting_value FROM settings WHERE setting_key = ?", (setting_key,)
+            ).fetchone()
+        return str(row["setting_value"]) if row else fallback
+
+    def set_setting(self, setting_key: str, setting_value: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO settings (setting_key, setting_value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(setting_key) DO UPDATE SET
+                    setting_value=excluded.setting_value,
+                    updated_at=excluded.updated_at
+                """,
+                (setting_key, setting_value, utc_now()),
+            )
+
     def overview(self) -> dict[str, Any]:
         applications = self.list_applications()
         incidents = self.list_incidents()

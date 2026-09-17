@@ -49,3 +49,24 @@ def load_env_file(path: str | Path | None = None, override: bool = False) -> Pat
         if override or key not in os.environ:
             os.environ[key] = value
     return env_path
+
+
+def write_env_value(path: str | Path, key: str, value: str) -> Path:
+    """Persist one local secret without returning it through an API or SQLite."""
+
+    env_path = Path(path).resolve()
+    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+    replacement = f"{key}={value}"
+    written = False
+    updated = []
+    for line in lines:
+        if line.strip().startswith(f"{key}="):
+            updated.append(replacement)
+            written = True
+        else:
+            updated.append(line)
+    if not written:
+        updated.append(replacement)
+    env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+    os.environ[key] = value
+    return env_path

@@ -1,9 +1,0 @@
-groups:
-  - name: fcapsule-demo
-    rules:
-      - alert: CheckoutHighErrorRate
-        expression: request_error_rate > 0.25
-        minimum_requests: 10
-        severity: warning
-        summary: Checkout request error rate exceeded 25 percent
-        description: The synthetic payment dependency failure caused checkout requests to return HTTP 503.

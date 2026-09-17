@@ -7,7 +7,6 @@ import json
 import sys
 from pathlib import Path
 
-from demo.incident_lab import SimulationConfig, run_simulation
 from fcapsule.env import load_env_file
 from fcapsule.evaluation.report import recompute_evaluation
 from fcapsule.io.case_loader import load_case
@@ -16,10 +15,10 @@ from fcapsule.pipeline import investigate_case
 from fcapsule.processing.entity_resolver import resolve_entities
 from fcapsule.reasoning.llm_client import LLMUnavailableError
 from fcapsule.reasoning.model_comparator import DEFAULT_MODELS, compare_models, rescore_comparison
+from fcapsule.control_plane import ControlPlane
 from fcapsule.store import FCAPSuleStore
 from fcapsule.ui.app import serve_app
 from fcapsule.ui.dashboard import render_dashboard
-from fcapsule.ui.demo_app import serve_demo_ui
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -43,18 +42,10 @@ def _parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--output", required=True)
     dashboard = subparsers.add_parser("dashboard", help="Render the static HTML review dashboard")
     dashboard.add_argument("--output", required=True, help="Directory containing capsule and evaluation outputs")
-    serve = subparsers.add_parser("serve", help="Run the FCAPSule operations console and incident lab")
+    serve = subparsers.add_parser("serve", help="Run the FCAPSule operations console")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8765)
     serve.add_argument("--state-dir", default=".fcapsule")
-    simulate = subparsers.add_parser("simulate", help="Run the multi-service incident scenario")
-    simulate.add_argument("--output", default=".fcapsule/cases/cli-latest")
-    simulate.add_argument("--app-id", default="checkout-platform")
-    simulate.add_argument("--app-name", default="Checkout Platform")
-    simulate.add_argument("--baseline-requests", type=int, default=180)
-    simulate.add_argument("--incident-requests", type=int, default=240)
-    simulate.add_argument("--concurrency", type=int, default=24)
-    simulate.add_argument("--state-dir", default=".fcapsule")
     register = subparsers.add_parser("register", help="Register an application with the local control plane")
     register.add_argument("--app-id", required=True)
     register.add_argument("--name", required=True)
@@ -64,12 +55,12 @@ def _parser() -> argparse.ArgumentParser:
     register.add_argument("--state-dir", default=".fcapsule")
     status = subparsers.add_parser("status", help="Print control-plane applications, incidents, capsules, and models")
     status.add_argument("--state-dir", default=".fcapsule")
-    demo_ui = subparsers.add_parser("demo-ui", help="Run the legacy single-case demo UI")
-    demo_ui.add_argument("--case", default="cases/case_001")
-    demo_ui.add_argument("--out", default="outputs/case_001")
-    demo_ui.add_argument("--host", default="127.0.0.1")
-    demo_ui.add_argument("--port", type=int, default=8765)
-    demo_ui.add_argument("--models", nargs="+", default=list(DEFAULT_MODELS))
+    ingest = subparsers.add_parser("ingest-case", help="Register a normalized case captured by an external source")
+    ingest.add_argument("--case", required=True, help="Path to a normalized incident case directory")
+    ingest.add_argument("--app-id", required=True, help="Registered application ID, or a new ID to register from case metadata")
+    ingest.add_argument("--app-name", default=None, help="Name used when the application must be registered")
+    ingest.add_argument("--environment", default="development")
+    ingest.add_argument("--state-dir", default=".fcapsule")
     inspect = subparsers.add_parser("inspect", help="Validate and summarize a case")
     inspect.add_argument("--case", required=True)
     return parser
@@ -142,23 +133,8 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(summary, indent=2))
         elif args.command == "dashboard":
             print(render_dashboard(args.output))
-        elif args.command == "demo-ui":
-            serve_demo_ui(args.case, args.out, args.host, args.port, tuple(args.models))
         elif args.command == "serve":
             serve_app(args.host, args.port, args.state_dir)
-        elif args.command == "simulate":
-            config = SimulationConfig(
-                app_id=args.app_id,
-                app_name=args.app_name,
-                baseline_requests=args.baseline_requests,
-                incident_requests=args.incident_requests,
-                concurrency=args.concurrency,
-            )
-            store = FCAPSuleStore(Path(args.state_dir) / "fcapsule.db")
-            store.upsert_application(args.app_id, args.app_name, "commerce", "local-lab", "simulation")
-            result = run_simulation(args.output, config)
-            store.record_incident(result)
-            print(json.dumps(result, indent=2))
         elif args.command == "register":
             store = FCAPSuleStore(Path(args.state_dir) / "fcapsule.db")
             application = store.upsert_application(
@@ -172,6 +148,10 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "status":
             store = FCAPSuleStore(Path(args.state_dir) / "fcapsule.db")
             print(json.dumps(store.overview(), indent=2))
+        elif args.command == "ingest-case":
+            control_plane = ControlPlane(args.state_dir)
+            incident = control_plane.ingest_case(args.case, args.app_id, args.app_name, args.environment)
+            print(json.dumps(incident, indent=2))
         return 0
     except CaseValidationError as exc:
         print(f"Case validation failed: {exc}", file=sys.stderr)
