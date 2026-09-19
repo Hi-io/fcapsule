@@ -177,6 +177,7 @@ class ControlPlane:
 
     def _run_source_sync(self) -> None:
         captured: list[dict[str, Any]] = []
+        incident_ids: list[str] = []
         try:
             self._event("sources", "running", "Discovering workloads and checking telemetry coverage")
             result = self.live_sources.synchronize()
@@ -185,7 +186,16 @@ class ControlPlane:
                 self.source_state.update(result)
                 self.source_state["error"] = None
             for item in captured:
-                self.ingest_case(item["case_dir"], item["app_id"], item["app_name"], self.source_configuration()["environment"])
+                incident = self.ingest_case(
+                    item["case_dir"],
+                    item["app_id"],
+                    item["app_name"],
+                    self.source_configuration()["environment"],
+                )
+                incident_ids.append(str(incident["incident_id"]))
+            if incident_ids and self.source_configuration()["auto_build_reports"]:
+                for incident_id in incident_ids:
+                    self._build_capsule(incident_id)
             self._event(
                 "sources",
                 "done",
@@ -194,9 +204,6 @@ class ControlPlane:
                 update_live=False,
             )
             self._finish()
-            if captured and self.source_configuration()["auto_build_reports"]:
-                incident = self.store.list_incidents(1)[0]
-                self.start_capsule(incident["incident_id"])
         except Exception as exc:  # pragma: no cover - surfaced through API and UI
             with self.lock:
                 self.source_state["error"] = str(exc)
@@ -310,48 +317,61 @@ class ControlPlane:
 
     def _run_capsule(self, incident_id: str) -> None:
         try:
-            incident = self.store.get_incident(incident_id)
-            if not incident:
-                raise ValueError(f"Unknown incident: {incident_id}")
-            output_dir = self.output_root / incident_id
-            result = investigate_case(incident["case_dir"], output_dir, self._pipeline_progress)
-            render_dashboard(output_dir)
-            evaluation = result["evaluation"]
-            capsule_id = f"capsule-{incident_id}"
-            capsule_path = output_dir / "capsule.json"
-            capsule_data = json.loads(capsule_path.read_text(encoding="utf-8"))
-            source_metrics = load_case(incident["case_dir"]).metrics
-            write_json(output_dir / "incident_report.json", build_incident_report(capsule_data, incident, source_metrics))
-            archive = create_archive(output_dir, incident_id)
-            capsule = self.store.record_capsule(
-                {
-                    "capsule_id": capsule_id,
-                    "incident_id": incident_id,
-                    "app_id": incident["app_id"],
-                    "output_dir": output_dir,
-                    "archive_path": archive,
-                    "size_bytes": capsule_path.stat().st_size,
-                    "selected_evidence": result["selected_evidence"],
-                    "compression": evaluation["log_compression_ratio"],
-                    "signal_preservation": evaluation["important_signal_preservation"],
-                    "grounding": evaluation["hypothesis_grounding_score"],
-                    "runtime_seconds": evaluation["runtime_seconds"],
-                    "model_winner": None,
-                }
-            )
-            with self.lock:
-                self.current_capsule_id = capsule_id
-                self.live.update(
-                    {
-                        "capsule": capsule,
-                        "evaluation": evaluation,
-                        "selected_evidence": result["selected_evidence"],
-                    }
-                )
-            self._event("capsule", "done", "Capsule ready", {"selected_evidence": result["selected_evidence"], "compression": evaluation["log_compression_ratio"], "signal_preservation": evaluation["important_signal_preservation"]})
+            self._build_capsule(incident_id)
             self._finish()
         except Exception as exc:  # pragma: no cover - surfaced through API and UI
             self._finish(exc)
+
+    def _build_capsule(self, incident_id: str) -> dict[str, Any]:
+        incident = self.store.get_incident(incident_id)
+        if not incident:
+            raise ValueError(f"Unknown incident: {incident_id}")
+        output_dir = self.output_root / incident_id
+        result = investigate_case(incident["case_dir"], output_dir, self._pipeline_progress)
+        render_dashboard(output_dir)
+        evaluation = result["evaluation"]
+        capsule_id = f"capsule-{incident_id}"
+        capsule_path = output_dir / "capsule.json"
+        capsule_data = json.loads(capsule_path.read_text(encoding="utf-8"))
+        source_metrics = load_case(incident["case_dir"]).metrics
+        write_json(output_dir / "incident_report.json", build_incident_report(capsule_data, incident, source_metrics))
+        archive = create_archive(output_dir, incident_id)
+        capsule = self.store.record_capsule(
+            {
+                "capsule_id": capsule_id,
+                "incident_id": incident_id,
+                "app_id": incident["app_id"],
+                "output_dir": output_dir,
+                "archive_path": archive,
+                "size_bytes": capsule_path.stat().st_size,
+                "selected_evidence": result["selected_evidence"],
+                "compression": evaluation["log_compression_ratio"],
+                "signal_preservation": evaluation["important_signal_preservation"],
+                "grounding": evaluation["hypothesis_grounding_score"],
+                "runtime_seconds": evaluation["runtime_seconds"],
+                "model_winner": None,
+            }
+        )
+        with self.lock:
+            self.current_capsule_id = capsule_id
+            self.live.update(
+                {
+                    "capsule": capsule,
+                    "evaluation": evaluation,
+                    "selected_evidence": result["selected_evidence"],
+                }
+            )
+        self._event(
+            "capsule",
+            "done",
+            "Capsule ready",
+            {
+                "selected_evidence": result["selected_evidence"],
+                "compression": evaluation["log_compression_ratio"],
+                "signal_preservation": evaluation["important_signal_preservation"],
+            },
+        )
+        return capsule
 
     def snapshot(self) -> dict[str, Any]:
         with self.lock:

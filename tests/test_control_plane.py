@@ -25,6 +25,40 @@ def wait_for_idle(control_plane: ControlPlane, timeout: float = 15) -> None:
 
 
 class ControlPlaneTests(unittest.TestCase):
+    def test_source_sync_builds_every_new_incident_report(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
+            control_plane = ControlPlane(Path(directory) / "state")
+            sync_result = {
+                "captured": [
+                    {"case_dir": "/case/one", "app_id": "app-1", "app_name": "App One"},
+                    {"case_dir": "/case/two", "app_id": "app-2", "app_name": "App Two"},
+                ],
+                "pods_visible": 2,
+                "applications_visible": 2,
+                "active_alerts": 2,
+                "last_sync_at": "2026-09-20T00:00:00Z",
+                "targets": {},
+                "ok": True,
+                "configuration": control_plane.source_configuration(),
+            }
+            with (
+                patch.object(control_plane.live_sources, "synchronize", return_value=sync_result),
+                patch.object(
+                    control_plane,
+                    "ingest_case",
+                    side_effect=[{"incident_id": "incident-1"}, {"incident_id": "incident-2"}],
+                ),
+                patch.object(control_plane, "_build_capsule") as build_capsule,
+            ):
+                control_plane.running = True
+                control_plane.active_job = "sources"
+                control_plane._run_source_sync()
+
+            self.assertEqual(
+                [call.args[0] for call in build_capsule.call_args_list],
+                ["incident-1", "incident-2"],
+            )
+
     def test_external_case_and_capsule_are_persisted(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
             control_plane = ControlPlane(Path(directory) / "state")
