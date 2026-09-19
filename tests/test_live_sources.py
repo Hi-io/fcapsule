@@ -6,7 +6,7 @@ from pathlib import Path
 from fcapsule.adapters.kubernetes_adapter import KubernetesAdapter
 from fcapsule.adapters.opensearch_adapter import OpenSearchAdapter
 from fcapsule.adapters.prometheus_adapter import PrometheusAdapter
-from fcapsule.live_sources import LiveSourceCoordinator
+from fcapsule.live_sources import LiveSourceCoordinator, _resolve_alert_pod
 from fcapsule.store import FCAPSuleStore
 
 
@@ -24,6 +24,12 @@ class FakeTransport:
 
 
 class LiveSourceTests(unittest.TestCase):
+    def test_alert_for_disappeared_named_pod_is_not_reassigned(self):
+        pods = [{"namespace": "shop", "name": "healthy-api"}]
+
+        self.assertIsNone(_resolve_alert_pod(pods, "shop", "deleted-worker"))
+        self.assertEqual(_resolve_alert_pod(pods, "shop", ""), pods[0])
+
     def test_prometheus_adapter_normalizes_inventory_alerts_and_ranges(self):
         adapter = PrometheusAdapter("http://prometheus")
         adapter.transport = FakeTransport(

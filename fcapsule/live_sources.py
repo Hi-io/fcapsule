@@ -180,10 +180,7 @@ class LiveSourceCoordinator:
             if alert["alertname"] in IGNORED_ALERTS or (namespaces and namespace not in namespaces):
                 continue
             pod_name = str(labels.get("pod", ""))
-            pod = next((item for item in pods if item["namespace"] == namespace and item["name"] == pod_name), None)
-            if pod is None:
-                namespace_pods = [item for item in pods if item["namespace"] == namespace]
-                pod = namespace_pods[0] if len(namespace_pods) == 1 else None
+            pod = _resolve_alert_pod(pods, namespace, pod_name)
             if pod is None or not alert.get("startsAt"):
                 continue
             incident_id = _incident_id(alert, namespace, pod["name"])
@@ -292,6 +289,13 @@ def _incident_id(alert: dict[str, Any], namespace: str, pod: str) -> str:
     digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:10]
     timestamp = re.sub(r"[^0-9]", "", str(alert["startsAt"]))[:14]
     return f"incident-{timestamp}-{_slug(str(alert['alertname']))}-{digest}"
+
+
+def _resolve_alert_pod(pods: list[dict[str, Any]], namespace: str, pod_name: str) -> dict[str, Any] | None:
+    if pod_name:
+        return next((item for item in pods if item["namespace"] == namespace and item["name"] == pod_name), None)
+    namespace_pods = [item for item in pods if item["namespace"] == namespace]
+    return namespace_pods[0] if len(namespace_pods) == 1 else None
 
 
 def _slug(value: str) -> str:
