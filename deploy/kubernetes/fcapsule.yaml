@@ -63,6 +63,20 @@ spec:
       serviceAccountName: fcapsule
       securityContext:
         fsGroup: 1000
+      initContainers:
+        - name: prepare-state
+          image: busybox:1.36
+          command: ["sh", "-c", "chgrp -R 1000 /var/lib/fcapsule && chmod -R g+rwX /var/lib/fcapsule"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "FOWNER"]
+            runAsNonRoot: false
+            runAsUser: 0
+          volumeMounts:
+            - name: state
+              mountPath: /var/lib/fcapsule
       containers:
         - name: fcapsule
           image: ghcr.io/hi-io/fcapsule:latest
@@ -71,6 +85,9 @@ spec:
           envFrom:
             - configMapRef:
                 name: fcapsule-runtime
+            - secretRef:
+                name: fcapsule-secrets
+                optional: true
           ports:
             - name: http
               containerPort: 8765

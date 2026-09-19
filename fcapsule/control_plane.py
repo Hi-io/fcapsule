@@ -51,6 +51,7 @@ class ControlPlane:
         }
         self.source_stop = threading.Event()
         self.source_monitor: threading.Thread | None = None
+        load_env_file(self.state_dir / ".env")
         load_env_file()
         self._persist_ai_settings()
         existing = self.store.overview()
@@ -121,7 +122,7 @@ class ControlPlane:
         self.store.set_setting("ai_active_model", model)
         self.store.set_setting("ai_max_tokens", str(max_tokens))
         if api_key:
-            write_env_value(Path.cwd() / ".env", "DEEPSEEK_API_KEY", api_key)
+            write_env_value(self.state_dir / ".env", "DEEPSEEK_API_KEY", api_key)
         self._persist_ai_settings()
         return self.ai_configuration()
 
@@ -134,6 +135,8 @@ class ControlPlane:
             self.source_state["configuration"] = config
         if config["enabled"]:
             self.start_live_monitoring()
+        else:
+            self.stop_live_monitoring()
         return config
 
     def test_source_connections(self) -> dict[str, Any]:
@@ -159,6 +162,8 @@ class ControlPlane:
 
     def _monitor_sources(self) -> None:
         while not self.source_stop.is_set():
+            if not self.source_configuration()["enabled"]:
+                return
             self.start_source_sync()
             interval = self.source_configuration()["poll_interval_seconds"]
             self.source_stop.wait(interval)
