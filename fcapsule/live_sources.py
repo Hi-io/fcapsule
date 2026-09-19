@@ -179,8 +179,7 @@ class LiveSourceCoordinator:
             namespace = str(labels.get("namespace", ""))
             if alert["alertname"] in IGNORED_ALERTS or (namespaces and namespace not in namespaces):
                 continue
-            pod_name = str(labels.get("pod", ""))
-            pod = _resolve_alert_pod(pods, namespace, pod_name)
+            pod = _resolve_alert_pod(pods, namespace, labels)
             if pod is None or not alert.get("startsAt"):
                 continue
             incident_id = _incident_id(alert, namespace, pod["name"])
@@ -291,9 +290,17 @@ def _incident_id(alert: dict[str, Any], namespace: str, pod: str) -> str:
     return f"incident-{timestamp}-{_slug(str(alert['alertname']))}-{digest}"
 
 
-def _resolve_alert_pod(pods: list[dict[str, Any]], namespace: str, pod_name: str) -> dict[str, Any] | None:
+def _resolve_alert_pod(pods: list[dict[str, Any]], namespace: str, labels: dict[str, Any]) -> dict[str, Any] | None:
+    pod_name = str(labels.get("pod", ""))
     if pod_name:
         return next((item for item in pods if item["namespace"] == namespace and item["name"] == pod_name), None)
+    workload_name = next(
+        (str(labels[key]) for key in ("deployment", "statefulset", "daemonset", "job_name") if labels.get(key)),
+        "",
+    )
+    if workload_name:
+        matches = [item for item in pods if item["namespace"] == namespace and item.get("workload") == workload_name]
+        return matches[0] if len(matches) == 1 else None
     namespace_pods = [item for item in pods if item["namespace"] == namespace]
     return namespace_pods[0] if len(namespace_pods) == 1 else None
 

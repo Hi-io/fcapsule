@@ -25,10 +25,12 @@ class FakeTransport:
 
 class LiveSourceTests(unittest.TestCase):
     def test_alert_for_disappeared_named_pod_is_not_reassigned(self):
-        pods = [{"namespace": "shop", "name": "healthy-api"}]
+        pods = [{"namespace": "shop", "name": "healthy-api", "workload": "api"}]
 
-        self.assertIsNone(_resolve_alert_pod(pods, "shop", "deleted-worker"))
-        self.assertEqual(_resolve_alert_pod(pods, "shop", ""), pods[0])
+        self.assertIsNone(_resolve_alert_pod(pods, "shop", {"pod": "deleted-worker"}))
+        self.assertIsNone(_resolve_alert_pod(pods, "shop", {"deployment": "deleted-worker"}))
+        self.assertEqual(_resolve_alert_pod(pods, "shop", {"deployment": "api"}), pods[0])
+        self.assertEqual(_resolve_alert_pod(pods, "shop", {}), pods[0])
 
     def test_prometheus_adapter_normalizes_inventory_alerts_and_ranges(self):
         adapter = PrometheusAdapter("http://prometheus")
