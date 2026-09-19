@@ -73,6 +73,42 @@ class PipelineRegressionTests(unittest.TestCase):
         self.assertEqual(report["impact"][0]["value"], "4.0 MiB")
         self.assertEqual(report["pm_signals"][0]["metric"], "pod_memory_working_set_bytes")
 
+    def test_incident_report_displays_restart_counter_as_window_increase(self):
+        anomaly = {
+            "metric_id": "metric_001",
+            "metric": "pod_container_restarts_total",
+            "baseline_median": 1,
+            "incident_peak": 0,
+            "peak_timestamp": "2026-09-20T00:01:00Z",
+            "percentage_change": -100,
+            "anomaly_score": 1,
+            "labels": {"pod": "checkout-abc"},
+        }
+        capsule = {
+            "case": {"case_id": "restart-case", "service": "checkout"},
+            "selected_evidence": [
+                {"evidence_id": "ev_metric_001", "source_id": "metric_001", "type": "metric_anomaly"}
+            ],
+            "metric_anomalies": [anomaly],
+            "hypotheses": [],
+            "alerts": [],
+            "domain_summary": {},
+            "evaluation": {},
+        }
+        source_metrics = [
+            {
+                "metric": "pod_container_restarts_total",
+                "labels": {"pod": "checkout-abc"},
+                "values": [["2026-09-20T00:00:00Z", 2], ["2026-09-20T00:01:00Z", 3]],
+            }
+        ]
+
+        report = build_incident_report(capsule, {"incident_id": "restart-case"}, source_metrics)
+
+        self.assertEqual(report["impact"][0]["value"], "1")
+        self.assertEqual(report["impact"][0]["component"], "checkout-abc")
+        self.assertEqual(report["pm_signals"][0]["peak_value"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

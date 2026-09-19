@@ -135,6 +135,12 @@ def _impact_context(name: str, value: Any, baseline: Any) -> tuple[str, str]:
     return meaning, baseline_text
 
 
+def _window_counter_increase(source_metrics: list[dict[str, Any]] | None, name: str) -> float | None:
+    series = next((item for item in source_metrics or [] if item.get("metric") == name), None)
+    values = [float(point[1]) for point in (series or {}).get("values", []) if isinstance(point, list) and len(point) == 2]
+    return max(values) - min(values) if len(values) >= 2 else None
+
+
 def _pm_signals(source_metrics: list[dict[str, Any]] | None, anomalies: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Keep a small, chartable PM view beside the retained explanation."""
 
@@ -159,17 +165,24 @@ def _pm_signals(source_metrics: list[dict[str, Any]] | None, anomalies: list[dic
             name,
             {"label": _metric_label(name), "meaning": "Observed for the affected pod during the incident window."},
         )
+        baseline_value = float(anomaly.get("baseline_median", 0))
+        peak_value = float(anomaly.get("incident_peak", 0))
+        if name == "pod_container_restarts_total":
+            increase = _window_counter_increase(source_metrics, name)
+            if increase is not None:
+                baseline_value = 0.0
+                peak_value = increase
         signals.append(
             {
                 "evidence_id": f"ev_{anomaly.get('metric_id')}",
                 "metric": name,
                 "label": context["label"],
                 "meaning": context["meaning"],
-                "component": series.get("labels", {}).get("component"),
-                "baseline": _display_value(name, anomaly.get("baseline_median")),
-                "peak": _display_value(name, anomaly.get("incident_peak")),
-                "baseline_value": round(float(anomaly.get("baseline_median", 0)), 4),
-                "peak_value": round(float(anomaly.get("incident_peak", 0)), 4),
+                "component": series.get("labels", {}).get("component") or series.get("labels", {}).get("pod"),
+                "baseline": _display_value(name, baseline_value),
+                "peak": _display_value(name, peak_value),
+                "baseline_value": round(baseline_value, 4),
+                "peak_value": round(peak_value, 4),
                 "alert_timestamp": anomaly.get("peak_timestamp"),
                 "values": values,
             }
@@ -255,17 +268,25 @@ def build_incident_report(
         if not any(term in name for term in _METRIC_ORDER):
             continue
         evidence = evidence_by_source.get(metric.get("metric_id"), {})
-        meaning, baseline_text = _impact_context(name, metric.get("incident_peak"), metric.get("baseline_median"))
+        display_value = metric.get("incident_peak")
+        display_baseline = metric.get("baseline_median")
+        meaning, baseline_text = _impact_context(name, display_value, display_baseline)
+        if name == "pod_container_restarts_total":
+            increase = _window_counter_increase(source_metrics, name)
+            if increase is not None:
+                display_value = increase
+                display_baseline = 0.0
+                baseline_text = f"Captured window: +{increase:.0f} restart{'s' if increase != 1 else ''}"
         impact.append(
             {
                 "label": _metric_label(name),
-                "value": _display_value(name, metric.get("incident_peak")),
-                "baseline": _display_value(name, metric.get("baseline_median")),
+                "value": _display_value(name, display_value),
+                "baseline": _display_value(name, display_baseline),
                 "meaning": meaning,
                 "baseline_text": baseline_text,
                 "change_percent": round(float(metric.get("percentage_change", 0)), 1),
                 "timestamp": metric.get("peak_timestamp"),
-                "component": metric.get("labels", {}).get("component"),
+                "component": metric.get("labels", {}).get("component") or metric.get("labels", {}).get("pod"),
                 "evidence_id": evidence.get("evidence_id"),
             }
         )
