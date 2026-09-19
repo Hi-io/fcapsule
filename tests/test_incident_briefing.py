@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from fcapsule.reasoning.incident_briefing import generate_incident_briefing
+from fcapsule.reasoning.incident_briefing import build_briefing_prompt, generate_incident_briefing
 
 
 class IncidentBriefingTests(unittest.TestCase):
@@ -14,7 +14,22 @@ class IncidentBriefingTests(unittest.TestCase):
             "fault_alerts": [{"evidence_id": "ev_alert_001", "name": "Pool saturation", "description": "Pool is full."}],
             "pm_signals": [{"evidence_id": "ev_metric_001", "label": "Error rate", "baseline": "0%", "peak": "45%"}],
             "log_patterns": [{"evidence_id": "ev_log_template_001", "pattern": "Retry exhausted", "summary": "200 matches"}],
+            "supporting_evidence": [
+                {
+                    "evidence_id": "ev_config_001",
+                    "type": "configuration",
+                    "title": "ConfigMap checkout-config",
+                    "summary": "Two runtime keys were retained.",
+                    "configuration": {"data": {"SCHEMA_EPOCH": "41", "REQUIRED_EPOCH": "42"}},
+                }
+            ],
         }
+
+    def test_prompt_includes_retained_configuration_values(self):
+        prompt = build_briefing_prompt(self.report)
+
+        self.assertIn("ev_config_001", prompt[1]["content"])
+        self.assertIn("SCHEMA_EPOCH", prompt[1]["content"])
 
     @patch("fcapsule.reasoning.incident_briefing.DeepSeekChatClient")
     def test_valid_cited_response_is_retained(self, client_class):

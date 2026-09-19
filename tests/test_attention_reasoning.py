@@ -36,6 +36,21 @@ class AttentionReasoningTests(unittest.TestCase):
         self.assertTrue(all(item["verdict"] == "plausible" for item in verified))
         self.assertTrue(all(item["supporting_evidence"] for item in verified))
 
+    def test_configuration_mismatch_is_prioritized_over_retry_symptoms(self):
+        selected = [
+            {"evidence_id": "ev_alert", "type": "alert", "title": "Pod restarted", "summary": "Restart detected", "score": 0.8},
+            {"evidence_id": "ev_schema", "type": "log_template", "title": "schema epoch mismatch", "summary": "unsafe-write prevented", "score": 0.9},
+            {"evidence_id": "ev_retry", "type": "log_template", "title": "dependency retry", "summary": "attempt failed", "score": 0.7},
+            {"evidence_id": "ev_pool", "type": "log_template", "title": "pool lock", "summary": "pool exhausted", "score": 0.7},
+            {"evidence_id": "ev_config", "type": "configuration", "title": "ConfigMap checkout", "summary": "runtime config", "score": 0.8},
+            {"evidence_id": "ev_metric", "type": "metric_anomaly", "title": "retry_total", "summary": "retry increased", "score": 0.7},
+        ]
+
+        hypotheses = generate_hypotheses(selected)
+
+        self.assertIn("configuration mismatch", hypotheses[0]["hypothesis"].lower())
+        self.assertIn("ev_config", hypotheses[0]["supporting_evidence"])
+
     def test_verifier_rejects_unknown_evidence(self):
         hypothesis = {
             "hypothesis_id": "hyp_bad",

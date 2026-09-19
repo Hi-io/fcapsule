@@ -25,8 +25,37 @@ def generate_hypotheses(selected: list[dict[str, Any]]) -> list[dict[str, Any]]:
     pool_log = _first(selected, "log_template", ("pool", "exhausted", "lock"))
     retry_metric = _first(selected, "metric_anomaly", ("retry", "attempt"))
     pool_metric = _first(selected, "metric_anomaly", ("pool", "exhaust", "slow"))
+    config_mismatch_log = _first(
+        selected,
+        "log_template",
+        ("mismatch", "schema", "configuration", "config", "unsafe-write"),
+    )
+    config_context = _first(selected, "configuration", ("configmap", "config", "environment"))
 
-    if retry_log and pool_log and (retry_metric or pool_metric):
+    if config_mismatch_log and config_context:
+        support = [config_mismatch_log["evidence_id"], config_context["evidence_id"]]
+        if alert:
+            support.append(alert["evidence_id"])
+        hypotheses.append(
+            {
+                "hypothesis_id": "hyp_001",
+                "hypothesis": "A runtime configuration mismatch may be preventing safe startup and causing repeated container restarts.",
+                "confidence": round(
+                    min(0.9, sum(next(item["score"] for item in selected if item["evidence_id"] == value) for value in support) / len(support)),
+                    3,
+                ),
+                "supporting_evidence": support,
+                "contradicting_evidence": [],
+                "missing_evidence": ["Deployment revision and configuration rollout history"],
+                "next_checks": [
+                    "Compare the observed configuration values with the requirements of the running image.",
+                    "Inspect the Deployment and ConfigMap rollout history immediately before the first restart.",
+                    "Restart the workload only after the conflicting configuration values are aligned.",
+                ],
+            }
+        )
+
+    if retry_log and pool_log and (retry_metric or pool_metric) and not hypotheses:
         support = [retry_log["evidence_id"], pool_log["evidence_id"]]
         if retry_metric:
             support.append(retry_metric["evidence_id"])

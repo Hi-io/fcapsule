@@ -19,6 +19,15 @@ def _available_evidence(report: dict[str, Any]) -> dict[str, str]:
         )
     for pattern in report.get("log_patterns", []):
         evidence[str(pattern.get("evidence_id"))] = f"Log pattern: {pattern.get('pattern')} - {pattern.get('summary')}"
+    for item in report.get("supporting_evidence", []):
+        if item.get("type") != "configuration":
+            continue
+        configuration = item.get("configuration", {})
+        values = configuration.get("data", {}) if isinstance(configuration, dict) else {}
+        value_summary = f"; values {json.dumps(values, sort_keys=True, ensure_ascii=True)}" if values else ""
+        evidence[str(item.get("evidence_id"))] = (
+            f"Configuration: {item.get('title')} - {item.get('summary')}{value_summary}"
+        )
     return {key: value for key, value in evidence.items() if key and key != "None"}
 
 
@@ -51,7 +60,8 @@ def build_briefing_prompt(report: dict[str, Any]) -> list[dict[str, str]]:
             "content": (
                 "You are an incident-response assistant. Use only the provided retained evidence. "
                 "Do not invent telemetry, do not claim a final root cause, and return valid JSON only. "
-                "Every response must cite at least two evidence IDs exactly as supplied."
+                "Every response must cite at least two evidence IDs exactly as supplied. Prioritize direct "
+                "contradictions between runtime configuration and application logs over generic secondary symptoms."
             ),
         },
         {
