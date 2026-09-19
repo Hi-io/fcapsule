@@ -13,6 +13,10 @@ _METRIC_ORDER = (
     "pool_peak_utilization",
     "pool_exhausted",
     "slow_queries",
+    "container_restarts",
+    "memory_working_set",
+    "cpu_usage",
+    "pod_ready",
 )
 
 _METRIC_CONTEXT = {
@@ -44,6 +48,22 @@ _METRIC_CONTEXT = {
         "label": "Slow reservation queries",
         "meaning": "Reservation database queries that exceeded their expected duration during one collection interval.",
     },
+    "pod_cpu_usage_cores": {
+        "label": "Pod CPU usage",
+        "meaning": "CPU consumed by the affected pod during the captured incident window.",
+    },
+    "pod_memory_working_set_bytes": {
+        "label": "Pod memory working set",
+        "meaning": "Memory actively used by the affected pod during the captured incident window.",
+    },
+    "pod_container_restarts_total": {
+        "label": "Container restart activity",
+        "meaning": "Change in the container restart counter around the incident trigger.",
+    },
+    "pod_ready": {
+        "label": "Pod readiness",
+        "meaning": "Whether the affected pod was ready to receive work during the captured window.",
+    },
 }
 
 _PM_CHART_METRICS = (
@@ -51,6 +71,10 @@ _PM_CHART_METRICS = (
     "checkout_request_latency_p95_ms",
     "checkout_retry_amplification_ratio",
     "inventory_db_pool_peak_utilization_ratio",
+    "pod_cpu_usage_cores",
+    "pod_memory_working_set_bytes",
+    "pod_container_restarts_total",
+    "pod_ready",
 )
 
 
@@ -78,6 +102,12 @@ def _metric_label(name: str) -> str:
 
 def _display_value(name: str, value: Any) -> str:
     number = float(value or 0)
+    if name == "pod_ready":
+        return "Ready" if number >= 1 else "Not ready"
+    if name.endswith("_bytes"):
+        return f"{number / 1024 / 1024:.1f} MiB"
+    if name.endswith("_cores"):
+        return f"{number * 1000:.1f} mCPU"
     if name.endswith("_rate") or "utilization_ratio" in name:
         return f"{number * 100:.1f}%"
     if "amplification_ratio" in name:
@@ -125,7 +155,10 @@ def _pm_signals(source_metrics: list[dict[str, Any]] | None, anomalies: list[dic
         ]
         if len(values) < 2:
             continue
-        context = _METRIC_CONTEXT[name]
+        context = _METRIC_CONTEXT.get(
+            name,
+            {"label": _metric_label(name), "meaning": "Observed for the affected pod during the incident window."},
+        )
         signals.append(
             {
                 "evidence_id": f"ev_{anomaly.get('metric_id')}",

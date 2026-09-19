@@ -5,6 +5,7 @@ from pathlib import Path
 from zipfile import ZipFile
 
 from fcapsule.pipeline import investigate_case
+from fcapsule.incident_report import build_incident_report
 from tests.common import REFERENCE_CASE
 
 
@@ -35,6 +36,42 @@ class PipelineRegressionTests(unittest.TestCase):
                 names = set(archive.namelist())
             self.assertNotIn("opensearch_logs.json", names)
             self.assertEqual(names, {"capsule.md", "capsule.json", "evidence.json", "evaluation.json", "baselines.json"})
+
+    def test_incident_report_surfaces_generic_kubernetes_metrics(self):
+        anomaly = {
+            "metric_id": "metric_001",
+            "metric": "pod_memory_working_set_bytes",
+            "baseline_median": 1048576,
+            "incident_peak": 4194304,
+            "peak_timestamp": "2026-09-20T00:01:00Z",
+            "percentage_change": 300,
+            "anomaly_score": 0.8,
+            "labels": {"pod": "checkout-abc"},
+        }
+        capsule = {
+            "case": {"case_id": "k8s-case", "service": "checkout", "cluster": "go15", "namespace": "default"},
+            "selected_evidence": [
+                {"evidence_id": "ev_metric_001", "source_id": "metric_001", "type": "metric_anomaly"}
+            ],
+            "metric_anomalies": [anomaly],
+            "hypotheses": [],
+            "alerts": [],
+            "domain_summary": {},
+            "evaluation": {},
+        }
+        source_metrics = [
+            {
+                "metric": "pod_memory_working_set_bytes",
+                "labels": {"pod": "checkout-abc"},
+                "values": [["2026-09-20T00:00:00Z", 1048576], ["2026-09-20T00:01:00Z", 4194304]],
+            }
+        ]
+
+        report = build_incident_report(capsule, {"incident_id": "k8s-case"}, source_metrics)
+
+        self.assertEqual(report["impact"][0]["label"], "Pod memory working set")
+        self.assertEqual(report["impact"][0]["value"], "4.0 MiB")
+        self.assertEqual(report["pm_signals"][0]["metric"], "pod_memory_working_set_bytes")
 
 
 if __name__ == "__main__":
