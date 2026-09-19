@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 
 from fcapsule.io.case_loader import load_case
 from fcapsule.processing.anonymizer import anonymize_text, template_for_message
@@ -45,6 +46,26 @@ class ProcessingTests(unittest.TestCase):
         self.assertLess(metrics["http_requests_total"]["anomaly_score"], 0.1)
         self.assertGreater(metrics["http_request_errors_total"]["anomaly_score"], 0.8)
         self.assertGreater(metrics["request_error_rate"]["anomaly_score"], 0.8)
+
+    def test_metric_analysis_falls_back_when_alert_is_outside_sample_window(self):
+        alerts = [{**self.bundle.alerts[0], "startsAt": "2099-01-01T00:00:00Z"}]
+        shifted_bundle = replace(self.bundle, alerts=alerts)
+
+        metrics = analyze_metrics(shifted_bundle)
+
+        self.assertEqual(len(metrics), len(self.bundle.metrics))
+        self.assertTrue(all(item["peak_timestamp"].endswith("Z") for item in metrics))
+
+    def test_two_sample_counter_has_a_valid_incident_point(self):
+        counter = next(item for item in self.bundle.metrics if str(item["metric"]).endswith("_total"))
+        metrics = [{**counter, "values": counter["values"][:2]}]
+        alerts = [{**self.bundle.alerts[0], "startsAt": "2099-01-01T00:00:00Z"}]
+        minimal_bundle = replace(self.bundle, metrics=metrics, alerts=alerts)
+
+        result = analyze_metrics(minimal_bundle)
+
+        self.assertEqual(result[0]["analysis_mode"], "counter_delta")
+        self.assertTrue(result[0]["peak_timestamp"].endswith("Z"))
 
 
 if __name__ == "__main__":

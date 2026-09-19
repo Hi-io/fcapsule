@@ -28,15 +28,25 @@ def analyze_metrics(bundle: CaseBundle) -> list[dict[str, Any]]:
                 (points[position][0], max(0.0, points[position][1] - points[position - 1][1]))
                 for position in range(1, len(points))
             ]
-        baseline = [value for timestamp, value in analyzed_points if timestamp < bundle.alert_time]
-        incident = [value for timestamp, value in analyzed_points if timestamp >= bundle.alert_time]
-        if not baseline or not incident:
-            midpoint = max(1, len(analyzed_points) // 2)
-            baseline = [value for _, value in analyzed_points[:midpoint]]
-            incident = [value for _, value in analyzed_points[midpoint:]]
+        baseline_points = [point for point in analyzed_points if point[0] < bundle.alert_time]
+        incident_points = [point for point in analyzed_points if point[0] >= bundle.alert_time]
+        if not baseline_points or not incident_points:
+            if len(analyzed_points) == 1:
+                incident_points = analyzed_points
+                baseline_points = [(analyzed_points[0][0], 0.0)] if is_counter else analyzed_points
+            else:
+                midpoint = min(max(1, len(analyzed_points) // 2), len(analyzed_points) - 1)
+                baseline_points = analyzed_points[:midpoint]
+                incident_points = analyzed_points[midpoint:]
+
+        baseline = [value for _, value in baseline_points]
+        incident = [value for _, value in incident_points]
 
         baseline_median = statistics.median(baseline)
-        incident_peak = max(incident, key=lambda value: abs(value - baseline_median))
+        peak_timestamp, incident_peak = max(
+            incident_points,
+            key=lambda point: abs(point[1] - baseline_median),
+        )
         mad = _median_absolute_deviation(baseline)
         scale = mad * 1.4826
         if scale == 0:
@@ -46,7 +56,6 @@ def analyze_metrics(bundle: CaseBundle) -> list[dict[str, Any]]:
             (incident_peak - baseline_median) / abs(baseline_median) * 100 if baseline_median != 0 else math.copysign(1000.0, incident_peak)
         )
         anomaly_score = min(1.0, abs(robust_z) / 6 * 0.65 + min(abs(percentage_change), 200) / 200 * 0.35)
-        peak_timestamp = next(timestamp for timestamp, value in analyzed_points if value == incident_peak and timestamp >= bundle.alert_time)
         labels = {str(key): str(value) for key, value in series.get("labels", {}).items()}
         entity = labels.get("pod") or labels.get("service") or labels.get("namespace") or "unknown"
         direction = "increased" if percentage_change >= 0 else "decreased"
