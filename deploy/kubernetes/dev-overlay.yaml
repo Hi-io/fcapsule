@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fcapsule
+  namespace: fcapsule
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: install-source
+          image: python:3.12-slim
+          command: ["python", "-m", "pip", "install", "--no-cache-dir", "--target", "/opt/fcapsule", "https://github.com/Hi-io/fcapsule/archive/refs/heads/master.zip"]
+          volumeMounts:
+            - name: source
+              mountPath: /opt/fcapsule
+      containers:
+        - name: fcapsule
+          image: python:3.12-slim
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "fcapsule.cli", "serve"]
+          env:
+            - name: PYTHONPATH
+              value: /opt/fcapsule
+          volumeMounts:
+            - name: source
+              mountPath: /opt/fcapsule
+      volumes:
+        - name: source
+          emptyDir: {}

@@ -1,0 +1,10 @@
+.git
+.github
+.fcapsule
+.env
+__pycache__
+*.pyc
+tests
+docs
+local_reports
+outputs

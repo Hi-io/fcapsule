@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: fcapsule-workload-alerts
+  namespace: monitoring
+  labels:
+    release: prometheus
+spec:
+  groups:
+    - name: fcapsule.workloads
+      rules:
+        - alert: FCAPSulePodRestartDetected
+          expr: increase(kube_pod_container_status_restarts_total{namespace!~"kube-system|monitoring|logging|fcapsule"}[5m]) > 0
+          for: 30s
+          labels:
+            severity: warning
+          annotations:
+            summary: "A workload container restarted"
+            description: "Pod {{ $labels.namespace }}/{{ $labels.pod }} restarted during the last five minutes."
