@@ -18,6 +18,14 @@ spec:
           image: python:3.12-slim
           imagePullPolicy: IfNotPresent
           command: ["python", "-m", "fcapsule.cli", "serve"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            capabilities:
+              drop: ["ALL"]
           env:
             - name: PYTHONPATH
               value: /opt/fcapsule
