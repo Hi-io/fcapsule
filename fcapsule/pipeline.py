@@ -62,6 +62,7 @@ def investigate_case(case_dir: str | Path, output_dir: str | Path, progress: Pro
         "log_summary": {"raw_lines": len(bundle.logs), "template_count": len(templates), "selected_lines": selected_log_lines},
         "log_templates": templates,
         "metric_anomalies": metrics,
+        "configuration": bundle.configurations,
         "hypotheses": hypotheses,
         "missing_evidence": missing_evidence,
         "next_steps": next_steps,

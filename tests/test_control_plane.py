@@ -48,7 +48,7 @@ class ControlPlaneTests(unittest.TestCase):
             self.assertTrue(report["impact"])
             self.assertTrue(report["actions"])
             self.assertIn(report["actions"][0]["priority"], {"urgent", "next"})
-            self.assertEqual(report["report_version"], "1.2")
+            self.assertEqual(report["report_version"], "1.3")
             self.assertTrue(report["fault_alerts"])
             self.assertTrue(report["log_patterns"])
             self.assertTrue(report["log_patterns"][0]["examples"])
@@ -77,11 +77,15 @@ class ControlPlaneTests(unittest.TestCase):
                 self.assertNotIn("Incident Lab", html)
                 with urlopen(f"{base}/settings", timeout=3) as response:
                     self.assertIn("AI settings", response.read().decode("utf-8"))
+                with urlopen(f"{base}/targets", timeout=3) as response:
+                    targets_html = response.read().decode("utf-8")
+                self.assertIn("Targets", targets_html)
                 with urlopen(f"{base}/api/state", timeout=3) as response:
                     state = json.loads(response.read())
                 self.assertFalse(state["running"])
                 self.assertIn("overview", state)
                 self.assertFalse(state["ai"]["api_key_configured"])
+                self.assertIn("sources", state)
                 request = Request(
                     f"{base}/api/settings/ai",
                     data=json.dumps({"model": "deepseek-v4-flash", "max_tokens": 1800}).encode("utf-8"),
@@ -94,6 +98,25 @@ class ControlPlaneTests(unittest.TestCase):
                 self.assertEqual(settings["max_tokens"], 1800)
                 self.assertNotIn("api_key", settings)
                 self.assertTrue((Path(directory) / "state" / "ai-settings.json").is_file())
+                source_request = Request(
+                    f"{base}/api/settings/sources",
+                    data=json.dumps(
+                        {
+                            "prometheus_url": "http://prometheus:9090",
+                            "opensearch_url": "http://opensearch:9200",
+                            "opensearch_index": "logs-*",
+                            "cluster_name": "test-cluster",
+                            "namespaces": "default",
+                            "enabled": False,
+                        }
+                    ).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urlopen(source_request, timeout=3) as response:
+                    sources = json.loads(response.read())
+                self.assertEqual(sources["cluster_name"], "test-cluster")
+                self.assertEqual(sources["namespaces"], ["default"])
             finally:
                 server.shutdown()
                 server.server_close()

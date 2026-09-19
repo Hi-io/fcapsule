@@ -14,6 +14,7 @@ from fcapsule.incident_report import build_incident_report
 from fcapsule.io.archive_writer import create_archive
 from fcapsule.io.case_loader import load_case
 from fcapsule.io.output_writer import write_json
+from fcapsule.live_sources import LiveSourceCoordinator
 from fcapsule.pipeline import investigate_case
 from fcapsule.reasoning.incident_briefing import generate_incident_briefing
 from fcapsule.store import FCAPSuleStore
@@ -29,6 +30,7 @@ class ControlPlane:
         self.ai_config_path = self.state_dir / "ai-settings.json"
         self.output_root.mkdir(parents=True, exist_ok=True)
         self.store = FCAPSuleStore(self.state_dir / "fcapsule.db")
+        self.live_sources = LiveSourceCoordinator(self.store, self.state_dir)
         self.lock = threading.Lock()
         self.running = False
         self.active_job: str | None = None
@@ -38,6 +40,17 @@ class ControlPlane:
         self.events: list[dict[str, Any]] = []
         self.phases = self._empty_phases()
         self.live: dict[str, Any] = {}
+        self.source_state: dict[str, Any] = {
+            "configuration": self.live_sources.configuration(),
+            "targets": {},
+            "last_sync_at": None,
+            "pods_visible": 0,
+            "applications_visible": 0,
+            "active_alerts": 0,
+            "error": None,
+        }
+        self.source_stop = threading.Event()
+        self.source_monitor: threading.Thread | None = None
         load_env_file()
         self._persist_ai_settings()
         existing = self.store.overview()
@@ -111,6 +124,79 @@ class ControlPlane:
             write_env_value(Path.cwd() / ".env", "DEEPSEEK_API_KEY", api_key)
         self._persist_ai_settings()
         return self.ai_configuration()
+
+    def source_configuration(self) -> dict[str, Any]:
+        return self.live_sources.configuration()
+
+    def update_source_configuration(self, payload: dict[str, Any]) -> dict[str, Any]:
+        config = self.live_sources.update_configuration(payload)
+        with self.lock:
+            self.source_state["configuration"] = config
+        if config["enabled"]:
+            self.start_live_monitoring()
+        return config
+
+    def test_source_connections(self) -> dict[str, Any]:
+        result = self.live_sources.test_connections()
+        with self.lock:
+            self.source_state.update(result)
+            self.source_state["error"] = None if result["ok"] else "One or more source connections failed"
+        return result
+
+    def start_live_monitoring(self) -> None:
+        if self.source_monitor and self.source_monitor.is_alive():
+            return
+        if not self.source_configuration()["enabled"]:
+            return
+        self.source_stop.clear()
+        self.source_monitor = threading.Thread(target=self._monitor_sources, daemon=True, name="fcapsule-source-monitor")
+        self.source_monitor.start()
+
+    def stop_live_monitoring(self) -> None:
+        self.source_stop.set()
+        if self.source_monitor and self.source_monitor.is_alive():
+            self.source_monitor.join(timeout=3)
+
+    def _monitor_sources(self) -> None:
+        while not self.source_stop.is_set():
+            self.start_source_sync()
+            interval = self.source_configuration()["poll_interval_seconds"]
+            self.source_stop.wait(interval)
+
+    def start_source_sync(self) -> bool:
+        if not self._begin("sources"):
+            return False
+        thread = threading.Thread(target=self._run_source_sync, daemon=True, name="fcapsule-source-sync")
+        thread.start()
+        return True
+
+    def _run_source_sync(self) -> None:
+        captured: list[dict[str, Any]] = []
+        try:
+            self._event("sources", "running", "Discovering workloads and checking telemetry coverage")
+            result = self.live_sources.synchronize()
+            captured = list(result.pop("captured", []))
+            with self.lock:
+                self.source_state.update(result)
+                self.source_state["error"] = None
+            for item in captured:
+                self.ingest_case(item["case_dir"], item["app_id"], item["app_name"], self.source_configuration()["environment"])
+            self._event(
+                "sources",
+                "done",
+                "Source inventory synchronized",
+                {"pods_visible": result["pods_visible"], "new_incidents": len(captured)},
+                update_live=False,
+            )
+            self._finish()
+            if captured and self.source_configuration()["auto_build_reports"]:
+                incident = self.store.list_incidents(1)[0]
+                self.start_capsule(incident["incident_id"])
+        except Exception as exc:  # pragma: no cover - surfaced through API and UI
+            with self.lock:
+                self.source_state["error"] = str(exc)
+                self.source_state["last_sync_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            self._finish(exc)
 
     def ingest_case(
         self,
@@ -274,6 +360,7 @@ class ControlPlane:
                 "phases": json.loads(json.dumps(self.phases)),
                 "live": json.loads(json.dumps(self.live)),
                 "ai": self.ai_configuration(),
+                "sources": json.loads(json.dumps(self.source_state)),
             }
         state["overview"] = self.store.overview()
         return state
@@ -312,7 +399,7 @@ class ControlPlane:
         capsule = json.loads(capsule_path.read_text(encoding="utf-8"))
         source_metrics = load_case(incident["case_dir"]).metrics
         report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.is_file() else None
-        if not report or report.get("report_version") != "1.2":
+        if not report or report.get("report_version") != "1.3":
             report = build_incident_report(capsule, incident, source_metrics)
             write_json(report_path, report)
             create_archive(Path(capsule_record["output_dir"]), incident_id)

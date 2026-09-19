@@ -26,7 +26,7 @@ def _representatives(items: list[dict[str, Any]], groups: tuple[tuple[str, ...],
 
 def select_evidence(evidence: list[dict[str, Any]], limit: int = MAX_SELECTED_EVIDENCE) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     selected: list[dict[str, Any]] = []
-    type_limits = {"alert": 4, "log_template": 6, "metric_anomaly": 10}
+    type_limits = {"alert": 4, "configuration": 4, "log_template": 6, "metric_anomaly": 10}
     for evidence_type, type_limit in type_limits.items():
         matches = [item for item in evidence if item["type"] == evidence_type and item["score"] >= 0.25]
         required: list[dict[str, Any]] = []

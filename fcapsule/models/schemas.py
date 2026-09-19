@@ -47,6 +47,7 @@ class CaseBundle:
     alerts: list[dict[str, Any]]
     metrics: list[dict[str, Any]]
     logs: list[dict[str, Any]]
+    configurations: list[dict[str, Any]]
     expected_notes: str
     warnings: tuple[str, ...] = ()
 

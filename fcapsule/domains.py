@@ -35,6 +35,13 @@ OBSERVABILITY_DOMAINS: dict[str, dict[str, Any]] = {
         "methods": ["entity normalization", "cross-source alignment", "coverage checks"],
         "role": "Connects evidence from different telemetry domains to the same system entity.",
     },
+    "configuration_state": {
+        "label": "Configuration state",
+        "signal_family": "Kubernetes workload and referenced ConfigMap snapshots",
+        "source_examples": ["PodSpec", "referenced ConfigMap"],
+        "methods": ["reference resolution", "secret-key masking", "content hashing"],
+        "role": "Preserves the deployment and non-secret configuration context present during the incident.",
+    },
     "trace_access": {
         "label": "On-demand traces",
         "signal_family": "Ephemeral request-path evidence queried only when needed",
@@ -56,6 +63,7 @@ TYPE_TO_DOMAIN = {
     "alert": "fault_events",
     "log_template": "log_text",
     "metric_anomaly": "time_series_metrics",
+    "configuration": "configuration_state",
 }
 
 
@@ -87,6 +95,8 @@ def build_domain_summary(payload: dict[str, Any], candidates: list[dict[str, Any
             raw_count = len(payload.get("entity_resolution", {}).get("entities", {}))
             if not raw_count:
                 raw_count = len(payload.get("case", {}).get("topology", []))
+        elif domain_id == "configuration_state":
+            raw_count = len(payload.get("configuration", []))
         elif domain_id == "trace_access":
             raw_count = int(bool(payload.get("case", {}).get("trace_access", {}).get("available")))
         elif domain_id == "llm_reasoning":

@@ -176,6 +176,30 @@ def _log_patterns(selected: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _configuration_evidence(selected: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result = []
+    for item in selected:
+        if item.get("type") != "configuration":
+            continue
+        config = item.get("configuration", {})
+        result.append(
+            {
+                "evidence_id": item.get("evidence_id"),
+                "kind": config.get("kind"),
+                "name": config.get("name"),
+                "namespace": config.get("namespace"),
+                "content_hash": config.get("content_hash"),
+                "resource_version": config.get("resource_version"),
+                "keys": config.get("keys", []),
+                "images": config.get("images", []),
+                "configmap_refs": config.get("configmap_refs", []),
+                "ready": config.get("ready"),
+                "summary": item.get("summary"),
+            }
+        )
+    return result
+
+
 def build_incident_report(
     capsule: dict[str, Any],
     record: dict[str, Any],
@@ -254,7 +278,7 @@ def build_incident_report(
     metric_names = {str(item.get("metric", "")).lower() for item in source_metrics or []}
     missing_pm = [label for label, terms in (("CPU", ("cpu",)), ("memory", ("memory", "mem_"))) if not any(term in name for name in metric_names for term in terms)]
     return {
-        "report_version": "1.2",
+        "report_version": "1.3",
         "incident": {
             "incident_id": record.get("incident_id", case.get("case_id")),
             "title": case.get("case_title", record.get("summary", "Incident report")),
@@ -285,6 +309,7 @@ def build_incident_report(
             else None
         ),
         "log_patterns": _log_patterns(selected),
+        "configuration_evidence": _configuration_evidence(selected),
         "actions": actions,
         "retention": {
             "trace_available": bool(trace_access.get("available")),

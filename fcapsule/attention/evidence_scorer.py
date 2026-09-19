@@ -138,4 +138,44 @@ def score_evidence(
             }
         )
 
+    for index, item in enumerate(bundle.configurations, start=1):
+        kind = str(item.get("kind", "Configuration"))
+        name = str(item.get("name", "unknown"))
+        namespace = str(item.get("namespace", bundle.metadata.get("namespace", "default")))
+        keys = [str(value) for value in item.get("keys", [])]
+        summary = (
+            f"ConfigMap exposes {len(keys)} non-secret configuration key(s); snapshot hash {item.get('content_hash', 'unavailable')}."
+            if kind == "ConfigMap"
+            else f"Pod phase {item.get('phase', 'unknown')}; images: {', '.join(item.get('images', [])) or 'unavailable'}."
+        )
+        components = {
+            "severity_weight": 0.3,
+            "anomaly_score": 0.45 if item.get("error") or item.get("ready") is False else 0.2,
+            "temporal_proximity": 1.0,
+            "entity_match_score": _entity_score([namespace, name], expected_entities),
+            "rarity_score": 0.5,
+            "semantic_relevance": 0.8,
+            "repetition_penalty": 0.0,
+        }
+        score = sum(components[key] * weight for key, weight in {
+            "severity_weight": 0.1, "anomaly_score": 0.2, "temporal_proximity": 0.2,
+            "entity_match_score": 0.15, "rarity_score": 0.05, "semantic_relevance": 0.3,
+        }.items())
+        evidence.append(
+            {
+                "evidence_id": f"ev_config_{index:03d}",
+                "type": "configuration",
+                "domain": domain_for_evidence_type("configuration"),
+                "source_id": f"config_{index:03d}",
+                "title": f"{kind} {name}",
+                "summary": summary,
+                "score": round(score, 4),
+                "score_components": components,
+                "why_selected": "Configuration context links the observed pod to its deployment inputs at incident time.",
+                "linked_entities": [namespace, name, str(item.get("workload", ""))],
+                "time_range": bundle.metadata["window"],
+                "configuration": item,
+            }
+        )
+
     return sorted(evidence, key=lambda item: (-item["score"], item["evidence_id"]))

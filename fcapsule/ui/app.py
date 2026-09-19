@@ -26,6 +26,7 @@ HTML = """<!doctype html>
     <a class="wordmark" href="/console"><span>FC</span>APSule</a>
     <nav aria-label="Primary">
       <a href="/console" data-nav="console">Operations</a>
+      <a href="/targets" data-nav="targets">Targets</a>
       <a href="/settings" data-nav="settings">AI settings</a>
     </nav>
     <div class="system-state"><i></i><span id="system-state">Ready</span></div>
@@ -115,6 +116,17 @@ tbody tr:hover { background:#fafbfb; }
 .form-pair { display:grid; grid-template-columns:1fr 1fr; gap:9px; }
 .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:15px; }
 .notice { border-left:3px solid var(--blue); background:var(--blue-bg); padding:10px 12px; color:#234e6b; }
+.target-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); border:1px solid var(--line); background:#fff; margin-bottom:14px; }
+.target { min-height:128px; padding:14px; border-right:1px solid var(--line); }
+.target:last-child { border-right:0; }
+.target h3 { margin:0 0 8px; font-size:14px; display:flex; justify-content:space-between; gap:8px; }
+.target dl { display:grid; grid-template-columns:1fr auto; gap:4px 10px; margin:10px 0 0; font-size:12px; }
+.target dt { color:var(--muted); }
+.target dd { margin:0; font-weight:650; }
+.target-error { color:var(--red); font-size:12px; overflow-wrap:anywhere; }
+.pod-list { display:grid; gap:5px; min-width:220px; }
+.pod-line { display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:12px; }
+.pod-line code { overflow-wrap:anywhere; }
 .capsule-detail h3 { font-size:14px; margin:14px 0 6px; }
 .capsule-detail p { color:var(--muted); margin:0; }
 .evidence-list { margin:8px 0 0; padding:0; list-style:none; }
@@ -209,13 +221,13 @@ details.engineering summary { cursor:pointer; padding:10px 11px; font-weight:650
 .boot { color:var(--muted); padding:40px; text-align:center; }
 .mono { font-family:"Cascadia Mono", Consolas, monospace; font-size:12px; }
 .right { text-align:right; }
-@media (max-width:1050px) { .grid-2, .report-layout { grid-template-columns:1fr; } .report-main { border-right:0; border-bottom:1px solid var(--line); } }
+@media (max-width:1050px) { .grid-2, .report-layout, .target-grid { grid-template-columns:1fr; } .target { border-right:0; border-bottom:1px solid var(--line); } .target:last-child { border-bottom:0; } .report-main { border-right:0; border-bottom:1px solid var(--line); } }
 @media (max-width:700px) { .product-bar { height:auto; min-height:58px; padding:10px 14px; grid-template-columns:1fr auto; } nav { grid-column:1/-1; order:3; margin-top:8px; } nav a { min-height:40px; } .system-state { justify-self:end; } main { width:calc(100% - 18px); margin-top:12px; } .page-head, .report-banner { align-items:start; flex-direction:column; } .kpis, .impact-grid { grid-template-columns:1fr 1fr; } .kpi:nth-child(2) { border-right:0; } .kpi { border-bottom:1px solid var(--line); } .impact-item:nth-child(2n) { border-right:0; } .form-pair, .model-compare { grid-template-columns:1fr; } .incident-table .wide-only { display:none; } .incident-table td, .incident-table th { padding:9px 7px; } .incident-table button { padding:6px 8px; font-size:12px; } }
 """
 
 
 JS = r"""
-const view = location.pathname.startsWith('/settings') ? 'settings' : 'console';
+const view = location.pathname.startsWith('/settings') ? 'settings' : location.pathname.startsWith('/targets') ? 'targets' : 'console';
 const app = document.querySelector('#app');
 const fmt = new Intl.NumberFormat('en-US');
 const pct = value => typeof value === 'number' ? (value * 100).toFixed(1) + '%' : '--';
@@ -241,18 +253,52 @@ function setSystem(state) {
 
 function status(value) { return `<span class="status ${safe(value)}">${safe(value)}</span>`; }
 function sources(config) {
-  return ['faults','metrics','logs','traces'].map(key => `<span class="source ${config?.[key]?.status ? 'on' : ''}">${key === 'faults' ? 'FM' : key === 'metrics' ? 'PM' : key === 'logs' ? 'LOG' : 'TRACE'}</span>`).join('');
+  const active = value => ['connected','observed','available'].includes(value);
+  return ['faults','metrics','logs','configuration','traces'].map(key => `<span class="source ${active(config?.[key]?.status) ? 'on' : ''}" title="${safe(config?.[key]?.status || 'not configured')}">${key === 'faults' ? 'FM' : key === 'metrics' ? 'PM' : key === 'logs' ? 'LOG' : key === 'configuration' ? 'CFG' : 'TRACE'}</span>`).join('');
 }
 
 function renderConsole(state) {
   const data = state.overview; const apps = data.applications; const incidents = data.incidents;
   app.innerHTML = `
-    <div class="page-head"><div><div class="eyebrow">Incident workspace</div><h1>Operations</h1><p>Captured incidents and the evidence needed to investigate them.</p></div><a href="/settings"><button class="secondary">AI settings</button></a></div>
+    <div class="page-head"><div><div class="eyebrow">Incident workspace</div><h1>Operations</h1><p>Captured incidents and the evidence needed to investigate them.</p></div><a href="/targets"><button class="secondary">Manage targets</button></a></div>
     <section class="sheet"><div class="sheet-head"><h2>Incident queue</h2><span class="queue-note">${incidents.length} captured incident${incidents.length === 1 ? '' : 's'} · reports stay available after source telemetry expires</span></div><div class="table-wrap">${incidentTable(incidents, data.capsules)}</div></section>
     <section class="sheet" style="margin-top:14px"><div class="sheet-head"><h2>Application coverage</h2><span class="queue-note">FM, PM, logs, and trace access configured per application</span></div><div class="table-wrap">${applicationTable(apps)}</div></section>`;
   document.querySelectorAll('[data-incident-report]').forEach(button => button.addEventListener('click', () => openReport(button.dataset.incidentReport)));
   document.querySelectorAll('[data-build-capsule]').forEach(button => button.addEventListener('click', () => buildCapsule(button.dataset.buildCapsule)));
   document.querySelectorAll('[data-ai-briefing]').forEach(button => button.addEventListener('click', () => generateAiBriefing(button.dataset.aiBriefing)));
+}
+
+function renderTargets(state) {
+  const config = state.sources.configuration; const targets = state.sources.targets || {};
+  const targetCard = (name, label) => {
+    const item = targets[name] || {}; const ok = item.ok === true;
+    const details = name === 'prometheus' ? [['Healthy targets', `${item.healthy_targets ?? '--'} / ${item.active_targets ?? '--'}`], ['Version', item.version || '--']]
+      : name === 'opensearch' ? [['Indexed documents', item.documents != null ? fmt.format(item.documents) : '--'], ['Version', item.version || '--']]
+      : [['Authentication', item.authentication || 'ServiceAccount'], ['Version', item.version || '--']];
+    return `<article class="target"><h3>${label}${status(item.ok == null ? 'not tested' : ok ? 'healthy' : 'error')}</h3>${item.error ? `<p class="target-error">${safe(item.error)}</p>` : `<dl>${details.map(row => `<dt>${safe(row[0])}</dt><dd>${safe(row[1])}</dd>`).join('')}</dl>`}</article>`;
+  };
+  app.innerHTML = `
+    <div class="page-head"><div><div class="eyebrow">Source connections</div><h1>Targets</h1><p>Connect the cluster data used for discovery and incident capture.</p></div><div class="actions"><button class="secondary" id="test-targets">Test connections</button><button id="sync-targets" ${state.running ? 'disabled' : ''}>Sync now</button></div></div>
+    <section class="target-grid">${targetCard('prometheus','Prometheus')}${targetCard('opensearch','OpenSearch')}${targetCard('kubernetes','Kubernetes API')}</section>
+    <div class="grid-2"><section class="sheet"><div class="sheet-head"><h2>Connection settings</h2><span class="queue-note">${config.enabled ? 'Automatic polling enabled' : 'Manual synchronization'}</span></div><div class="sheet-body">
+      <div class="field"><label for="prometheus-url">Prometheus URL</label><input id="prometheus-url" value="${safe(config.prometheus_url)}"></div>
+      <div class="field"><label for="opensearch-url">OpenSearch URL</label><input id="opensearch-url" value="${safe(config.opensearch_url)}"></div>
+      <div class="form-pair"><div class="field"><label for="opensearch-index">Log index pattern</label><input id="opensearch-index" value="${safe(config.opensearch_index)}"></div><div class="field"><label for="cluster-name">Cluster name</label><input id="cluster-name" value="${safe(config.cluster_name)}"></div></div>
+      <div class="field"><label for="kubernetes-url">Kubernetes API URL</label><input id="kubernetes-url" value="${safe(config.kubernetes_url || '')}" placeholder="In-cluster ServiceAccount"><small>Leave blank inside Kubernetes. FCAPSule uses the mounted ServiceAccount and cluster CA.</small></div>
+      <div class="field"><label for="source-namespaces">Observed namespaces</label><input id="source-namespaces" value="${safe(config.namespaces.join(', '))}" placeholder="default, production"><small>Only these namespaces can create incidents. Leave blank to observe all namespaces allowed by RBAC.</small></div>
+      <div class="form-pair"><div class="field"><label for="poll-interval">Poll interval (seconds)</label><input id="poll-interval" type="number" min="10" max="3600" value="${safe(config.poll_interval_seconds)}"></div><div class="field"><label for="window-minutes">Incident window (minutes)</label><input id="window-minutes" type="number" min="2" max="120" value="${safe(config.incident_window_minutes)}"></div></div>
+      <label class="toggle"><input id="source-enabled" type="checkbox" ${config.enabled ? 'checked' : ''}>Poll sources and capture new firing alerts automatically</label>
+      <label class="toggle" style="margin-top:8px"><input id="auto-reports" type="checkbox" ${config.auto_build_reports ? 'checked' : ''}>Build a responder report after capture</label>
+      ${window.targetNotice ? `<p class="notice">${safe(window.targetNotice)}</p>` : ''}
+      <div class="actions"><button id="save-targets">Save settings</button></div>
+    </div></section>
+    <section class="sheet"><div class="sheet-head"><h2>Discovery</h2><span class="queue-note">${state.sources.last_sync_at ? formatDate(state.sources.last_sync_at) : 'Not synchronized'}</span></div><div class="sheet-body">
+      <div class="kpis" style="grid-template-columns:repeat(3,1fr);margin:0"><div class="kpi"><span>Pods visible</span><strong>${state.sources.pods_visible || 0}</strong></div><div class="kpi"><span>Applications</span><strong>${state.sources.applications_visible || 0}</strong></div><div class="kpi"><span>Active alerts</span><strong>${state.sources.active_alerts || 0}</strong></div></div>
+      ${state.sources.error ? `<p class="target-error">${safe(state.sources.error)}</p>` : '<p class="queue-note" style="margin-top:12px">Discovery maps Kubernetes pods to Prometheus metrics, OpenSearch logs, and referenced configuration.</p>'}
+    </div></section></div>`;
+  document.querySelector('#save-targets').addEventListener('click', saveTargets);
+  document.querySelector('#test-targets').addEventListener('click', testTargets);
+  document.querySelector('#sync-targets').addEventListener('click', syncTargets);
 }
 
 function renderSettings(state) {
@@ -274,7 +320,26 @@ function renderSettings(state) {
 
 function applicationTable(items) {
   if (!items.length) return '<div class="empty">No applications are registered yet.</div>';
-  return `<table><thead><tr><th>State</th><th>Application</th><th>Environment</th><th>Coverage</th><th>Latest incident</th><th class="right">Reports</th></tr></thead><tbody>${items.map(item => `<tr><td>${status(item.status)}</td><td><strong>${safe(item.name)}</strong><br><span class="mono">${safe(item.app_id)}</span></td><td>${safe(item.environment)}<br><small>${safe(item.cluster)} / ${safe(item.namespace)}</small></td><td><div class="source-row">${sources(item.source_config)}</div></td><td>${item.last_incident_at ? shortTime(item.last_incident_at) : '--'}</td><td class="right">${item.capsule_count || 0}</td></tr>`).join('')}</tbody></table>`;
+  return `<table><thead><tr><th>State</th><th>Application</th><th>Environment</th><th>Observed pods</th><th>Coverage</th><th>Latest incident</th><th class="right">Reports</th></tr></thead><tbody>${items.map(item => `<tr><td>${status(item.status)}</td><td><strong>${safe(item.name)}</strong><br><span class="mono">${safe(item.app_id)}</span></td><td>${safe(item.environment)}<br><small>${safe(item.cluster)} / ${safe(item.namespace)}</small></td><td><div class="pod-list">${(item.source_config?.pods || []).map(pod => `<span class="pod-line"><code>${safe(pod.name)}</code>${status(pod.ready ? 'ready' : pod.phase || 'unknown')}</span>`).join('') || '--'}</div></td><td><div class="source-row">${sources(item.source_config)}</div></td><td>${item.last_incident_at ? shortTime(item.last_incident_at) : '--'}</td><td class="right">${item.capsule_count || 0}</td></tr>`).join('')}</tbody></table>`;
+}
+
+async function saveTargets() {
+  const payload = {prometheus_url:document.querySelector('#prometheus-url').value, opensearch_url:document.querySelector('#opensearch-url').value, opensearch_index:document.querySelector('#opensearch-index').value, kubernetes_url:document.querySelector('#kubernetes-url').value, cluster_name:document.querySelector('#cluster-name').value, namespaces:document.querySelector('#source-namespaces').value, poll_interval_seconds:Number(document.querySelector('#poll-interval').value), incident_window_minutes:Number(document.querySelector('#window-minutes').value), enabled:document.querySelector('#source-enabled').checked, auto_build_reports:document.querySelector('#auto-reports').checked};
+  const response = await fetch('/api/settings/sources', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}); const result = await response.json();
+  if (!response.ok) { alert(result.error || 'Unable to save targets'); return; }
+  window.targetNotice = 'Target settings saved.'; lastState.sources.configuration = result; renderTargets(lastState);
+}
+
+async function testTargets() {
+  window.targetNotice = 'Testing source connections...'; renderTargets(lastState);
+  const response = await fetch('/api/sources/test', {method:'POST'}); const result = await response.json();
+  lastState.sources.targets = result.targets || {}; window.targetNotice = result.ok ? 'All source connections are healthy.' : 'One or more targets could not be reached.'; renderTargets(lastState);
+}
+
+async function syncTargets() {
+  const response = await fetch('/api/sources/sync', {method:'POST'}); const result = await response.json();
+  if (!response.ok) { alert(result.error || 'Unable to synchronize sources'); return; }
+  window.targetNotice = 'Source synchronization started.'; await refresh();
 }
 
 function incidentTable(items, capsules) {
@@ -367,6 +432,7 @@ function reportPanel(payload) {
   const faultAlerts = report.fault_alerts.map(item => `<div class="alert-record ${safe(item.severity)}"><strong>${safe(item.name)}</strong><small>${formatDate(item.timestamp)}${item.service ? ` · ${safe(item.service)}` : ''}</small><span>${safe(item.description)}</span></div>`).join('');
   const pmSignals = report.pm_signals.map(item => `<article class="pm-signal"><h4>${safe(item.label)}</h4><p>${safe(item.meaning)}</p>${sparkline(item)}<div class="pm-values"><span>Typical<b>${safe(item.baseline)}</b></span><span>Peak<b>${safe(item.peak)}</b></span></div></article>`).join('');
   const logPatterns = report.log_patterns.map(item => `<details class="log-pattern"><summary><strong>${safe(item.pattern)}</strong><span class="queue-note"> · ${safe(item.summary)}</span></summary><p>${safe(formatDate(item.first_seen))}${item.last_seen ? ` to ${safe(formatDate(item.last_seen))}` : ''} · retained pattern ${safe(item.evidence_id)}</p>${item.examples?.length ? `<pre class="log-lines">${safe(item.examples.join('\n'))}</pre>` : ''}</details>`).join('');
+  const configuration = (report.configuration_evidence || []).map(item => `<div class="alert-record"><strong>${safe(item.kind)} · ${safe(item.name)}</strong><small>${safe(item.namespace)}${item.content_hash ? ` · snapshot ${safe(item.content_hash)}` : ''}</small><span>${safe(item.summary)}</span>${item.images?.length ? `<p class="queue-note">Images: ${safe(item.images.join(', '))}</p>` : ''}${item.keys?.length ? `<p class="queue-note">Config keys: ${safe(item.keys.join(', '))}</p>` : ''}</div>`).join('');
   const ai = payload.ai_briefing;
   const aiBriefing = ai?.status === 'ready' ? `<div class="ai-briefing"><p>${safe(ai.briefing.operator_brief)}</p><p class="briefing-action">First action: ${safe(ai.briefing.first_action)}</p><small>${safe(ai.briefing.why_this_first)}</small><p class="citations">Grounded in ${safe(ai.briefing.evidence_ids.join(', '))} · ${safe(ai.model)}</p></div>` : ai ? `<p class="queue-note">AI briefing unavailable: ${safe(ai.message || 'The response was not accepted.')}</p>` : `<div class="report-tools"><button class="secondary" data-ai-briefing="${safe(incident.incident_id)}" ${window.aiBriefingLoading ? 'disabled' : ''}>${window.aiBriefingLoading ? 'Generating briefing…' : 'Generate AI briefing'}</button></div>`;
   const coverage = report.coverage.map(item => `<div class="coverage-item"><span>${safe(item.domain)}</span><span>${safe(item.detail)}</span></div>`).join('');
@@ -376,7 +442,7 @@ function reportPanel(payload) {
   const archiveName = `fcapsule_${incident.incident_id}.zip`;
   const archiveUrl = capsuleId ? `/artifacts/${encodeURIComponent(capsuleId)}/${encodeURIComponent(archiveName)}` : '';
   const reportUrl = capsuleId ? `/artifacts/${encodeURIComponent(capsuleId)}/incident_report.json` : '';
-  return `<section id="incident-report" class="report"><div class="report-banner"><div><div class="eyebrow">Incident report · ${safe(incident.incident_id)}</div><h2>${safe(incident.title)}</h2><p>${safe(incident.summary)}</p></div><div>${status(incident.severity)}<br><span class="queue-note">${safe(incident.service)} · ${safe(incident.cluster)} / ${safe(incident.namespace)}<br>${formatDate(incident.started_at)}</span></div></div><div class="report-layout"><div class="report-main"><section class="report-section"><h3>Observed impact</h3><div class="impact-grid">${impact}</div></section><section class="report-section"><h3>FCAPSule assessment <span class="domain-mark">FM + PM + logs</span></h3><div class="hypothesis"><p>${safe(hypothesis.statement)}</p><small>${hypothesis.confidence != null ? `${Math.round(Number(hypothesis.confidence) * 100)}% confidence` : 'Confidence unavailable'} · ${safe(hypothesis.verdict)} · investigation path, not final root cause</small></div>${hypothesis.uncertainty.length ? `<p class="queue-note" style="margin-top:9px">To confirm: ${safe(hypothesis.uncertainty.join('; '))}</p>` : ''}</section><section class="report-section"><h3>AI incident briefing <span class="domain-mark">Cited response</span></h3>${aiBriefing}</section><section class="evidence-domain"><h3>Fault management <span class="domain-mark">FM alerts</span></h3><p class="report-note">Alerts that established the incident window and user impact.</p><div class="alert-records">${faultAlerts || '<span class="queue-note">No fault events were retained.</span>'}</div></section><section class="evidence-domain"><h3>Performance management <span class="domain-mark">PM time series</span></h3><p class="report-note">Trend lines compare normal behaviour with the incident window. The red marker identifies the observed peak.</p><div class="pm-grid">${pmSignals || '<span class="queue-note">No PM trend qualified for chart display. Retained PM evidence is reflected in Observed impact.</span>'}</div>${report.pm_coverage_note ? `<p class="queue-note" style="margin-top:8px">${safe(report.pm_coverage_note)}</p>` : ''}</section><section class="evidence-domain"><h3>Log evidence <span class="domain-mark">Anonymized patterns</span></h3><p class="report-note">Only the selected patterns and representative lines are retained. Expand a pattern to inspect the examples used in the assessment.</p>${logPatterns || '<span class="queue-note">No selected log patterns were retained.</span>'}</section><section class="report-section"><h3>Incident sequence</h3><ul class="timeline">${timeline}</ul>${topology ? `<p class="queue-note" style="margin-top:10px">Observed dependency path: ${topology}</p>` : ''}</section></div><aside class="report-side"><section class="report-section"><h3>Recommended follow-up</h3><ul class="action-list">${actions}</ul></section><section class="report-section"><h3>Trace availability</h3><div class="${retentionClass}"><strong>${report.retention.trace_available ? 'Trace window available' : 'Trace window unavailable'}</strong><br><span>${safe(report.retention.message)}</span>${report.retention.source_retention_seconds ? `<br><small>Source window: ${safe(report.retention.source_retention_seconds)} seconds · raw traces retained by FCAPSule: no</small>` : ''}</div></section><section class="report-section"><h3>Incident package</h3><p class="report-note">The report and curated evidence are retained in the FCAPSule archive. Raw logs and traces remain in their source systems.</p><div class="report-tools">${reportUrl ? `<a class="button-link" href="${reportUrl}" download>Report JSON</a>` : ''}${archiveUrl ? `<a class="button-link" href="${archiveUrl}" download>Capsule archive</a>` : ''}</div></section><section class="report-section"><h3>Coverage</h3><div class="coverage-list">${coverage}</div></section><details class="engineering"><summary>Engineering diagnostics</summary><div class="diagnostics"><dl><dt>Derived evidence retained</dt><dd>${report.engineering_diagnostics.selected_evidence}</dd><dt>Log reduction</dt><dd>${pct(report.engineering_diagnostics.log_compression_ratio)}</dd><dt>Signal preservation</dt><dd>${pct(report.engineering_diagnostics.important_signal_preservation)}</dd><dt>Hypothesis grounding</dt><dd>${pct(report.engineering_diagnostics.hypothesis_grounding_score)}</dd><dt>Pipeline runtime</dt><dd>${Number(report.engineering_diagnostics.runtime_seconds || 0).toFixed(2)}s</dd></dl></div></details></aside></div></section>`;
+  return `<section id="incident-report" class="report"><div class="report-banner"><div><div class="eyebrow">Incident report · ${safe(incident.incident_id)}</div><h2>${safe(incident.title)}</h2><p>${safe(incident.summary)}</p></div><div>${status(incident.severity)}<br><span class="queue-note">${safe(incident.service)} · ${safe(incident.cluster)} / ${safe(incident.namespace)}<br>${formatDate(incident.started_at)}</span></div></div><div class="report-layout"><div class="report-main"><section class="report-section"><h3>Observed impact</h3><div class="impact-grid">${impact}</div></section><section class="report-section"><h3>FCAPSule assessment <span class="domain-mark">FM + PM + logs + config</span></h3><div class="hypothesis"><p>${safe(hypothesis.statement)}</p><small>${hypothesis.confidence != null ? `${Math.round(Number(hypothesis.confidence) * 100)}% confidence` : 'Confidence unavailable'} · ${safe(hypothesis.verdict)} · investigation path, not final root cause</small></div>${hypothesis.uncertainty.length ? `<p class="queue-note" style="margin-top:9px">To confirm: ${safe(hypothesis.uncertainty.join('; '))}</p>` : ''}</section><section class="report-section"><h3>AI incident briefing <span class="domain-mark">Cited response</span></h3>${aiBriefing}</section><section class="evidence-domain"><h3>Fault management <span class="domain-mark">FM alerts</span></h3><p class="report-note">Alerts that established the incident window and user impact.</p><div class="alert-records">${faultAlerts || '<span class="queue-note">No fault events were retained.</span>'}</div></section><section class="evidence-domain"><h3>Performance management <span class="domain-mark">PM time series</span></h3><p class="report-note">Trend lines compare normal behaviour with the incident window. The red marker identifies the observed peak.</p><div class="pm-grid">${pmSignals || '<span class="queue-note">No PM trend qualified for chart display. Retained PM evidence is reflected in Observed impact.</span>'}</div>${report.pm_coverage_note ? `<p class="queue-note" style="margin-top:8px">${safe(report.pm_coverage_note)}</p>` : ''}</section><section class="evidence-domain"><h3>Log evidence <span class="domain-mark">Anonymized patterns</span></h3><p class="report-note">Only the selected patterns and representative lines are retained. Expand a pattern to inspect the examples used in the assessment.</p>${logPatterns || '<span class="queue-note">No selected log patterns were retained.</span>'}</section><section class="evidence-domain"><h3>Configuration at incident time <span class="domain-mark">Kubernetes</span></h3><p class="report-note">Pod images and referenced ConfigMaps are captured without reading Secrets. Sensitive-looking ConfigMap keys are masked.</p><div class="alert-records">${configuration || '<span class="queue-note">No referenced configuration was available.</span>'}</div></section><section class="report-section"><h3>Incident sequence</h3><ul class="timeline">${timeline}</ul>${topology ? `<p class="queue-note" style="margin-top:10px">Observed dependency path: ${topology}</p>` : ''}</section></div><aside class="report-side"><section class="report-section"><h3>Recommended follow-up</h3><ul class="action-list">${actions}</ul></section><section class="report-section"><h3>Trace availability</h3><div class="${retentionClass}"><strong>${report.retention.trace_available ? 'Trace window available' : 'Trace window unavailable'}</strong><br><span>${safe(report.retention.message)}</span>${report.retention.source_retention_seconds ? `<br><small>Source window: ${safe(report.retention.source_retention_seconds)} seconds · raw traces retained by FCAPSule: no</small>` : ''}</div></section><section class="report-section"><h3>Incident package</h3><p class="report-note">The report and curated evidence are retained in the FCAPSule archive. Raw logs and traces remain in their source systems.</p><div class="report-tools">${reportUrl ? `<a class="button-link" href="${reportUrl}" download>Report JSON</a>` : ''}${archiveUrl ? `<a class="button-link" href="${archiveUrl}" download>Capsule archive</a>` : ''}</div></section><section class="report-section"><h3>Coverage</h3><div class="coverage-list">${coverage}</div></section><details class="engineering"><summary>Engineering diagnostics</summary><div class="diagnostics"><dl><dt>Derived evidence retained</dt><dd>${report.engineering_diagnostics.selected_evidence}</dd><dt>Log reduction</dt><dd>${pct(report.engineering_diagnostics.log_compression_ratio)}</dd><dt>Signal preservation</dt><dd>${pct(report.engineering_diagnostics.important_signal_preservation)}</dd><dt>Hypothesis grounding</dt><dd>${pct(report.engineering_diagnostics.hypothesis_grounding_score)}</dd><dt>Pipeline runtime</dt><dd>${Number(report.engineering_diagnostics.runtime_seconds || 0).toFixed(2)}s</dd></dl></div></details></aside></div></section>`;
 }
 
 async function refresh() {
@@ -386,12 +452,12 @@ async function refresh() {
       const reportResponse = await fetch('/api/incidents/' + encodeURIComponent(requestedReportId) + '/report');
       if (reportResponse.ok) selectedReport = await reportResponse.json();
     }
-    view === 'settings' ? renderSettings(state) : renderConsole(state);
+    view === 'settings' ? renderSettings(state) : view === 'targets' ? renderTargets(state) : renderConsole(state);
   } catch (error) { document.querySelector('#system-state').textContent = 'Disconnected'; }
 }
 refresh();
 setInterval(() => {
-  if (lastState?.running) refresh();
+  if (lastState?.running || view === 'targets') refresh();
 }, 1000);
 """
 
@@ -400,6 +466,10 @@ class FCAPSuleHTTPServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int], control_plane: ControlPlane) -> None:
         self.control_plane = control_plane
         super().__init__(address, FCAPSuleHandler)
+
+    def server_close(self) -> None:
+        self.control_plane.stop_live_monitoring()
+        super().server_close()
 
 
 class FCAPSuleHandler(BaseHTTPRequestHandler):
@@ -441,7 +511,7 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             self.send_header("Location", "/console")
             self.end_headers()
             return
-        if path in {"/console", "/settings"}:
+        if path in {"/console", "/targets", "/settings"}:
             self._text(HTML, "text/html; charset=utf-8")
             return
         if path == "/assets/app.css":
@@ -453,8 +523,14 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
         if path == "/api/state":
             self._json(self.server.control_plane.snapshot())
             return
+        if path == "/healthz":
+            self._json({"status": "ok"})
+            return
         if path == "/api/settings/ai":
             self._json(self.server.control_plane.ai_configuration())
+            return
+        if path == "/api/settings/sources":
+            self._json(self.server.control_plane.source_configuration())
             return
         if path.startswith("/api/incidents/") and path.endswith("/report"):
             incident_id = unquote(path.removeprefix("/api/incidents/").removesuffix("/report").rstrip("/"))
@@ -511,6 +587,19 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             if path == "/api/settings/ai":
                 self._json(self.server.control_plane.update_ai_configuration(self._payload()))
                 return
+            if path == "/api/settings/sources":
+                self._json(self.server.control_plane.update_source_configuration(self._payload()))
+                return
+            if path == "/api/sources/test":
+                result = self.server.control_plane.test_source_connections()
+                self._json(result, HTTPStatus.OK if result.get("ok") else HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            if path == "/api/sources/sync":
+                if not self.server.control_plane.start_source_sync():
+                    self._json({"error": "Another job is already running"}, HTTPStatus.CONFLICT)
+                else:
+                    self._json({"ok": True}, HTTPStatus.ACCEPTED)
+                return
             if path.startswith("/api/incidents/") and path.endswith("/briefing"):
                 incident_id = unquote(path.removeprefix("/api/incidents/").removesuffix("/briefing").rstrip("/"))
                 result = self.server.control_plane.generate_ai_briefing(incident_id)
@@ -527,12 +616,16 @@ def create_app_server(
     port: int = 8765,
     state_dir: str | Path = ".fcapsule",
 ) -> FCAPSuleHTTPServer:
-    return FCAPSuleHTTPServer((host, port), ControlPlane(state_dir))
+    control_plane = ControlPlane(state_dir)
+    server = FCAPSuleHTTPServer((host, port), control_plane)
+    control_plane.start_live_monitoring()
+    return server
 
 
 def serve_app(host: str = "127.0.0.1", port: int = 8765, state_dir: str | Path = ".fcapsule") -> None:
     server = create_app_server(host, port, state_dir)
     print(f"FCAPSule is running at http://{host}:{server.server_port}/console")
+    print(f"Source targets: http://{host}:{server.server_port}/targets")
     print(f"AI settings: http://{host}:{server.server_port}/settings")
     try:
         server.serve_forever()

@@ -94,6 +94,17 @@ def _validate_logs(raw: Any, metadata: dict[str, Any]) -> list[dict[str, Any]]:
     return logs
 
 
+def _validate_configurations(raw: Any) -> list[dict[str, Any]]:
+    root = require_mapping(raw, "kubernetes_config")
+    items = require_list(root.get("items"), "kubernetes_config.items")
+    for index, value in enumerate(items):
+        item = require_mapping(value, f"configuration[{index}]")
+        for field in ("kind", "name", "namespace"):
+            if not isinstance(item.get(field), str) or not item[field]:
+                raise CaseValidationError(f"configuration[{index}].{field} is required")
+    return items
+
+
 def load_case(case_dir: str | Path) -> CaseBundle:
     path = Path(case_dir).resolve()
     if not path.is_dir():
@@ -112,7 +123,9 @@ def load_case(case_dir: str | Path) -> CaseBundle:
     metrics = _validate_metrics(_read_json(path / "prometheus_metrics.json"))
     logs = _validate_logs(_read_json(path / "opensearch_logs.json"), metadata)
     notes_path = path / "expected_notes.md"
+    configuration_path = path / "kubernetes_config.json"
     warnings: list[str] = []
+    configurations = _validate_configurations(_read_json(configuration_path)) if configuration_path.is_file() else []
     if notes_path.is_file():
         expected_notes = notes_path.read_text(encoding="utf-8")
     else:
@@ -125,6 +138,7 @@ def load_case(case_dir: str | Path) -> CaseBundle:
         alerts=alerts,
         metrics=metrics,
         logs=logs,
+        configurations=configurations,
         expected_notes=expected_notes,
         warnings=tuple(warnings),
     )
