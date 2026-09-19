@@ -145,6 +145,31 @@ class LiveSourceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 coordinator.update_configuration({"prometheus_url": "prometheus:9090"})
 
+    def test_missing_kubernetes_application_is_marked_not_observed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            store = FCAPSuleStore(state / "state.db")
+            coordinator = LiveSourceCoordinator(store, state)
+            store.upsert_application(
+                "cluster-a:shop:checkout",
+                "checkout",
+                "shop",
+                "cluster-a",
+                source_config={
+                    "metrics": {"adapter": "prometheus", "status": "observed", "pods_observed": 1},
+                    "logs": {"adapter": "opensearch", "status": "observed", "recent_documents": 30},
+                    "configuration": {"adapter": "kubernetes", "status": "available", "pods_visible": 1},
+                    "pods": [{"name": "checkout-1"}],
+                },
+            )
+
+            coordinator._mark_unobserved_applications({"cluster_name": "cluster-a"}, set())
+
+            application = store.get_application("cluster-a:shop:checkout")
+            self.assertEqual(application["status"], "not_observed")
+            self.assertEqual(application["source_config"]["pods"], [])
+            self.assertEqual(application["source_config"]["metrics"]["status"], "not_observed")
+
 
 if __name__ == "__main__":
     unittest.main()

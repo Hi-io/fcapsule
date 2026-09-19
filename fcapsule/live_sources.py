@@ -134,8 +134,10 @@ class LiveSourceCoordinator:
         grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
         for pod in pods:
             grouped[(pod["namespace"], pod["workload"])].append(pod)
+        observed_app_ids: set[str] = set()
         for (namespace, workload), workload_pods in grouped.items():
             app_id = _app_id(config["cluster_name"], namespace, workload)
+            observed_app_ids.add(app_id)
             metric_pods = sum((namespace, item["name"]) in prometheus_inventory for item in workload_pods)
             recent_logs = sum(log_counts.get((namespace, item["name"]), 0) for item in workload_pods)
             pod_records = [
@@ -168,6 +170,7 @@ class LiveSourceCoordinator:
                 "healthy" if healthy else "degraded",
                 source_config,
             )
+        self._mark_unobserved_applications(config, observed_app_ids)
 
         alerts = prometheus.active_alerts() if probes["targets"]["prometheus"].get("ok") else []
         captured: list[dict[str, Any]] = []
@@ -199,6 +202,33 @@ class LiveSourceCoordinator:
             "captured": captured,
             "configuration": config,
         }
+
+    def _mark_unobserved_applications(self, config: dict[str, Any], observed_app_ids: set[str]) -> None:
+        """Keep incident history while making current discovery coverage truthful."""
+
+        for application in self.store.list_applications():
+            if application["cluster"] != config["cluster_name"] or application["app_id"] in observed_app_ids:
+                continue
+            source_config = application.get("source_config", {})
+            if source_config.get("configuration", {}).get("adapter") != "kubernetes":
+                continue
+            updated = json.loads(json.dumps(source_config))
+            for domain in ("metrics", "logs", "configuration"):
+                if domain in updated:
+                    updated[domain]["status"] = "not_observed"
+            updated.get("metrics", {}).update({"pods_observed": 0})
+            updated.get("logs", {}).update({"recent_documents": 0})
+            updated.get("configuration", {}).update({"pods_visible": 0})
+            updated["pods"] = []
+            self.store.upsert_application(
+                application["app_id"],
+                application["name"],
+                application["namespace"],
+                application["cluster"],
+                application["environment"],
+                "not_observed",
+                updated,
+            )
 
     def _capture_case(
         self,
