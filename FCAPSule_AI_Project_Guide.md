@@ -133,6 +133,17 @@ The Operations view must make these questions answerable at a glance:
 - Which models are enabled?
 - What is the strongest evidence in a selected capsule?
 
+### Targets
+
+The Targets view must make source operation explicit:
+
+- Are Prometheus, OpenSearch, and the Kubernetes API reachable?
+- Which namespaces are in scope?
+- Which pods are currently visible and mapped to applications?
+- Are metrics, recent logs, and referenced configuration observed for each workload?
+- When did the last discovery run complete?
+- Can an operator test and update source settings without rebuilding the deployment?
+
 ### External Workload Integration
 
 The product must accept a normalized bounded incident case from a source adapter or

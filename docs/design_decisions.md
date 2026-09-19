@@ -8,11 +8,11 @@ The reference implementation uses `argparse`, the standard library HTTP server, 
 
 SQLite is sufficient for one local process and makes multi-application state durable. Raw telemetry remains in observability sources. This avoids turning FCAPSule into a second telemetry warehouse.
 
-## Two Views, One Control Plane
+## Three Views, One Control Plane
 
 Operations is the product surface. The source/test harness is now the separate FCAPSule
-Lab project, which exports the same normalized incident contract used by future
-live-source adapters. Keeping the contract shared while keeping runtime ownership
+Lab project, which exports the same normalized incident contract used by live-source
+adapters. Targets configures production data sources; AI settings configures optional cited reasoning. Keeping the contract shared while keeping runtime ownership
 separate prevents the product from becoming a simulator or container controller.
 
 ## Deterministic Core

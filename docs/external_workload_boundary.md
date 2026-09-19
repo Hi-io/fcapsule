@@ -36,9 +36,9 @@ records the incident with `fcapsule ingest-case`. It does not copy source retent
 systems or keep a permanent raw log/trace mirror.
 
 For local verification, FCAPSule Lab queries its independent Prometheus instance and
-Docker's structured stdout logs to export a case. A future production adapter should
-replace this export with read-only bounded API queries and source references while
-preserving the same normalized contract.
+Docker's structured stdout logs to export a case. In Kubernetes, the implemented live
+adapters perform read-only bounded queries against Prometheus and OpenSearch and resolve
+pods plus referenced ConfigMaps through the Kubernetes API. Both paths preserve the same normalized contract.
 
 ## AI Configuration Boundary
 
@@ -54,5 +54,5 @@ an unverified model name.
 The separation makes each repository independently useful and testable. FCAPSule can be
 deployed beside real observability systems without shipping demo services. FCAPSule Lab
 can evolve as a reproducible adapter fixture without acquiring product state or access to
-production credentials. Future contributors can add source adapters, authentication,
-durable object storage, RBAC, and Kubernetes deployment without altering this boundary.
+production credentials. Future work can add other source adapters, authentication,
+durable object storage, and distributed execution without altering this boundary.

@@ -10,6 +10,7 @@ Default URLs:
 
 - `http://127.0.0.1:8765/console`
 - `http://127.0.0.1:8765/settings`
+- `http://127.0.0.1:8765/targets`
 
 Use `--host`, `--port`, and `--state-dir` to change the binding or storage location.
 
@@ -24,6 +25,14 @@ The Operations view shows:
 - application coverage across FM, PM, logs, and trace access.
 
 The report distinguishes its evidence by domain: FM alert records, PM trend lines with normal/peak values, and expandable anonymized log patterns. Compression, signal preservation, grounding, runtime, and model-evaluation details are available only inside the collapsed engineering diagnostics section. They support maintainers and evaluation work; they are not the first information presented to an on-call responder.
+
+## Targets View
+
+Targets is the live-source control surface. It shows connection health for Prometheus, OpenSearch, and the Kubernetes API and lets an operator change source URLs, the OpenSearch index pattern, cluster identity, namespace scope, poll interval, incident window, and automatic report generation. **Test connections** checks credentials and reachability without changing settings; **Sync now** performs immediate discovery and alert polling.
+
+Application coverage is current inventory, not a permanent registration claim. A discovered workload is mapped by cluster, namespace, workload, and pod. If it disappears, historical incidents remain available but the application is marked `not observed` and its current pod list is cleared.
+
+For Kubernetes installation and source prerequisites, use `docs/kubernetes_deployment.md`.
 
 ### Optional AI Briefing
 
@@ -104,7 +113,7 @@ Capsule creation always completes with deterministic detection and evidence-grou
 
 Open **AI settings** in the console to choose the DeepSeek-compatible model and
 completion budget for an optional cited briefing. Paste a replacement API key only when
-necessary. It is saved to the local `.env` file and never returned to the browser or
+necessary. It is saved to the configured state directory's `.env` file and never returned to the browser or
 written to SQLite. The non-secret selection is persisted in `.fcapsule/ai-settings.json`.
 
 ## Local Files
@@ -113,6 +122,8 @@ written to SQLite. The non-secret selection is persisted in `.fcapsule/ai-settin
 .fcapsule/
   fcapsule.db
   ai-settings.json
+  source-settings.json
+  live-cases/<incident-id>/
   capsules/<incident-id>/
 ```
 
@@ -121,6 +132,8 @@ The directory is ignored by Git. To preserve results outside local development, 
 ## Troubleshooting
 
 - **Port already in use:** start with `--port 8766`.
-- **No incidents appear:** validate and ingest a normalized external case first.
+- **No incidents appear:** check Targets, namespace scope, and active Prometheus alerts; external cases can also be ingested manually.
+- **Pod is visible but logs are waiting:** confirm Filebeat has indexed recent documents with `kubernetes.namespace` and `kubernetes.pod.name` keyword fields.
+- **Kubernetes target fails:** verify the ServiceAccount token/CA mount and the `fcapsule-observer` ClusterRoleBinding.
 - **Build report is unavailable:** wait for the active capsule job to finish before starting another one.
 - **Trace shows zero retained spans:** this is expected; only source availability is retained.

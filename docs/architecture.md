@@ -3,15 +3,15 @@
 ## Runtime Flow
 
 ```text
-Alert trigger or explicit incident window
+Prometheus firing alert or explicit incident window
                   |
                   v
-        Application registry (SQLite)
+   Kubernetes discovery + application registry
                   |
                   v
 +------------------------------------------------+
 | Read-only source adapters                      |
-| FM | PM | logs | topology/config | trace probe |
+| Prometheus | OpenSearch | Kubernetes | trace probe |
 +----------------------+-------------------------+
                        |
                        v
@@ -41,7 +41,7 @@ Alert trigger or explicit incident window
 
 ## Control Plane
 
-`ControlPlane` coordinates background capsule jobs and exposes an immutable snapshot to the HTTP API. `FCAPSuleStore` persists application, incident, capsule metadata, and non-secret model preferences in SQLite. External sources submit a normalized bounded case through the ingestion boundary. An incident report is generated from deterministic evidence before the capsule is marked ready; offline model evaluation cannot block that report. A separately requested AI briefing is a compact, citation-checked derivative that may be archived only after validation.
+`ControlPlane` coordinates source polling and background capsule jobs and exposes an immutable snapshot to the HTTP API. `LiveSourceCoordinator` discovers Kubernetes workloads, correlates pod identity across Prometheus and OpenSearch, polls firing alerts, and captures one bounded normalized case per new alert. `FCAPSuleStore` persists application, incident, capsule metadata, source settings, and non-secret model preferences in SQLite. External sources may also submit a normalized case through the ingestion boundary. An incident report is generated from deterministic evidence before optional AI reasoning.
 
 ## Source Ownership
 
@@ -55,33 +55,21 @@ FCAPSule owns derived evidence. Observability systems own raw telemetry.
 
 ## Deployment Shape
 
-The current service is single-node and local-first:
-
-```text
-python process
-  |-- HTTP/API server
-  |-- background jobs
-  |-- SQLite metadata
-  |-- local derived artifacts
-  `-- read-only adapter calls
-```
-
-The target Kubernetes shape is:
+The current Kubernetes deployment is single-replica:
 
 ```text
 FCAPSule pod
-  |-- API/UI container
-  |-- worker process or queue consumer
-  |-- mounted configuration
-  |-- secret references
-  |-- PostgreSQL metadata
-  `-- object storage for derived capsules
+  |-- HTTP/API server
+  |-- source polling and capsule threads
+  |-- SQLite + derived artifacts on a PVC
+  |-- ConfigMap source configuration
+  |-- optional Secret model credential
+  |-- read-only ServiceAccount
        |
-       +-- Alertmanager
        +-- Prometheus
        +-- OpenSearch
        +-- Kubernetes API
-       `-- trace backend (query on demand)
+       `-- future trace backend (query on demand)
 ```
 
-Distributed workers and Kafka-triggered scheduling are future scaling work. They do not change the normalized case or capsule contracts.
+The ClusterRole can get/list/watch pods, ConfigMaps, and namespaces. It cannot read Secrets. The default Service is a NodePort for local-cluster development. Distributed workers, PostgreSQL, object storage, ingress authentication, multi-cluster registration, and queue-backed scheduling are future scaling work; they do not change the normalized case or capsule contracts.

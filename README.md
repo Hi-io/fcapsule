@@ -6,9 +6,10 @@ It is not another root-cause chatbot and it does not replace Prometheus, OpenSea
 
 ## Product Surfaces
 
-FCAPSule provides one local control plane with two operator views:
+FCAPSule provides one control plane with three operator views:
 
 - **Operations** (`/console`) starts with an incident queue. A report expands beneath its incident and separates FM alerts, PM trends, anonymized log patterns, urgent retention actions, exports, and application coverage.
+- **Targets** (`/targets`) configures and tests Prometheus, OpenSearch, and Kubernetes API access, controls namespace scope and polling, and reports current discovery coverage.
 - **AI settings** (`/settings`) selects the optional cited-briefing model. The provider key remains local in `.env` and is never returned through the console or stored in SQLite.
 
 The CLI remains fully usable without the web application.
@@ -45,8 +46,23 @@ Open:
 
 - Operations: `http://127.0.0.1:8765/console`
 - AI settings: `http://127.0.0.1:8765/settings`
+- Targets: `http://127.0.0.1:8765/targets`
 
 The control plane stores local metadata under `.fcapsule/`. That directory is ignored by Git.
+
+### Run in Kubernetes with live sources
+
+FCAPSule can run inside a cluster and discover workloads through its mounted ServiceAccount. The provided deployment connects to Prometheus and OpenSearch over their in-cluster service names and reads pods plus referenced ConfigMaps through read-only RBAC.
+
+```bash
+kubectl apply -f deploy/kubernetes/local-single-node-storage.yaml
+kubectl apply -f deploy/kubernetes/prometheus-rule.yaml
+kubectl apply -f deploy/kubernetes/fcapsule.yaml
+```
+
+For development, apply `deploy/kubernetes/dev-overlay.yaml` to the Deployment after the base manifest. It installs the current `master` source into an `emptyDir`, so an iteration only requires a push and `kubectl rollout restart deployment/fcapsule -n fcapsule`.
+
+The default NodePort is `http://<node-ip>:30765`. Edit the `fcapsule-runtime` ConfigMap or use **Targets** to change URLs, namespaces, polling, and incident-window settings. See `docs/kubernetes_deployment.md` for RBAC, secrets, storage, verification, and production notes.
 
 ### Ingest an externally captured case
 
@@ -144,11 +160,11 @@ The suite covers validation, processing, domain-balanced selection, hypothesis g
 model comparison scoring, external-case ingestion, SQLite control-plane state, HTTP
 routes, and the full capsule pipeline.
 
-## Deployment Direction
+## Deployment
 
-The local control plane is the reference implementation. The intended deployment model is a service or Kubernetes pod configured with read-only access to observability APIs and durable metadata storage. Adapters normalize OpenSearch, Prometheus, Alertmanager, topology, and trace-source responses into the same incident contract used by `ingest-case`.
+The reference deployment runs as a Kubernetes pod with read-only access to Prometheus, OpenSearch, and the Kubernetes API. Prometheus firing alerts trigger bounded capture; range queries provide PM data; OpenSearch supplies Filebeat-indexed logs; and the Kubernetes API supplies workload identity, PodSpec state, and referenced ConfigMaps. Secrets are never read as configuration evidence.
 
-Raw telemetry remains in the source systems. The pod retains application registrations, incident metadata, responder reports, capsules, evaluation results, and source references. See `docs/architecture.md`, `docs/production_product_requirements.md`, and `ROADMAP.md` for the distributed path.
+Raw telemetry remains in the source systems. The pod retains application registrations, incident metadata, responder reports, capsules, evaluation results, and source references on its state volume. SQLite and in-process workers remain single-replica constraints; PostgreSQL, object storage, durable jobs, authentication, and multi-cluster control are later scaling work.
 
 ## Documentation
 
@@ -158,6 +174,7 @@ Raw telemetry remains in the source systems. The pod retains application registr
 - `DATA_SCHEMA.md`: normalized case, store, and capsule contracts.
 - `EVALUATION_PLAN.md`: objective metrics and model-comparison protocol.
 - `docs/operations.md`: CLI and web operating guide.
+- `docs/kubernetes_deployment.md`: live-source Kubernetes deployment and verification runbook.
 - `docs/external_workload_boundary.md`: boundary between FCAPSule and workloads such as FCAPSule Lab.
 - `docs/architecture.md`: component and deployment architecture.
 - `docs/data_privacy.md`: collection, anonymization, and retention policy.

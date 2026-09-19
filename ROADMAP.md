@@ -1,16 +1,15 @@
 # FCAPSule Roadmap
 
-FCAPSule 1.0 provides a complete local control plane, a realistic regression lab, domain-balanced evidence capsules, model profiles, and two operational web views. The remaining roadmap focuses on live integrations, deployment, scale, and broader evaluation.
+FCAPSule provides a single-replica Kubernetes control plane, live Prometheus/OpenSearch/Kubernetes adapters, domain-balanced evidence capsules, model profiles, and three operational web views. The remaining roadmap focuses on hardening, additional integrations, scale, and broader evaluation.
 
-## 1. Live Source Adapters
+## 1. Source Hardening and Expansion
 
 - Alertmanager webhook receiver and alert query support;
-- Prometheus range-query client with query templates;
-- OpenSearch bounded log search with source-field mapping;
-- Kubernetes workload/topology resolver;
 - Tempo, Jaeger, or OpenTelemetry trace availability and on-demand query;
 - Kafka/OpenSearch indexing-lag metadata;
-- credential references, timeouts, retries, and per-source health.
+- bearer token, TLS client certificate, and external Secret references;
+- retries, backoff, circuit breaking, pagination, and source rate limits;
+- multi-cluster target registry and per-source query diagnostics.
 
 ## 2. Service Deployment
 
@@ -18,8 +17,8 @@ FCAPSule 1.0 provides a complete local control plane, a realistic regression lab
 - background job queue;
 - PostgreSQL metadata;
 - object storage for immutable capsule artifacts;
-- Kubernetes manifests or Helm chart;
-- readiness, liveness, and metrics endpoints;
+- Helm chart and environment-specific overlays;
+- internal FCAPSule Prometheus metrics endpoint;
 - role-based access and audit logging;
 - retention policies and integrity hashes.
 
@@ -46,7 +45,7 @@ FCAPSule 1.0 provides a complete local control plane, a realistic regression lab
 ## 5. Operations Experience
 
 - application registration editor;
-- live adapter status and query diagnostics;
+- source query history and detailed diagnostics;
 - incident filters and search;
 - capsule comparison and version history;
 - downloadable reports and shareable links;
@@ -73,4 +72,3 @@ FCAPSule 1.0 provides a complete local control plane, a realistic regression lab
 - high-availability metadata and artifact storage.
 
 Autonomous remediation remains outside the core roadmap. FCAPSule may feed downstream AIOps systems, but any action must use a separate approval and safety boundary.
-

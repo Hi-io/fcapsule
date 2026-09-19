@@ -2,13 +2,14 @@
 
 ## Normalized Incident Case
 
-Every adapter produces a directory with four required files and one optional regression note:
+Every adapter produces a directory with four required files. Kubernetes configuration evidence and regression notes are optional:
 
 ```text
 metadata.yaml
 alert.json
 prometheus_metrics.json
 opensearch_logs.json
+kubernetes_config.json
 expected_notes.md
 ```
 
@@ -98,6 +99,34 @@ Each series requires at least two numeric points.
 
 Field names can be mapped in metadata.
 
+### `kubernetes_config.json`
+
+```json
+{
+  "items": [
+    {
+      "kind": "PodSpec",
+      "name": "checkout-api-7d9f",
+      "namespace": "commerce",
+      "images": ["example/checkout:1.4.0"],
+      "configmap_refs": ["checkout-runtime"],
+      "ready": false
+    },
+    {
+      "kind": "ConfigMap",
+      "name": "checkout-runtime",
+      "namespace": "commerce",
+      "resource_version": "19422",
+      "content_hash": "f12c89a6d70e4a13",
+      "keys": ["SCHEMA_EPOCH", "WORKER_COUNT"],
+      "data": {"SCHEMA_EPOCH": "41", "WORKER_COUNT": "24"}
+    }
+  ]
+}
+```
+
+FCAPSule reads only ConfigMaps referenced by the affected pod. Keys that look credential-bearing are redacted, and Kubernetes Secrets are outside the RBAC contract and are never collected.
+
 ### `expected_notes.md`
 
 Regression cases may list diagnostic signal groups that should survive selection. These notes are not final root-cause truth. They define review intent and make missing evidence inspectable.
@@ -132,6 +161,7 @@ Raw spans are never part of the normalized case archive or evidence archive. A l
 - `selection_summary`;
 - `log_summary` and `log_templates`;
 - `metric_anomalies`;
+- retained configuration evidence when available;
 - `hypotheses`;
 - `missing_evidence`;
 - `next_steps`;
