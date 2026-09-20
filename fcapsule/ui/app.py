@@ -25,9 +25,9 @@ HTML = """<!doctype html>
   <header class="product-bar">
     <a class="wordmark" href="/console"><span>FCAPS</span>ule</a>
     <nav aria-label="Primary">
-      <a href="/console" data-nav="console">Operations</a>
-      <a href="/targets" data-nav="targets">Targets</a>
-      <a href="/settings" data-nav="settings">Settings</a>
+      <a href="/console" data-nav="console"><span class="ui-icon" data-icon="activity" aria-hidden="true"></span>Operations</a>
+      <a href="/targets" data-nav="targets"><span class="ui-icon" data-icon="network" aria-hidden="true"></span>Targets</a>
+      <a href="/settings" data-nav="settings"><span class="ui-icon" data-icon="settings-2" aria-hidden="true"></span>Settings</a>
     </nav>
     <div class="system-state"><i></i><span id="system-state">Ready</span></div>
   </header>
@@ -38,8 +38,9 @@ HTML = """<!doctype html>
 
 
 ASSET_ROOT = Path(__file__).with_name("assets")
-CSS = (ASSET_ROOT / "app.css").read_text(encoding="utf-8")
+CSS = (ASSET_ROOT / "app.css").read_text(encoding="utf-8") + "\n" + (ASSET_ROOT / "visual.css").read_text(encoding="utf-8")
 JS = (ASSET_ROOT / "app.js").read_text(encoding="utf-8")
+ICONS = {path.name: path.read_text(encoding="utf-8") for path in (ASSET_ROOT / "icons").glob("*.svg")}
 
 
 class FCAPSuleHTTPServer(ThreadingHTTPServer):
@@ -100,6 +101,9 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             return
         if path == "/assets/app.js":
             self._text(JS, "text/javascript; charset=utf-8")
+            return
+        if path.startswith("/assets/icons/") and path.removeprefix("/assets/icons/") in ICONS:
+            self._text(ICONS[path.removeprefix("/assets/icons/")], "image/svg+xml")
             return
         if path == "/api/state":
             self._json(self.server.control_plane.snapshot())

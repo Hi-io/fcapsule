@@ -11,6 +11,8 @@ const bytes = value => {
 const safe = value => String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
 const shortTime = value => value ? new Date(value).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '--';
 document.querySelector(`[data-nav="${view}"]`)?.classList.add('active');
+document.querySelector(`[data-nav="${view}"]`)?.setAttribute('aria-current', 'page');
+document.body.dataset.view = view;
 let lastState = null;
 let selectedReport = null;
 let selectedEpisodeId = null;
@@ -42,8 +44,10 @@ function renderPreservingFocus(render) {
   }
 }
 function disclosure(id, title, content, count = '') {
-  return `<details class="evidence-disclosure" data-disclosure="${safe(id)}" ${openDisclosures.has(id) ? 'open' : ''}><summary id="disclosure-${safe(id)}">${safe(title)}${count !== '' ? `<span class="detail-count">${safe(count)}</span>` : ''}</summary><div class="disclosure-body">${content}</div></details>`;
+  const domainIcon = {'domain-alerts':'bell-ring','domain-logs':'logs','domain-metrics':'chart-no-axes-combined','domain-config':'file-code-2','domain-coverage':'layers','diagnostics':'settings-2'}[id];
+  return `<details class="evidence-disclosure" data-disclosure="${safe(id)}" ${openDisclosures.has(id) ? 'open' : ''}><summary id="disclosure-${safe(id)}"><span class="disclosure-title">${domainIcon ? icon(domainIcon) : ''}<span>${safe(title)}</span></span>${count !== '' ? `<span class="detail-count">${safe(count)}</span>` : ''}</summary><div class="disclosure-body">${content}</div></details>`;
 }
+function icon(name) { return `<span class="ui-icon" data-icon="${safe(name)}" aria-hidden="true"></span>`; }
 function reportId() { return selectedReport?.incident?.incident_id || selectedReport?.report?.incident?.incident_id; }
 function allEpisodes(state = lastState) { return [...state.overview.episodes, ...state.overview.archived_episodes]; }
 function updateLocation() {
@@ -135,9 +139,9 @@ function renderTargets(state) {
     return `<article class="target"><h3>${label}<span id="target-status-${name}">${status(item.ok == null ? 'not tested' : ok ? 'healthy' : 'error')}</span></h3>${item.error ? `<p class="target-error">${safe(item.error)}</p>` : `<dl>${details.map(row => `<dt>${safe(row[0])}</dt><dd>${safe(row[1])}</dd>`).join('')}</dl>`}</article>`;
   };
   app.innerHTML = `
-    <div class="page-head"><div><div class="eyebrow">Source connections</div><h1>Targets</h1><p>Connect the cluster data used for discovery and incident capture.</p></div><div class="actions"><button class="secondary" id="test-targets">Test connections</button><button id="sync-targets" ${state.running ? 'disabled' : ''}>Sync now</button></div></div>
-    <section class="target-grid">${targetCard('prometheus','Prometheus')}${targetCard('opensearch','OpenSearch')}${targetCard('kubernetes','Kubernetes API')}</section>
-    <div class="grid-2"><section class="sheet"><div class="sheet-head"><h2>Connection settings</h2><span class="queue-note">${config.enabled ? 'Automatic polling enabled' : 'Manual synchronization'}</span></div><div class="sheet-body">
+    <div class="page-head"><div><div class="eyebrow">Source connections</div><h1>Targets</h1><p>Connect the cluster data used for discovery and incident capture.</p></div><div class="actions"><button class="secondary" id="configure-targets">${icon('settings-2')}Configure</button><button class="secondary" id="test-targets">Test connections</button><button id="sync-targets" ${state.running ? 'disabled' : ''}>Sync now</button></div></div>
+    <div class="targets-workspace"><section class="target-grid">${targetCard('prometheus','Prometheus')}${targetCard('opensearch','OpenSearch')}${targetCard('kubernetes','Kubernetes API')}</section>
+    <details class="connection-settings" data-disclosure="connections" ${openDisclosures.has('connections') || window.targetNotice || !config.prometheus_url ? 'open' : ''}><summary><span class="disclosure-title">${icon('settings-2')}<span>Connection settings</span></span><span class="queue-note">${config.enabled ? 'Automatic polling enabled' : 'Manual synchronization'}</span></summary><section class="sheet"><div class="sheet-body">
       <div class="field"><label for="prometheus-url">Prometheus URL</label><input id="prometheus-url" value="${safe(config.prometheus_url)}"></div>
       <div class="field"><label for="opensearch-url">OpenSearch URL</label><input id="opensearch-url" value="${safe(config.opensearch_url)}"></div>
       <div class="form-pair"><div class="field"><label for="opensearch-index">Log index pattern</label><input id="opensearch-index" value="${safe(config.opensearch_index)}"></div><div class="field"><label for="cluster-name">Cluster name</label><input id="cluster-name" value="${safe(config.cluster_name)}"></div></div>
@@ -148,12 +152,20 @@ function renderTargets(state) {
       <label class="toggle" style="margin-top:8px"><input id="auto-reports" type="checkbox" ${config.auto_build_reports ? 'checked' : ''}>Build a responder report after capture</label>
       ${window.targetNotice ? `<p class="notice">${safe(window.targetNotice)}</p>` : ''}
       <div class="actions"><button id="save-targets">Save settings</button></div>
-    </div></section>
-    <section class="sheet"><div class="sheet-head"><h2>Discovery</h2><span class="queue-note" id="discovery-time">${state.sources.last_sync_at ? formatDate(state.sources.last_sync_at) : 'Not synchronized'}</span></div><div class="sheet-body">
+    </div></section></details>
+    <section class="sheet discovery-section"><div class="sheet-head"><h2>Discovery</h2><span class="queue-note" id="discovery-time">${state.sources.last_sync_at ? formatDate(state.sources.last_sync_at) : 'Not synchronized'}</span></div><div class="sheet-body">
       <div class="kpis" style="grid-template-columns:repeat(3,1fr);margin:0"><div class="kpi"><span>Pods visible</span><strong id="pods-visible">${state.sources.pods_visible || 0}</strong></div><div class="kpi"><span>Applications</span><strong id="applications-visible">${state.sources.applications_visible || 0}</strong></div><div class="kpi"><span>Active alerts</span><strong id="active-alerts">${state.sources.active_alerts || 0}</strong></div></div>
       ${state.sources.error ? `<p class="target-error">${safe(state.sources.error)}</p>` : '<p class="queue-note" style="margin-top:12px">Discovery maps Kubernetes pods to Prometheus metrics, OpenSearch logs, and referenced configuration.</p>'}
-    </div></section></div>
-    <section class="sheet" style="margin-top:14px"><div class="sheet-head"><h2>Application coverage</h2><span class="queue-note" id="coverage-count">${observedApps.length} observed applications</span></div><div id="coverage-content">${applicationTable(observedApps)}</div></section>`;
+    </div></section>
+    <section class="sheet coverage-section"><div class="sheet-head"><h2>Application coverage</h2><span class="queue-note" id="coverage-count">${observedApps.length} observed applications</span></div><div id="coverage-content">${applicationTable(observedApps)}</div></section></div>`;
+  document.querySelector('.targets-workspace').append(document.querySelector('.connection-settings'));
+  document.querySelector('#configure-targets').addEventListener('click', () => {
+    const settings = document.querySelector('.connection-settings');
+    settings.open = true;
+    openDisclosures.add('connections');
+    settings.scrollIntoView({block:'start', behavior:matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'});
+    settings.querySelector('summary').focus({preventScroll:true});
+  });
   document.querySelector('#save-targets').addEventListener('click', saveTargets);
   document.querySelector('#test-targets').addEventListener('click', testTargets);
   document.querySelector('#sync-targets').addEventListener('click', syncTargets);
@@ -165,11 +177,11 @@ function renderSettings(state) {
   const keyState = ai.api_key_configured ? 'Automatic analysis enabled' : 'Provider key required';
   app.innerHTML = `
     <div class="page-head"><div><div class="eyebrow">Runtime configuration</div><h1>Settings</h1><p>Manage retention and automatic incident analysis.</p></div></div>
-    <div class="grid-2"><section class="sheet"><div class="sheet-head"><h2>Incident lifecycle</h2><span class="queue-note">Automatic cleanup</span></div><div class="sheet-body">
+    <div class="settings-layout"><section class="sheet"><div class="sheet-head"><h2>${icon('archive')}Incident lifecycle</h2><span class="queue-note">Automatic cleanup</span></div><div class="sheet-body">
       <div class="field"><label for="retention-days">Incident retention (days)</label><input id="retention-days" type="number" min="1" max="3650" value="${safe(state.settings.incident_retention_days)}"><small>Active and archived incidents older than this are permanently removed with their managed reports and capsules. Default: 30 days.</small></div>
       ${window.generalSettingsNotice ? `<p class="notice">${safe(window.generalSettingsNotice)}</p>` : ''}
       <div class="actions"><button id="save-general-settings">Save retention</button></div>
-    </div></section><section class="sheet"><div class="sheet-head"><h2>AI briefing</h2><span class="queue-note">${safe(keyState)}</span></div><div class="sheet-body">
+    </div></section><section class="sheet"><div class="sheet-head"><h2>${icon('activity')}AI briefing</h2><span class="queue-note">${safe(keyState)}</span></div><div class="sheet-body">
       <div class="field"><label for="ai-provider">Provider</label><input id="ai-provider" value="DeepSeek-compatible" disabled></div>
       <div class="field"><label for="ai-model">Model ID</label><input id="ai-model" list="ai-model-options" value="${safe(ai.model)}"><datalist id="ai-model-options">${options}</datalist><small>Configured models are available here; a compatible model ID may also be entered.</small></div>
       <div class="field"><label for="ai-max-tokens">Maximum completion tokens</label><input id="ai-max-tokens" type="number" min="256" max="16000" value="${safe(ai.max_tokens)}"></div>
@@ -191,7 +203,7 @@ function applicationTable(items) {
   });
   return [...groups].sort(([a],[b]) => a.localeCompare(b)).map(([key, apps]) => `
     <details class="namespace-group" data-namespace="${safe(key)}" ${closedNamespaces.has(key) ? '' : 'open'}>
-    <summary><strong>${safe(key)}</strong><span>${apps.length} applications · ${apps.reduce((n,item)=>n+(item.source_config?.pods?.length || 0),0)} pods</span></summary>
+    <summary><span class="namespace-heading">${icon('layers')}<span><small>${safe(apps[0].cluster)}</small><strong>${safe(apps[0].namespace)}</strong></span></span><span>${apps.length} app${apps.length === 1 ? '' : 's'} · ${apps.reduce((n,item)=>n+(item.source_config?.pods?.length || 0),0)} pods</span></summary>
     <div class="table-wrap"><table><thead><tr><th>Application</th><th>State</th><th>Pods</th><th>Telemetry</th><th>Latest capture</th></tr></thead><tbody>${apps.map(item => `
     <tr><td><strong>${safe(item.name)}</strong><small class="cell-note">${safe(item.environment)}</small></td><td>${status(item.status)}</td>
     <td>${disclosure('pods-' + item.app_id, (item.source_config?.pods?.length || 0) + ' observed', `<div class="pod-list">${(item.source_config?.pods || []).map(pod=>`<span class="pod-line"><code>${safe(pod.name)}</code>${status(pod.ready ? 'ready' : pod.phase || 'unknown')}</span>`).join('')}</div>`)}</td>
