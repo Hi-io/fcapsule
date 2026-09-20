@@ -29,6 +29,7 @@ HTML = """<!doctype html>
     <nav aria-label="Primary">
       <a href="/console" data-nav="console"><span class="ui-icon" data-icon="activity" aria-hidden="true"></span>Operations</a>
       <a href="/targets" data-nav="targets"><span class="ui-icon" data-icon="network" aria-hidden="true"></span>Targets</a>
+      <a href="/patterns" data-nav="patterns"><span class="ui-icon" data-icon="layers" aria-hidden="true"></span>Patterns</a>
       <a href="/settings" data-nav="settings"><span class="ui-icon" data-icon="settings-2" aria-hidden="true"></span>Settings</a>
     </nav>
     <div class="system-state" role="status"><i></i><span id="system-state">Connecting</span></div>
@@ -96,7 +97,7 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             self.send_header("Location", "/console")
             self.end_headers()
             return
-        if path in {"/console", "/targets", "/settings"}:
+        if path in {"/console", "/targets", "/patterns", "/settings"}:
             self._text(HTML, "text/html; charset=utf-8")
             return
         if path == "/assets/app.css":

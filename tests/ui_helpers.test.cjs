@@ -61,6 +61,7 @@ test('closed episodes do not duplicate the selected report controls', () => {
     lastState: { overview: { applications: [] } }, selectedEpisodeId: 'second',
     selectedReport: {}, reportLoading: false, reportError: '',
     safe: value => String(value ?? ''), status: value => value, formatDate: value => value, relativeTime: value => value,
+    resourceLabel: item => item.app_id || 'application', recurrenceLabel: () => '',
     episodeContext: () => '<select id="signal-report"></select>',
     reportPanel: () => '<div role="tablist"></div>',
   });
@@ -87,11 +88,26 @@ test('domain disclosures retain native semantics, count and decorative icon', ()
 
 test('episode overview does not imply it is the selected individual alert', () => {
   const context = helper('episodeContext', 'formatDate', {
-    reportId:()=> 'one', reportTab:'overview',
+    reportId:()=> 'one', reportTab:'overview', safe:value=>String(value ?? ''), relativeTime:value=>value, icon:()=>'',
   });
-  const html = context({signal_count:2, signals:[{incident_id:'one'},{incident_id:'two'}]});
-  assert.match(html, /Episode investigation/);
+  const html = context({episode_id:'episode', reference:'EP-ONE', signal_count:2, status:'resolved', signals:[{incident_id:'one',reference:'INC-ONE'},{incident_id:'two'}]});
+  assert.match(html, /INC-ONE/);
+  assert.match(html, /2 captured alerts/);
   assert.doesNotMatch(html, /select/);
+});
+
+test('queue filters can find a stable incident reference without hiding unrelated history', () => {
+  const filter = helper('filteredEpisodes', 'queueFiltersPanel', {
+    queueFilters:{namespace:'commerce',scope:'',status:'resolved',period:'',query:'inc-ab'},
+    resourceLabel:(item, application) => item.resource?.name || application?.name || item.app_id,
+  });
+  const applications = new Map([['orders',{name:'Orders',namespace:'commerce'}],['other',{name:'Other',namespace:'platform'}]]);
+  const rows = filter([
+    {reference:'EP-AB12',app_id:'orders',status:'resolved',started_at:new Date().toISOString(),resource:{name:'orders-api'},signals:[{reference:'INC-AB12',incident_id:'incident-one'}]},
+    {reference:'EP-CD34',app_id:'other',status:'resolved',started_at:new Date().toISOString(),resource:{name:'other-api'},signals:[{reference:'INC-CD34',incident_id:'incident-two'}]},
+  ], applications);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].reference, 'EP-AB12');
 });
 
 test('investigation citations are escaped and point to unique observations', () => {

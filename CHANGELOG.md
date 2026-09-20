@@ -4,6 +4,15 @@
 
 ### Changed
 
+- Added stable short incident/episode references, shareable direct report links,
+  compact queue filters, a focused Operations triage strip and a Patterns view
+  for retained recurring issues. Recurrence is resource- and alert-aware; it does
+  not merge incidents or claim a common root cause.
+- Added a bounded historical-episode investigator tool. Recurring assessments now
+  compare one deterministic prior capture with cited retained evidence, while a
+  prior model assessment remains a hypothesis rather than proof.
+- Prioritized the affected Kubernetes resource in Operations, including node
+  identity for node alerts instead of the exporter collector name.
 - Enabled reasoning in the reserved evidence-review call and added explicit unit, sampled-peak and event-order checks after a live investigation retained an invalid memory comparison. This remains model-assisted review, not numerical proof.
 - Added bounded same-namespace dependency investigation through declared Kubernetes Services after external workload tests exposed upstream-only diagnoses.
 - Prioritized log matches around the latest episode alert, separated post-alert metric summaries, and retained MySQL error codes and exporter reachability gaps.

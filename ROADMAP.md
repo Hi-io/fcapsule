@@ -1,6 +1,6 @@
 # FCAPSule Roadmap
 
-FCAPSule provides a single-replica Kubernetes control plane, live Prometheus/OpenSearch/Kubernetes adapters, domain-balanced evidence capsules, model profiles, and three operational web views. The remaining roadmap focuses on hardening, additional integrations, scale, and broader evaluation.
+FCAPSule provides a single-replica Kubernetes control plane, live Prometheus/OpenSearch/Kubernetes adapters, domain-balanced evidence capsules, model profiles, and four operational web views. The remaining roadmap focuses on hardening, additional integrations, scale, and broader evaluation.
 
 ## 1. Source Hardening and Expansion
 
@@ -29,7 +29,7 @@ FCAPSule provides a single-replica Kubernetes control plane, live Prometheus/Ope
 - semantic log embeddings as an optional model;
 - stronger contradiction handling;
 - configuration/deployment change correlation;
-- cross-capsule similarity and recurrence detection;
+- semantic similarity beyond deterministic recurrence matching;
 - explicit evidence exclusion reasons in the UI;
 - reviewer feedback and relevance labels.
 
@@ -37,7 +37,8 @@ FCAPSule provides a single-replica Kubernetes control plane, live Prometheus/Ope
 
 Implemented: joint episode assessment, fixed read-only tool dispatch, incremental
 observation retention, peer/preceding-window comparisons, omitted-log inspection,
-competing hypotheses, bounded calls and provider-reported token usage. These are
+bounded retained-history comparison, competing hypotheses, bounded calls and
+provider-reported token usage. These are
 described in [AI techniques](docs/ai_investigation_techniques.md). Remaining work:
 
 - provider-neutral model registry;
@@ -52,7 +53,7 @@ described in [AI techniques](docs/ai_investigation_techniques.md). Remaining wor
 
 - application registration editor;
 - source query history and detailed diagnostics;
-- incident filters and search;
+- pattern suppression/ownership after review;
 - capsule comparison and version history;
 - authenticated sharing and portable human-readable export (JSON/ZIP downloads and local incident URLs exist);
 - reviewer notes;

@@ -14,7 +14,7 @@ Implement FCAPSule as a source-neutral telemetry attention service with:
 - compact evidence selection;
 - grounded deterministic and optional pretrained-model reasoning;
 - durable capsule metadata;
-- CLI, API, Operations, Targets, and Settings surfaces.
+- CLI, API, Operations, Targets, Patterns, and Settings surfaces.
 
 ## Implemented Local Stack
 
@@ -71,7 +71,7 @@ Implemented live adapters query source APIs and stage bounded normalized inputs 
 
 The control plane stores applications, incidents, capsules, and non-secret model preferences. It provides external-case ingestion and background capsule jobs to the web API.
 
-Operations groups incidents and opens a shared episode investigation with individual capture reports; Targets owns source configuration and namespace-grouped coverage; Settings owns retention and the investigation model. The model selects bounded read-only checks, inspects reference windows and omitted log candidates, and returns cited competing explanations and alert relationships. [AI techniques](docs/ai_investigation_techniques.md) describes the implemented bounds and remaining limitations. Lab workloads remain separate; the investigator does not replicate applications or run experiments.
+Operations groups incidents and opens a shared episode investigation with individual capture reports, stable short references, URL-persisted filters and a compact actionable triage strip. Targets owns source configuration and namespace-grouped coverage; Patterns exposes retained recurrence context without merging individual incidents; Settings owns retention and the investigation model. The model selects bounded read-only checks, inspects reference windows and omitted log candidates, and can compare one deterministic prior recurrence candidate using cited retained observations. [AI techniques](docs/ai_investigation_techniques.md) describes the implemented bounds and remaining limitations. Lab workloads remain separate; the investigator does not replicate applications or run experiments.
 
 ## Trace Approach
 

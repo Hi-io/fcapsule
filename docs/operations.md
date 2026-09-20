@@ -11,6 +11,7 @@ Default URLs:
 - `http://127.0.0.1:8765/console`
 - `http://127.0.0.1:8765/settings`
 - `http://127.0.0.1:8765/targets`
+- `http://127.0.0.1:8765/patterns`
 
 Use `--host`, `--port`, and `--state-dir` to change the binding or storage location.
 
@@ -25,15 +26,34 @@ consecutive failures share a root cause.
 
 The view shows:
 
+- a short **Needs attention** strip only when there is an active incident, a
+  retained recurring issue, or a material evidence-based difference from a prior
+  occurrence; every item opens its episode;
 - an episode queue ordered by latest activity;
 - active episodes prioritized before resolved ones;
-- severity and lifecycle state, affected application, latest signal time, related-signal count, and report readiness;
+- severity and lifecycle state, affected resource, latest signal time, related-signal count, and report readiness;
+- a compact recurrence badge when the same application, affected resource and
+  normalized alert identity occurred earlier in retained history;
+- URL-persisted namespace, resource, lifecycle, age and text/short-reference
+  filters, so an operator can narrow the queue without changing retained history;
 - a clickable episode row that expands its investigation, with an alert selector when several reports are available;
+- stable short incident and episode references, plus a direct-link control for
+  sharing the selected report with another responder;
 - archive and restore controls that keep an episode out of the active queue without deleting its signals or evidence;
 - incident impact, a cited investigation path, uncertainty, and concrete next checks;
 - FM sequence, PM changes, representative evidence, topology, and trace-source retention context;
 
-Overview presents one episode assessment, next action, uncertainty and a compact investigation progress column. Competing explanations and alert relationships are expandable. Evidence includes agent observations plus each alert's captured telemetry; the alert selector appears in detail views, not the shared Overview. Timeline separates historical alerts from the later agent activity. References open the cited observation directly. Charts include the captured time range, not current workload health. Queue ages are relative with exact timestamps on hover. Export provides report/investigation JSON and the capsule archive. Compression, preservation, grounding and runtime remain in collapsed engineering diagnostics.
+Overview presents one episode assessment, next action, uncertainty and a compact investigation progress column. When an earlier deterministic match exists, the assessment may include a cited **Related history** comparison. It compares captured evidence; it does not establish that two events share a root cause. Competing explanations and alert relationships are expandable. Evidence includes agent observations plus each alert's captured telemetry; the alert selector appears in detail views, not the shared Overview. Timeline separates historical alerts from the later agent activity. References open the cited observation directly. Charts include the captured time range, not current workload health. Queue ages are relative with exact timestamps on hover. Export provides report/investigation JSON and the capsule archive. Compression, preservation, grounding and runtime remain in collapsed engineering diagnostics.
+
+## Patterns View
+
+Patterns is historical context, not a second incident queue. It lists only groups
+with at least two retained episodes using the same application, resource and
+normalized alert identity. A row shows the affected resource, occurrence count,
+first/most-recent observation and median observed interval, then links to the
+individual episodes. Archived episodes still count until FCAPSule retention
+permanently removes them. The interval describes retained history; it is not a
+forecast and does not imply one common failure mechanism.
 
 ## Targets View
 
@@ -55,7 +75,7 @@ For Kubernetes installation and source prerequisites, use `docs/kubernetes_deplo
 
 When a provider key is configured, retaining member reports queues one episode investigation. Two workers run these jobs without blocking capture. The investigator preserves mutable workload state, then lets the model select up to four read-only checks. Overview refreshes progress while the model works. A missing key points to Settings; incomplete attempts retain observations and offer Reassess. Startup resumes interrupted unarchived work; failed unchanged attempts are not automatically retried. New members trigger a fresh joint assessment after their reports are ready.
 
-The request includes retained alerts/rules, performance findings, log examples, configuration and subsequent check observations. The final response contains a likely mechanism, one next action, expected finding, uncertainty, competing hypotheses and alert relationships. Citation validation confirms references exist, not causal truth. No remediation or application replication is executed. `episode_investigation.json` includes checks, assessment, usage and up to three previous attempts; it is copied to participating capsule archives on completion. Expand the token count for input/output and previous-attempt totals. See [techniques and limits](ai_investigation_techniques.md).
+The request includes retained alerts/rules, performance findings, log examples, configuration and subsequent check observations. The final response contains a likely mechanism, one next action, expected finding, uncertainty, competing hypotheses and alert relationships. For a recurring episode, it must inspect one bounded prior capsule and explicitly classify the historical comparison as similar, changed, or still insufficiently supported. Citation validation confirms references exist, not causal truth. No remediation or application replication is executed. `episode_investigation.json` includes checks, assessment, usage and up to three previous attempts; it is copied to participating capsule archives on completion. Expand the token count for input/output and previous-attempt totals. See [techniques and limits](ai_investigation_techniques.md).
 
 ## Ingest an External Incident
 

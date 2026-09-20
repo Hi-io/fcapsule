@@ -1,4 +1,4 @@
-const view = location.pathname.startsWith('/settings') ? 'settings' : location.pathname.startsWith('/targets') ? 'targets' : 'console';
+const view = location.pathname.startsWith('/settings') ? 'settings' : location.pathname.startsWith('/targets') ? 'targets' : location.pathname.startsWith('/patterns') ? 'patterns' : 'console';
 const app = document.querySelector('#app');
 const fmt = new Intl.NumberFormat('en-US');
 const pct = value => typeof value === 'number' ? (value * 100).toFixed(1) + '%' : '--';
@@ -13,11 +13,11 @@ const shortTime = value => value ? new Date(value).toLocaleTimeString([], {hour:
 document.querySelector(`[data-nav="${view}"]`)?.classList.add('active');
 document.querySelector(`[data-nav="${view}"]`)?.setAttribute('aria-current', 'page');
 document.body.dataset.view = view;
-document.title = ({console:'Operations', targets:'Targets', settings:'Settings'})[view] + ' | FCAPSule';
+document.title = ({console:'Operations', targets:'Targets', patterns:'Patterns', settings:'Settings'})[view] + ' | FCAPSule';
 let lastState = null;
 let selectedReport = null;
 let selectedEpisodeId = null;
-let showArchived = false;
+let showArchived;
 let reportTab = 'overview';
 let reportLoading = false;
 let reportError = '';
@@ -53,11 +53,24 @@ function quantity(count, noun) { return `${count} ${noun}${count === 1 ? '' : 's
 function reportId() { return selectedReport?.incident?.incident_id || selectedReport?.report?.incident?.incident_id; }
 function allEpisodes(state = lastState) { return [...state.overview.episodes, ...state.overview.archived_episodes]; }
 function updateLocation() {
-  const query = selectedEpisodeId ? '?episode=' + encodeURIComponent(selectedEpisodeId) + (reportId() ? '&incident=' + encodeURIComponent(reportId()) : '') : '';
-  history.replaceState(null, '', '/console' + query);
+  const params = new URLSearchParams();
+  if (selectedEpisodeId) params.set('episode', selectedEpisodeId);
+  if (reportId()) params.set('incident', reportId());
+  if (showArchived) params.set('archived', '1');
+  Object.entries(queueFilters).forEach(([key, value]) => { if (value) params.set(key, value); });
+  history.replaceState(null, '', '/console' + (params.size ? '?' + params.toString() : ''));
 }
 let requestedReportId = new URLSearchParams(location.search).get('incident');
 let requestedEpisodeId = new URLSearchParams(location.search).get('episode');
+const initialParams = new URLSearchParams(location.search);
+showArchived = initialParams.get('archived') === '1';
+const queueFilters = {
+  namespace: initialParams.get('namespace') || '',
+  scope: initialParams.get('scope') || '',
+  status: initialParams.get('status') || '',
+  period: initialParams.get('period') || '',
+  query: initialParams.get('query') || '',
+};
 
 function setSystem(state) {
   const node = document.querySelector('.system-state');
@@ -74,21 +87,88 @@ function sources(config) {
 }
 
 function consoleSignature(state) {
-  return JSON.stringify([state.overview.episodes, state.overview.archived_episodes, selectedReport, selectedEpisodeId, showArchived, reportTab, reportLoading, reportError, state.running]);
+  return JSON.stringify([state.overview.episodes, state.overview.archived_episodes, state.overview.triage, selectedReport, selectedEpisodeId, showArchived, queueFilters, reportTab, reportLoading, reportError, state.running]);
+}
+function resourceLabel(item, application) {
+  const resource = item.resource || {};
+  if (resource.kind === 'node' && resource.name) return 'Node ' + resource.name;
+  if (resource.kind === 'pod' && resource.name) return 'Pod ' + resource.name;
+  if (resource.kind === 'workload' && resource.name) return 'Workload ' + resource.name;
+  return application?.name || resource.name || item.app_id;
+}
+function recurrenceLabel(recurrence) {
+  const count = Number(recurrence?.previous_count || 0);
+  return count ? `Repeated · ${count} prior ${count === 1 ? 'episode' : 'episodes'}` : '';
+}
+function intervalLabel(seconds) {
+  if (!Number.isFinite(Number(seconds)) || Number(seconds) <= 0) return '';
+  const value = Number(seconds);
+  const [amount, unit] = value >= 86400 ? [Math.round(value / 86400), 'day'] : value >= 3600 ? [Math.round(value / 3600), 'hour'] : [Math.round(value / 60), 'minute'];
+  return `about every ${amount} ${unit}${amount === 1 ? '' : 's'}`;
+}
+function filteredEpisodes(items, applications) {
+  const cutoff = {day:86400000, week:604800000, month:2592000000}[queueFilters.period];
+  const now = Date.now();
+  const needle = queueFilters.query.trim().toLowerCase();
+  return items.filter(item => {
+    const application = applications.get(item.app_id);
+    const target = resourceLabel(item, application);
+    if (queueFilters.namespace && application?.namespace !== queueFilters.namespace) return false;
+    if (queueFilters.scope && target !== queueFilters.scope) return false;
+    if (queueFilters.status && item.status !== queueFilters.status) return false;
+    if (cutoff && now - new Date(item.started_at).getTime() > cutoff) return false;
+    if (!needle) return true;
+    const references = (item.signals || []).flatMap(signal => [signal.reference, signal.incident_id]);
+    return [item.reference, item.episode_id, item.primary_incident_id, ...references, item.title, target, application?.name, application?.namespace, item.status]
+      .some(value => String(value || '').toLowerCase().includes(needle));
+  });
+}
+function queueFiltersPanel(items, applications) {
+  const namespaces = [...new Set(items.map(item => applications.get(item.app_id)?.namespace).filter(Boolean))].sort();
+  const scopes = [...new Set(items.map(item => resourceLabel(item, applications.get(item.app_id))).filter(Boolean))].sort();
+  const option = (value, label, selected) => `<option value="${safe(value)}" ${value === selected ? 'selected' : ''}>${safe(label)}</option>`;
+  return `<form class="queue-filters" aria-label="Filter incident queue">
+    <label><span>Namespace</span><select data-queue-filter="namespace">${option('', 'All namespaces', queueFilters.namespace)}${namespaces.map(value => option(value, value, queueFilters.namespace)).join('')}</select></label>
+    <label><span>Target</span><select data-queue-filter="scope">${option('', 'All targets', queueFilters.scope)}${scopes.map(value => option(value, value, queueFilters.scope)).join('')}</select></label>
+    <label><span>Status</span><select data-queue-filter="status">${option('', 'Any status', queueFilters.status)}${option('active', 'Active', queueFilters.status)}${option('resolved', 'Resolved', queueFilters.status)}</select></label>
+    <label><span>Time</span><select data-queue-filter="period">${option('', 'All time', queueFilters.period)}${option('day', 'Last 24 hours', queueFilters.period)}${option('week', 'Last 7 days', queueFilters.period)}${option('month', 'Last 30 days', queueFilters.period)}</select></label>
+    <label class="queue-search"><span>Search</span><input data-queue-filter="query" value="${safe(queueFilters.query)}" placeholder="ID or text"></label>
+    <button class="secondary filter-clear" type="button" data-clear-filters ${Object.values(queueFilters).some(Boolean) ? '' : 'disabled'}>Clear</button>
+  </form>`;
+}
+function triageStrip(items) {
+  if (!items.length || showArchived) return '';
+  return `<section class="triage" aria-label="Needs attention"><div class="triage-head"><h2>Needs attention</h2><span>Focused from retained incident history</span></div><div class="triage-list">${items.map(item => `<button class="triage-item" data-triage-episode="${safe(item.episode_id)}"><span class="triage-kind ${safe(item.kind)}">${safe(item.label)}</span><span><strong>${safe(item.title)}</strong><small>${safe(item.detail)}</small></span><span class="triage-open">View</span></button>`).join('')}</div></section>`;
 }
 function renderConsole(state) {
   lastConsoleSignature = consoleSignature(state);
   const data = state.overview;
-  const episodes = [...(showArchived ? data.archived_episodes : data.episodes)].sort((a,b) => Number(b.status === 'active') - Number(a.status === 'active') || b.last_activity_at.localeCompare(a.last_activity_at));
+  const allQueueEpisodes = [...(showArchived ? data.archived_episodes : data.episodes)];
+  const apps = new Map(data.applications.map(item => [item.app_id, item]));
+  const episodes = filteredEpisodes(allQueueEpisodes, apps).sort((a,b) => Number(b.status === 'active') - Number(a.status === 'active') || b.last_activity_at.localeCompare(a.last_activity_at));
   const active = data.episodes.filter(item => item.status === 'active').length;
   app.innerHTML = `
     <div class="page-head"><div><div class="eyebrow">Incident workspace</div><h1>Operations</h1><p>${active} active · ${data.episodes.length - active} resolved</p></div><a class="button-link" href="/targets">Manage targets</a></div>
+    ${triageStrip(data.triage || [])}
     <section class="queue"><div class="sheet-head"><h2>${showArchived ? 'Archived episodes' : 'Incident queue'}</h2><button class="secondary" id="queue-mode">${showArchived ? 'Back to queue' : `Archived (${data.archived_episodes.length})`}</button></div>
+    ${queueFiltersPanel(allQueueEpisodes, apps)}
     ${episodeTable(episodes, data.capsules, showArchived)}</section>`;
   document.querySelector('#queue-mode').addEventListener('click', () => {
     selectedReport = null; selectedEpisodeId = null; requestSequence++; showArchived = !showArchived;
     updateLocation(); renderConsole(lastState);
   });
+  document.querySelectorAll('[data-queue-filter]').forEach(field => field.addEventListener(field.tagName === 'INPUT' ? 'input' : 'change', () => {
+    queueFilters[field.dataset.queueFilter] = field.value; selectedReport = null; selectedEpisodeId = null; requestSequence++;
+    updateLocation(); renderPreservingFocus(() => renderConsole(lastState));
+  }));
+  document.querySelector('[data-clear-filters]')?.addEventListener('click', () => {
+    Object.keys(queueFilters).forEach(key => { queueFilters[key] = ''; });
+    selectedReport = null; selectedEpisodeId = null; requestSequence++; updateLocation(); renderConsole(lastState);
+  });
+  document.querySelectorAll('[data-triage-episode]').forEach(button => button.addEventListener('click', () => {
+    const episode = data.episodes.find(item => item.episode_id === button.dataset.triageEpisode);
+    if (episode) openEpisodeReport(episode.episode_id, episode.primary_incident_id);
+  }));
   document.querySelectorAll('[data-episode-toggle]').forEach(summary => summary.addEventListener('click', event => {
     event.preventDefault();
     const episode = episodes.find(item => item.episode_id === summary.dataset.episodeToggle);
@@ -121,6 +201,7 @@ function renderConsole(state) {
   document.querySelectorAll('[data-build-capsule]').forEach(button => button.addEventListener('click', () => buildCapsule(button.dataset.buildCapsule)));
   document.querySelectorAll('[data-ai-briefing]').forEach(button => button.addEventListener('click', () => generateAiBriefing(button.dataset.aiBriefing)));
   document.querySelectorAll('[data-investigate]').forEach(button => button.addEventListener('click', () => startInvestigation(button.dataset.investigate)));
+  document.querySelectorAll('[data-copy-incident-link]').forEach(button => button.addEventListener('click', () => copyIncidentLink(button)));
   document.querySelectorAll('[data-investigation-ref]').forEach(button => button.addEventListener('click', () => {
     reportTab = 'evidence';
     const id = button.dataset.investigationRef;
@@ -257,7 +338,7 @@ async function syncTargets() {
 }
 
 function episodeTable(items, capsules, archived = false) {
-  if (!items.length) return `<div class="empty">${archived ? 'No archived episodes.' : 'No incidents captured.'}</div>`;
+  if (!items.length) return `<div class="empty">${archived ? 'No archived episodes match these filters.' : 'No incidents match these filters.'}</div>`;
   const apps = new Map(lastState.overview.applications.map(item => [item.app_id, item]));
   return items.map(item => {
     const isOpen = selectedEpisodeId === item.episode_id;
@@ -268,7 +349,7 @@ function episodeTable(items, capsules, archived = false) {
       <summary id="toggle-${safe(item.episode_id)}" data-episode-toggle="${safe(item.episode_id)}" aria-controls="body-${safe(item.episode_id)}" aria-expanded="${isOpen}">
       <span class="episode-summary">
         <span class="episode-state">${status(item.severity)}${status(item.status)}</span>
-        <span class="episode-identity"><strong>${safe(item.title)}</strong><small>${safe(application?.name || item.app_id)} · ${safe(application?.namespace || '')}</small></span>
+        <span class="episode-identity"><strong>${safe(item.title)}</strong><small>${safe(resourceLabel(item, application))} · ${safe(application?.namespace || '')}</small>${recurrenceLabel(item.recurrence) ? `<em class="recurrence-badge">${safe(recurrenceLabel(item.recurrence))}</em>` : ''}</span>
         <span class="episode-count">${item.signal_count} alert${item.signal_count === 1 ? '' : 's'}<small>${['queued','running'].includes(item.investigation?.status) ? 'Investigating' : item.investigation?.status === 'ready' ? 'Assessment ready' : item.report_count + ' reports'}</small></span>
         <time class="episode-time" datetime="${safe(item.started_at)}" title="${safe(formatDate(item.started_at))}">${relativeTime(item.started_at)}</time>
       </span></summary>
@@ -284,7 +365,10 @@ function episodeTable(items, capsules, archived = false) {
 
 function episodeContext(episode) {
   const id = reportId() || episode.primary_incident_id;
-  if (reportTab === 'overview') return '<span class="queue-note">Episode investigation · ' + episode.signal_count + ' captured alert' + (episode.signal_count === 1 ? '' : 's') + '</span>';
+  const signal = episode.signals.find(item => item.incident_id === id) || episode.signals[0] || {};
+  const identity = `<span class="incident-reference">${safe(signal.reference || episode.reference || id)}</span>`;
+  const lifecycle = episode.status === 'resolved' && episode.investigation?.finished_at ? `Assessment saved ${safe(relativeTime(episode.investigation.finished_at))} · currently resolved` : episode.status === 'active' ? 'Currently active' : 'Currently resolved';
+  if (reportTab === 'overview') return `<span class="queue-note">${identity} · ${episode.signal_count} captured alert${episode.signal_count === 1 ? '' : 's'} · ${lifecycle}</span><button class="icon-button" data-copy-incident-link title="Copy direct incident link" aria-label="Copy direct incident link">${icon('copy')}</button>`;
   if (episode.signals.length === 1) return '<span class="queue-note">Investigation</span>';
   return `<div class="signal-selector"><label for="signal-report">Alert report</label><select id="signal-report" data-signal-select>${episode.signals.map((signal, index) => `<option value="${safe(signal.incident_id)}" ${id === signal.incident_id ? 'selected' : ''}>${index + 1}. ${safe(signal.summary || signal.scenario)} · ${shortTime(signal.started_at)}</option>`).join('')}</select></div>`;
 }
@@ -393,6 +477,18 @@ async function deleteEpisode(id) {
   selectedReport = null; selectedEpisodeId = null; await refresh();
 }
 
+async function copyIncidentLink(button) {
+  const link = location.href;
+  try {
+    await navigator.clipboard.writeText(link);
+    button.classList.add('copied');
+    button.title = 'Link copied';
+    setTimeout(() => { button.classList.remove('copied'); button.title = 'Copy direct incident link'; }, 1600);
+  } catch (_) {
+    window.prompt('Copy this incident link:', link);
+  }
+}
+
 function sparkline(signal) {
   const values = signal.values || [];
   if (values.length < 2) return '';
@@ -441,23 +537,28 @@ function briefingPanel(payload) {
   const run = payload.investigation || {status:'not_started', episode_id:selectedEpisodeId};
   const assessment = run.assessment;
   const loading = ['queued','running','waiting'].includes(run.status);
-  const header = '<div class="section-heading"><h3>Episode assessment</h3><span class="queue-note">' + safe(run.model || '') + '</span></div>';
+  const saved = run.finished_at ? 'Assessment saved ' + formatDate(run.finished_at) : '';
+  const header = '<div class="section-heading"><h3>Episode assessment</h3><span class="queue-note">' + safe([run.model, saved].filter(Boolean).join(' · ')) + '</span></div>';
   if (!assessment) return '<section class="briefing">' + header + '<div class="analysis-state" role="status" aria-live="polite">' +
     (loading ? '<span class="spinner"></span>' : '') + '<div><strong>' + (loading ? 'Investigating' : run.status === 'not_configured' ? 'Provider key required' : 'No validated conclusion yet') + '</strong><p>' + safe(run.message || 'Retained evidence is available below.') + '</p>' +
     (!loading ? run.status === 'not_configured' ? '<a href="/settings">Open Settings</a>' : '<button class="secondary" data-investigate="' + safe(run.episode_id) + '">Investigate episode</button>' : '') + '</div></div></section>';
   const hypotheses = (assessment.hypotheses || []).map(item => '<article class="hypothesis-row"><div class="section-heading"><h4>' + safe(item.explanation) + '</h4><span class="hypothesis-state ' + safe(item.status) + '">' + safe(item.status) + '</span></div><p>' + safe(item.reason) + '</p><div class="citations">' + investigationRefs(run, item.evidence_ids) + '</div></article>').join('');
   const name = id => run.context?.alerts?.find(item=>item.incident_id === id)?.title || id;
   const connections = (assessment.connections || []).map(item=>'<article class="hypothesis-row"><h4>' + safe(name(item.from)) + ' / ' + safe(name(item.to)) + '</h4><small>' + safe(item.relationship.replaceAll('_',' ')) + '</small><p>' + safe(item.reason) + '</p><div class="citations">' + investigationRefs(run,item.evidence_ids) + '</div></article>').join('');
+  const history = assessment.historical_comparison;
+  const historyCandidate = run.context?.historical_candidates?.find(item => item.episode_id === history?.episode_id);
+  const historyHtml = history ? '<section class="history-comparison"><div><span class="text-label">Related history</span><h4>' + safe(history.status.replaceAll('_',' ')) + '</h4><p>' + safe(history.summary) + '</p></div><div><span class="incident-reference">' + safe(historyCandidate?.reference || history.episode_id) + '</span><div class="citations">' + investigationRefs(run, history.evidence_ids) + '</div></div></section>' : '';
   return '<section class="briefing">' + header + '<p class="brief-lead">' + safe(assessment.summary) + '</p><h4>Likely explanation</h4><p>' + safe(assessment.likely_mechanism) + '</p>' +
     '<div class="next-check"><h4>Next action</h4><p><strong>' + safe(assessment.next_action) + '</strong></p><p><span class="text-label">What would confirm it</span>' + safe(assessment.expected_finding) + '</p></div>' +
     '<p class="uncertainty"><strong>Still unconfirmed:</strong> ' + safe(assessment.uncertainty) + '</p><div class="citations">' + investigationRefs(run,assessment.evidence_ids) + '</div>' +
+    historyHtml +
     disclosure('competing-explanations','Explanations considered',hypotheses,assessment.hypotheses?.length) +
     (connections ? disclosure('alert-connections','How the alerts relate',connections,assessment.connections.length) : '') + '</section>';
 }
 
 function investigationRefs(run, ids = []) {
   const labels = new Map();
-  const checks = {workload_state:'Runtime snapshot',resource_history:'Resource history',search_logs:'Source logs',compare_baseline:'Baseline comparison',database_pressure:'Database metrics',dependency_evidence:'Dependency evidence',review_omitted:'Omitted log patterns'};
+  const checks = {workload_state:'Runtime snapshot',resource_history:'Resource history',search_logs:'Source logs',compare_baseline:'Baseline comparison',database_pressure:'Database metrics',dependency_evidence:'Dependency evidence',review_omitted:'Omitted log patterns',historical_episode:'Prior episode'};
   return ids.map(id => {
     const item = [...(run.checks || []), ...(run.context?.evidence || [])].find(item=>item.id === id);
     const label = checks[item?.tool] || (item?.domain === 'log_template' ? logLabel(item.title) : item?.title) || item?.question || id;
@@ -500,12 +601,18 @@ function investigationResult(result = {}, checkId = '') {
   if (configs.length) body += '<ul class="snapshot-list">' + configs.map(item=>'<li><strong>' + safe(item.kind) + ' · ' + safe(item.name) + '</strong><small>' + safe(item.phase || (item.keys || []).join(', ')) + '</small>' +
     (item.resources || []).map(container=>'<p>' + safe(container.name) + ' limits: <code>' + safe(JSON.stringify(container.limits)) + '</code></p>').join('') +
     (item.container_states || []).map(container=>'<p>' + safe(container.name) + ': ' + safe(container.restart_count) + ' restarts' + (container.last_state?.terminated ? ' · ' + safe(container.last_state.terminated.reason) + ' · exit ' + safe(container.last_state.terminated.exitCode) + ' · ' + formatDate(container.last_state.terminated.finishedAt) : '') + '</p>').join('') + '</li>').join('') + '</ul>';
+  if (result.episode) {
+    const historic = result.episode;
+    body += '<section class="historical-observation"><span class="incident-reference">' + safe(historic.reference || historic.episode_id) + '</span><strong>' + safe(historic.title) + '</strong><small>' + formatDate(historic.started_at) + ' · ' + safe(historic.status) + '</small>' +
+      (historic.assessment?.summary ? '<p>' + safe(historic.assessment.summary) + '</p>' : '<p>No validated earlier assessment was retained.</p>') +
+      '<small>' + safe((historic.captured_evidence || []).length) + ' retained incident capture(s) available for comparison.</small></section>';
+  }
   if (!series.length && !patterns.length && !configs.length) body += '<p>No observations returned.</p>';
   return body + '<p class="uncertainty">' + safe(result.limitation || result.comparability || '') + '</p><details class="raw-observation"><summary>Observation JSON</summary><pre class="log-lines">' + safe(JSON.stringify(result,null,2)) + '</pre></details>';
 }
 
 function investigationEvidence(run = {}) {
-  const cited = new Set([...(run.assessment?.evidence_ids || []), ...(run.assessment?.hypotheses || []).flatMap(item=>item.evidence_ids), ...(run.assessment?.connections || []).flatMap(item=>item.evidence_ids)]);
+  const cited = new Set([...(run.assessment?.evidence_ids || []), ...(run.assessment?.hypotheses || []).flatMap(item=>item.evidence_ids), ...(run.assessment?.connections || []).flatMap(item=>item.evidence_ids), ...(run.assessment?.historical_comparison?.evidence_ids || [])]);
   const checks = (run.checks || []).map(item=>disclosure('agent-' + item.id,item.question,'<p>' + safe(item.distinguishes) + '</p><p class="queue-note">' + formatDate(item.started_at) + ' · ' + safe(item.status) + '</p>' + investigationResult(item.result,item.id),item.id)).join('');
   const evidence = (run.context?.evidence || []).filter(item=>cited.has(item.id)).map(item=>disclosure('agent-' + item.id, item.domain === 'log_template' ? logLabel(item.title) : item.title,
     '<p>' + safe(item.summary) + '</p><p class="queue-note">' + safe(item.domain) + ' · ' + formatDate(item.time_range?.start) + '</p>' +
@@ -602,6 +709,18 @@ function reportPanel(payload) {
     '</div>' + exports + '</div><div id="investigation-panel" role="tabpanel" aria-labelledby="tab-' + reportTab + '" tabindex="0">' + content + '</div><div class="report-technical">' + diagnostics + '</div></section>';
 }
 
+function renderPatterns(state) {
+  const applications = new Map(state.overview.applications.map(item => [item.app_id, item]));
+  const patterns = state.overview.patterns || [];
+  const rows = patterns.map(pattern => {
+    const application = applications.get(pattern.app_id);
+    const target = resourceLabel({app_id:pattern.app_id, resource:pattern.resource}, application);
+    const interval = intervalLabel(pattern.observed_interval_seconds);
+    return `<article class="pattern-row"><div class="pattern-main"><span class="pattern-reference">${safe(pattern.pattern_id)}</span><h2>${safe(pattern.title)}</h2><p>${safe(target)} · ${safe(application?.namespace || '')}</p></div><dl class="pattern-stats"><div><dt>Occurrences</dt><dd>${safe(pattern.occurrence_count)}</dd></div><div><dt>Observed</dt><dd>${safe(relativeTime(pattern.first_seen_at))} to ${safe(relativeTime(pattern.last_seen_at))}</dd></div><div><dt>Interval</dt><dd>${safe(interval || 'No stable interval')}</dd></div></dl><div class="pattern-episodes"><span>Recent episodes</span>${pattern.episodes.map(episode => `<a href="/console?episode=${encodeURIComponent(episode.episode_id)}">${safe(episode.reference)} · ${safe(relativeTime(episode.started_at))}</a>`).join('')}</div></article>`;
+  }).join('');
+  app.innerHTML = `<div class="page-head"><div><div class="eyebrow">Incident history</div><h1>Patterns</h1><p>Repeated episodes are kept separate and linked through their retained evidence.</p></div><a class="button-link" href="/console">Open operations</a></div><section class="patterns"><div class="sheet-head"><h2>Recurring issues</h2><span class="queue-note">${patterns.length} recurring pattern${patterns.length === 1 ? '' : 's'}</span></div>${rows || '<div class="empty">No recurring patterns in retained history.</div>'}</section>`;
+}
+
 async function refresh() {
   if (refreshing || document.hidden) return;
   refreshing = true;
@@ -634,7 +753,7 @@ async function refresh() {
       }
       if (!reportLoading && consoleSignature(state) !== lastConsoleSignature) renderPreservingFocus(() => renderConsole(state));
     } else if (!previous) {
-      view === 'targets' ? renderTargets(state) : renderSettings(state);
+      view === 'targets' ? renderTargets(state) : view === 'patterns' ? renderPatterns(state) : renderSettings(state);
     } else if (view === 'targets') {
       // Refresh inventory without replacing editable connection settings.
       document.querySelector('#discovery-time').textContent = formatDate(state.sources.last_sync_at);
@@ -660,6 +779,8 @@ async function refresh() {
           document.querySelector('#coverage-count').textContent = observed.length + ' observed applications';
         }
       }
+    } else if (view === 'patterns') {
+      renderPatterns(state);
     }
   } catch (_) {
     document.querySelector('.system-state').className = 'system-state error';

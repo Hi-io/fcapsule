@@ -47,7 +47,7 @@ Prometheus firing alert or explicit incident window
 
 ## Control Plane
 
-`ControlPlane` coordinates source polling and background capsule jobs and exposes an immutable snapshot to the HTTP API. `LiveSourceCoordinator` discovers Kubernetes workloads, correlates pod identity across Prometheus and OpenSearch, polls firing alerts, and captures one bounded normalized case per new alert. `FCAPSuleStore` persists application, incident, capsule metadata, source settings, and non-secret model preferences in SQLite. External sources may also submit a normalized case through the ingestion boundary. An incident report is generated from deterministic evidence before optional AI reasoning.
+`ControlPlane` coordinates source polling and background capsule jobs and exposes an immutable snapshot to the HTTP API. `LiveSourceCoordinator` discovers Kubernetes workloads, correlates pod identity across Prometheus and OpenSearch, polls firing alerts, and captures one bounded normalized case per new alert. `FCAPSuleStore` persists application, incident, capsule metadata, source settings, non-secret model preferences, resource identity and deterministic recurrence keys in SQLite. External sources may also submit a normalized case through the ingestion boundary. An incident report is generated from deterministic evidence before optional AI reasoning. Recurrence preserves separate episodes and can expose up to three earlier retained candidates to the investigator; it never merges incident records or establishes a shared cause by itself.
 
 ## Source Ownership
 

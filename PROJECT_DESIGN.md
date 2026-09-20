@@ -2,7 +2,7 @@
 
 ## Design Summary
 
-FCAPSule is a dependency-light Python control plane with a normalized evidence pipeline, SQLite metadata, CLI commands, three operator views, and live Kubernetes source adapters. It captures a bounded incident window, derives evidence and retains a capsule. Source systems remain authoritative, but live raw captures are also staged on disk until managed retention/deletion; see [storage policy](docs/data_privacy.md).
+FCAPSule is a dependency-light Python control plane with a normalized evidence pipeline, SQLite metadata, CLI commands, four operator views, and live Kubernetes source adapters. It captures a bounded incident window, derives evidence and retains a capsule. Source systems remain authoritative, but live raw captures are also staged on disk until managed retention/deletion; see [storage policy](docs/data_privacy.md).
 
 The architecture deliberately separates four responsibilities:
 
@@ -27,7 +27,7 @@ The architecture deliberately separates four responsibilities:
 | `fcapsule/control_plane.py` | external-case ingestion, capsule jobs, and local AI configuration |
 | `fcapsule/live_sources.py` | discovery, source health, alert polling, and bounded live capture |
 | `fcapsule/adapters/` | Prometheus, OpenSearch, Kubernetes, and HTTP transport boundaries |
-| `fcapsule/ui/app.py` | Operations, Targets, and general Settings web application |
+| `fcapsule/ui/app.py` | Operations, Targets, Patterns, and general Settings web application |
 | `fcapsule/cli.py` | operator and automation entry point |
 | `deploy/kubernetes/` | RBAC, state volume, Deployment, Service, alert rule, and development overlay |
 
@@ -58,15 +58,15 @@ Within logs and PM, representatives for errors, retries, latency, pool saturatio
 
 The deterministic reasoner provides a credential-free baseline. For the reference incident it can connect retry evidence, pool evidence, related PM changes, and the FM trigger into a tentative investigation path.
 
-The deterministic verifier rejects unknown evidence IDs, bounds confidence, and reduces confidence when required data is missing. The optional episode investigator receives merged retained evidence, preserves current workload state, and lets the model select up to four scoped read-only checks. Successful observations become citable evidence for competing explanations and alert relationships. It validates structured output and records usage; it does not publish model confidence percentages. Neither mechanism proves that cited evidence entails every generated claim. See [AI techniques](docs/ai_investigation_techniques.md).
+The deterministic verifier rejects unknown evidence IDs, bounds confidence, and reduces confidence when required data is missing. The optional episode investigator receives merged retained evidence, preserves current workload state, and lets the model select up to four scoped read-only checks. When an exact application/resource/alert recurrence match exists, it may inspect one of at most three deterministic retained candidates; prior assessments remain historical hypotheses and the final comparison must cite the returned observation. Successful observations become citable evidence for competing explanations and alert relationships. It validates structured output and records usage; it does not publish model confidence percentages. Neither mechanism proves that cited evidence entails every generated claim. See [AI techniques](docs/ai_investigation_techniques.md).
 
 ## Storage
 
 SQLite stores metadata, not source telemetry. The schema includes:
 
 - `applications`;
-- `incidents`;
-- `incident_episodes` and `episode_incidents`;
+- `incidents`, including captured resource identity and normalized recurrence key;
+- `incident_episodes` and `episode_incidents`, including independent episode references and retained recurrence summaries;
 - `capsules`;
 - `model_profiles`;
 - `settings`.

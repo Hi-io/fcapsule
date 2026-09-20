@@ -8,10 +8,11 @@ It does not replace Prometheus, OpenSearch, Alertmanager, Kafka, or a tracing ba
 
 ## Product Surfaces
 
-FCAPSule provides one control plane with three operator views:
+FCAPSule provides one control plane with four operator views:
 
-- **Operations** (`/console`) groups related firing alerts into expandable incident episodes. Overview presents one evidence-seeking AI investigation per episode, a concrete next action and check progress. Evidence and Timeline expose observations and the agent's activity separately from historical events. Reports and capsules can be exported.
+- **Operations** (`/console`) groups related firing alerts into expandable incident episodes. A compact triage strip highlights only active, recurring, or materially changed retained work. Overview presents one evidence-seeking AI investigation per episode, a concrete next action and check progress. Evidence and Timeline expose observations and the agent's activity separately from historical events. Reports and capsules can be exported.
 - **Targets** (`/targets`) configures and tests Prometheus, OpenSearch, and Kubernetes API access, controls namespace scope and polling, and shows coverage for currently observed applications.
+- **Patterns** (`/patterns`) provides historical recurrence context for matching application/resource/alert episodes while keeping each incident independently auditable.
 - **Settings** (`/settings`) controls incident retention, the investigation model and completion budget per call. With a provider key configured, new reports trigger background episode investigation. Retention defaults to 30 days. The key remains local in `.env` and is never returned through the console or stored in SQLite.
 
 The CLI remains fully usable without the web application.
@@ -49,6 +50,7 @@ Open:
 - Operations: `http://127.0.0.1:8765/console`
 - Settings: `http://127.0.0.1:8765/settings`
 - Targets: `http://127.0.0.1:8765/targets`
+- Patterns: `http://127.0.0.1:8765/patterns`
 
 On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`. The control plane stores metadata, bounded live captures, reports and local settings under `.fcapsule/`, which is ignored by Git. No source is connected until configured in Targets or supplied through environment variables.
 
@@ -116,7 +118,7 @@ python3 -m fcapsule.cli compare-llms \
   --models deepseek-v4-flash deepseek-v4-pro
 ```
 
-Model comparison is an offline evaluation workflow, not an operator dashboard. The evidence report is built deterministically. With a key configured, a background investigator preserves mutable workload state and lets the model select up to four bounded checks before concluding. Tools can query resource history, literal log matches, peer/preceding-window comparisons, namespace-scoped database metrics, explicitly declared same-namespace dependencies and unselected retained log candidates. Valid evidence references and uncertainty are required, but citation checks do not prove the explanation. No remediation or application replication is executed. See [AI investigation techniques](docs/ai_investigation_techniques.md) for scope, budgets and limitations.
+Model comparison is an offline evaluation workflow, not an operator dashboard. The evidence report is built deterministically. With a key configured, a background investigator preserves mutable workload state and lets the model select up to four bounded checks before concluding. Tools can query resource history, literal log matches, peer/preceding-window comparisons, namespace-scoped database metrics, explicitly declared same-namespace dependencies and unselected retained log candidates. For an exact retained recurrence candidate, it can also inspect one bounded prior episode and publish a cited comparison; that remains support for responder memory, not proof of a common cause. Valid evidence references and uncertainty are required, but citation checks do not prove the explanation. No remediation or application replication is executed. See [AI investigation techniques](docs/ai_investigation_techniques.md) for scope, budgets and limitations.
 
 Re-score stored responses after a rubric change without making provider calls:
 
@@ -184,7 +186,8 @@ Start with the [documentation index](docs/README.md), which separates current op
 - `docs/kubernetes_deployment.md`: live-source Kubernetes deployment and verification runbook.
 - `docs/external_workload_boundary.md`: boundary between FCAPSule and workloads such as FCAPSule Lab.
 - `docs/architecture.md`: component and deployment architecture.
-- `docs/ai_investigation_techniques.md`: tool-driven episode reasoning, preservation, reference comparisons, validation and token accounting.
+- `docs/ai_investigation_techniques.md`: tool-driven episode reasoning, preservation, bounded historical comparisons, validation and token accounting.
+- `docs/operations_evolution_plan.md`: implemented Operations evolution and explicit non-goals.
 - `docs/data_privacy.md`: collection, anonymization, and retention policy.
 - `docs/design_decisions.md`: important design decisions and tradeoffs.
 - `docs/production_product_requirements.md`: operator-first product requirements and acceptance criteria.
