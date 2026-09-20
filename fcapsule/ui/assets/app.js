@@ -117,7 +117,7 @@ function renderConsole(state) {
   document.querySelectorAll('[data-archive]').forEach(button => button.addEventListener('click', () => changeEpisodeState(button.dataset.archive, 'archive')));
   document.querySelectorAll('[data-restore]').forEach(button => button.addEventListener('click', () => changeEpisodeState(button.dataset.restore, 'restore')));
   document.querySelectorAll('[data-delete]').forEach(button => button.addEventListener('click', () => deleteEpisode(button.dataset.delete)));
-  const animated = animateEpisodeId && document.querySelector('.episode-body');
+  const animated = animateEpisodeId && document.querySelector('.episode.is-open .episode-body');
   if (animated && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
     animated.animate([{opacity:0, transform:'translateY(-6px)'},{opacity:1, transform:'translateY(0)'}], {duration:180, easing:'ease-out'});
   }
@@ -256,7 +256,7 @@ function formatDate(value) {
 async function openEpisodeReport(episodeId, incidentId, keepOpen = false) {
   const sequence = ++requestSequence;
   if (selectedEpisodeId === episodeId && !keepOpen) {
-    const body = document.querySelector('.episode-body');
+    const body = document.querySelector('.episode.is-open .episode-body');
     if (body && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
       await body.animate([{height:body.offsetHeight + 'px',opacity:1},{height:'0px',opacity:0}], {duration:150,easing:'ease-in',fill:'forwards'}).finished;
     }
