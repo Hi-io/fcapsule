@@ -31,6 +31,12 @@ class IncidentBriefingTests(unittest.TestCase):
         self.assertIn("ev_config_001", prompt[1]["content"])
         self.assertIn("SCHEMA_EPOCH", prompt[1]["content"])
 
+    def test_prompt_distinguishes_missing_samples_from_contrary_evidence(self):
+        prompt = build_briefing_prompt(self.report)[0]["content"]
+        self.assertIn("cannot exclude a brief OOM peak", prompt)
+        self.assertIn("do not prove CPU saturation", prompt)
+        self.assertIn("termination reason", prompt)
+
     @patch("fcapsule.reasoning.incident_briefing.DeepSeekChatClient")
     def test_valid_cited_response_is_retained(self, client_class):
         client_class.return_value.chat.return_value = {
