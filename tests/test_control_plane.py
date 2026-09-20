@@ -107,10 +107,10 @@ class ControlPlaneTests(unittest.TestCase):
                 with urlopen(f"{base}/console", timeout=3) as response:
                     html = response.read().decode("utf-8")
                 self.assertIn("Operations", html)
-                self.assertIn("AI settings", html)
+                self.assertIn("Settings", html)
                 self.assertNotIn("Incident Lab", html)
                 with urlopen(f"{base}/settings", timeout=3) as response:
-                    self.assertIn("AI settings", response.read().decode("utf-8"))
+                    self.assertIn("Settings", response.read().decode("utf-8"))
                 with urlopen(f"{base}/targets", timeout=3) as response:
                     targets_html = response.read().decode("utf-8")
                 self.assertIn("Targets", targets_html)
@@ -151,10 +151,36 @@ class ControlPlaneTests(unittest.TestCase):
                     sources = json.loads(response.read())
                 self.assertEqual(sources["cluster_name"], "test-cluster")
                 self.assertEqual(sources["namespaces"], ["default"])
+                retention_request = Request(
+                    f"{base}/api/settings/general",
+                    data=json.dumps({"incident_retention_days": 45}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urlopen(retention_request, timeout=3) as response:
+                    general = json.loads(response.read())
+                self.assertEqual(general["incident_retention_days"], 45)
             finally:
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=5)
+
+    def test_incident_archive_restore_and_delete_lifecycle(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
+            control_plane = ControlPlane(Path(directory) / "state")
+            incident = control_plane.ingest_case(REFERENCE_CASE, "checkout-platform", "Checkout Platform")
+            incident_id = incident["incident_id"]
+
+            control_plane.set_incident_archived(incident_id, True)
+            state = control_plane.snapshot()
+            self.assertEqual(state["overview"]["incidents"], [])
+            self.assertEqual(state["overview"]["archived_incidents"][0]["incident_id"], incident_id)
+
+            control_plane.set_incident_archived(incident_id, False)
+            self.assertEqual(control_plane.snapshot()["overview"]["incidents"][0]["incident_id"], incident_id)
+
+            control_plane.delete_incident(incident_id)
+            self.assertIsNone(control_plane.store.get_incident(incident_id))
 
 
 if __name__ == "__main__":

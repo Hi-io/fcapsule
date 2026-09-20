@@ -173,8 +173,19 @@ class LiveSourceCoordinator:
         self._mark_unobserved_applications(config, observed_app_ids)
 
         alerts = prometheus.active_alerts() if probes["targets"]["prometheus"].get("ok") else []
+        alert_rules: dict[str, dict[str, Any]] = {}
+        if probes["targets"]["prometheus"].get("ok"):
+            try:
+                alert_rules = prometheus.alert_rules()
+            except Exception:
+                # Alert capture remains available on Prometheus versions or proxies
+                # that do not expose rule definitions.
+                alert_rules = {}
         captured: list[dict[str, Any]] = []
         for alert in alerts:
+            rule = alert_rules.get(str(alert.get("alertname", "")))
+            if rule:
+                alert["rule"] = rule
             labels = alert.get("labels", {})
             namespace = str(labels.get("namespace", ""))
             if alert["alertname"] in IGNORED_ALERTS or (namespaces and namespace not in namespaces):

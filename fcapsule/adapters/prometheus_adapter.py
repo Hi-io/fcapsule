@@ -81,6 +81,30 @@ class PrometheusAdapter:
             )
         return alerts
 
+    def alert_rules(self) -> dict[str, dict[str, Any]]:
+        """Return Prometheus alert definitions keyed by alert name."""
+
+        data = self._api("/api/v1/rules", {"type": "alert"}) or {}
+        definitions: dict[str, dict[str, Any]] = {}
+        for group in data.get("groups", []):
+            for rule in group.get("rules", []):
+                name = str(rule.get("name", "")).strip()
+                if not name or str(rule.get("type", "alerting")) != "alerting":
+                    continue
+                definitions[name] = {
+                    "name": name,
+                    "query": str(rule.get("query", "")),
+                    "duration": float(rule.get("duration", 0) or 0),
+                    "keep_firing_for": float(rule.get("keepFiringFor", 0) or 0),
+                    "labels": dict(rule.get("labels", {})),
+                    "annotations": dict(rule.get("annotations", {})),
+                    "health": str(rule.get("health", "unknown")),
+                    "last_error": str(rule.get("lastError", "")),
+                    "group": str(group.get("name", "")),
+                    "file": str(group.get("file", "")),
+                }
+        return definitions
+
     def pod_inventory(self, namespaces: set[str] | None = None) -> dict[tuple[str, str], dict[str, str]]:
         inventory: dict[tuple[str, str], dict[str, str]] = {}
         for item in self.query("kube_pod_info"):

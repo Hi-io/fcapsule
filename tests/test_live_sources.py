@@ -49,6 +49,26 @@ class LiveSourceTests(unittest.TestCase):
                         ]
                     },
                 },
+                "/api/v1/rules": {
+                    "status": "success",
+                    "data": {
+                        "groups": [
+                            {
+                                "name": "workloads",
+                                "file": "/etc/prometheus/rules.yaml",
+                                "rules": [
+                                    {
+                                        "type": "alerting",
+                                        "name": "PodRestart",
+                                        "query": "increase(kube_pod_container_status_restarts_total[5m]) > 0",
+                                        "duration": 60,
+                                        "health": "ok",
+                                    }
+                                ],
+                            }
+                        ]
+                    },
+                },
                 "/api/v1/query_range": {
                     "status": "success",
                     "data": {
@@ -71,6 +91,7 @@ class LiveSourceTests(unittest.TestCase):
             }
         )
         self.assertEqual(adapter.active_alerts()[0]["alertname"], "PodRestart")
+        self.assertIn("increase(", adapter.alert_rules()["PodRestart"]["query"])
         self.assertIn(("shop", "api-1"), adapter.pod_inventory({"shop"}))
         end = datetime(2026, 9, 20, tzinfo=timezone.utc)
         metrics = adapter.collect_pod_metrics("shop", "api-1", end - timedelta(minutes=5), end)

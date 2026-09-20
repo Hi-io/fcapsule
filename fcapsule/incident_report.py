@@ -202,6 +202,7 @@ def _fault_alerts(capsule: dict[str, Any]) -> list[dict[str, Any]]:
                 "timestamp": item.get("startsAt"),
                 "description": item.get("annotations", {}).get("description", "Alert fired."),
                 "service": labels.get("service") or labels.get("component"),
+                "rule": item.get("rule"),
             }
         )
     return sorted(alerts, key=lambda item: str(item.get("timestamp", "")))

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +24,7 @@ from fcapsule.ui.dashboard import render_dashboard
 
 
 class ControlPlane:
-    """Thread-safe coordinator shared by the API, Operations, and AI settings."""
+    """Thread-safe coordinator shared by the API and operator console."""
 
     def __init__(self, state_dir: str | Path = ".fcapsule") -> None:
         self.state_dir = Path(state_dir).resolve()
@@ -54,6 +56,8 @@ class ControlPlane:
         load_env_file(self.state_dir / ".env")
         load_env_file()
         self._persist_ai_settings()
+        self._last_retention_check = 0.0
+        self.purge_expired_incidents()
         existing = self.store.overview()
         if existing["incidents"]:
             incident = existing["incidents"][0]
@@ -125,6 +129,66 @@ class ControlPlane:
             write_env_value(self.state_dir / ".env", "DEEPSEEK_API_KEY", api_key)
         self._persist_ai_settings()
         return self.ai_configuration()
+
+    def general_configuration(self) -> dict[str, Any]:
+        try:
+            retention_days = int(self.store.get_setting("incident_retention_days", "30") or 30)
+        except ValueError:
+            retention_days = 30
+        return {"incident_retention_days": min(3650, max(1, retention_days))}
+
+    def update_general_configuration(self, payload: dict[str, Any]) -> dict[str, Any]:
+        retention_days = int(payload.get("incident_retention_days", 30))
+        if retention_days < 1 or retention_days > 3650:
+            raise ValueError("Incident retention must be between 1 and 3650 days")
+        self.store.set_setting("incident_retention_days", str(retention_days))
+        self.purge_expired_incidents(force=True)
+        return self.general_configuration()
+
+    def set_incident_archived(self, incident_id: str, archived: bool) -> dict[str, Any]:
+        incident = self.store.set_incident_archived(incident_id, archived)
+        if archived and self.current_incident_id == incident_id:
+            active = self.store.list_incidents(limit=1)
+            self.current_incident_id = active[0]["incident_id"] if active else None
+        return incident
+
+    def delete_incident(self, incident_id: str) -> None:
+        incident = self.store.get_incident(incident_id)
+        if not incident:
+            raise KeyError(f"Unknown incident: {incident_id}")
+        capsule = self.store.get_capsule_for_incident(incident_id)
+        self.store.delete_incident(incident_id)
+        self._remove_managed_tree(incident.get("case_dir"))
+        if capsule:
+            self._remove_managed_tree(capsule.get("output_dir"))
+        if self.current_incident_id == incident_id:
+            active = self.store.list_incidents(limit=1)
+            self.current_incident_id = active[0]["incident_id"] if active else None
+        if capsule and self.current_capsule_id == capsule.get("capsule_id"):
+            self.current_capsule_id = None
+
+    def purge_expired_incidents(self, force: bool = False) -> int:
+        now = time.monotonic()
+        if not force and now - self._last_retention_check < 60:
+            return 0
+        self._last_retention_check = now
+        retention_days = self.general_configuration()["incident_retention_days"]
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat().replace("+00:00", "Z")
+        expired = self.store.incidents_older_than(cutoff)
+        for incident in expired:
+            self.delete_incident(str(incident["incident_id"]))
+        return len(expired)
+
+    def _remove_managed_tree(self, value: Any) -> None:
+        if not value:
+            return
+        path = Path(str(value)).resolve()
+        try:
+            path.relative_to(self.state_dir)
+        except ValueError:
+            return
+        if path.is_dir():
+            shutil.rmtree(path)
 
     def source_configuration(self) -> dict[str, Any]:
         return self.live_sources.configuration()
@@ -374,6 +438,7 @@ class ControlPlane:
         return capsule
 
     def snapshot(self) -> dict[str, Any]:
+        self.purge_expired_incidents()
         with self.lock:
             state = {
                 "running": self.running,
@@ -385,6 +450,7 @@ class ControlPlane:
                 "phases": json.loads(json.dumps(self.phases)),
                 "live": json.loads(json.dumps(self.live)),
                 "ai": self.ai_configuration(),
+                "settings": self.general_configuration(),
                 "sources": json.loads(json.dumps(self.source_state)),
             }
         state["overview"] = self.store.overview()
@@ -411,10 +477,7 @@ class ControlPlane:
         incident = self.store.get_incident(incident_id)
         if not incident:
             return None
-        capsule_record = next(
-            (item for item in self.store.list_capsules() if item["incident_id"] == incident_id),
-            None,
-        )
+        capsule_record = self.store.get_capsule_for_incident(incident_id)
         if not capsule_record:
             return {"incident": incident, "report": None}
         capsule_path = Path(capsule_record["output_dir"]) / "capsule.json"

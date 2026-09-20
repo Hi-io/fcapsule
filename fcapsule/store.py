@@ -82,7 +82,8 @@ class FCAPSuleStore:
                     raw_bytes INTEGER NOT NULL,
                     trace_access TEXT NOT NULL,
                     summary TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    archived_at TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS capsules (
@@ -122,6 +123,12 @@ class FCAPSuleStore:
                     ON capsules(app_id, created_at DESC);
                 """
             )
+            incident_columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(incidents)").fetchall()
+            }
+            if "archived_at" not in incident_columns:
+                connection.execute("ALTER TABLE incidents ADD COLUMN archived_at TEXT")
             now = utc_now()
             for model_id, provider, max_tokens, enabled in DEFAULT_MODEL_PROFILES:
                 connection.execute(
@@ -251,10 +258,38 @@ class FCAPSuleStore:
             row = connection.execute("SELECT * FROM incidents WHERE incident_id = ?", (incident_id,)).fetchone()
         return self._incident_row(row) if row else None
 
-    def list_incidents(self, limit: int = 50) -> list[dict[str, Any]]:
+    def list_incidents(self, limit: int = 50, archived: bool = False) -> list[dict[str, Any]]:
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM incidents ORDER BY started_at DESC LIMIT ?", (limit,)
+                "SELECT * FROM incidents WHERE archived_at IS "
+                + ("NOT NULL" if archived else "NULL")
+                + " ORDER BY started_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [self._incident_row(row) for row in rows]
+
+    def set_incident_archived(self, incident_id: str, archived: bool) -> dict[str, Any]:
+        with self._connect() as connection:
+            result = connection.execute(
+                "UPDATE incidents SET archived_at = ? WHERE incident_id = ?",
+                (utc_now() if archived else None, incident_id),
+            )
+            if result.rowcount == 0:
+                raise KeyError(f"Unknown incident: {incident_id}")
+        return self.get_incident(incident_id) or {}
+
+    def delete_incident(self, incident_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute("DELETE FROM capsules WHERE incident_id = ?", (incident_id,))
+            result = connection.execute("DELETE FROM incidents WHERE incident_id = ?", (incident_id,))
+            if result.rowcount == 0:
+                raise KeyError(f"Unknown incident: {incident_id}")
+
+    def incidents_older_than(self, cutoff: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM incidents WHERE created_at < ? ORDER BY created_at",
+                (cutoff,),
             ).fetchall()
         return [self._incident_row(row) for row in rows]
 
@@ -306,6 +341,14 @@ class FCAPSuleStore:
     def get_capsule(self, capsule_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM capsules WHERE capsule_id = ?", (capsule_id,)).fetchone()
+        return dict(row) if row else None
+
+    def get_capsule_for_incident(self, incident_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM capsules WHERE incident_id = ? ORDER BY created_at DESC LIMIT 1",
+                (incident_id,),
+            ).fetchone()
         return dict(row) if row else None
 
     def list_capsules(self, limit: int = 50) -> list[dict[str, Any]]:
@@ -390,16 +433,20 @@ class FCAPSuleStore:
     def overview(self) -> dict[str, Any]:
         applications = self.list_applications()
         incidents = self.list_incidents()
+        archived_incidents = self.list_incidents(archived=True)
         capsules = self.list_capsules()
+        observed_applications = [item for item in applications if item["status"] != "not_observed"]
         return {
             "applications": applications,
             "incidents": incidents,
+            "archived_incidents": archived_incidents,
             "capsules": capsules,
             "models": self.list_model_profiles(),
             "totals": {
-                "applications": len(applications),
-                "degraded_applications": sum(1 for item in applications if item["status"] == "degraded"),
+                "applications": len(observed_applications),
+                "degraded_applications": sum(1 for item in observed_applications if item["status"] == "degraded"),
                 "incidents": len(incidents),
+                "archived_incidents": len(archived_incidents),
                 "capsules": len(capsules),
                 "raw_bytes_observed": sum(int(item["raw_bytes"]) for item in incidents),
                 "capsule_bytes_retained": sum(int(item["size_bytes"]) for item in capsules),
