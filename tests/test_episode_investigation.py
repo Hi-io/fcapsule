@@ -119,6 +119,12 @@ class InvestigationEngineTests(unittest.TestCase):
         value["connections"] = [{"from": "one", "to": "two", "relationship": "no_link_established", "reason": "Timing only", "evidence_ids": ["Q001"]}]
         self.assertEqual(len(validate_assessment(value, {"Q001"}, {"one", "two"})["connections"]), 1)
 
+    def test_live_log_query_is_not_delegated_back_without_attempt(self):
+        self.context.update(live_capture=True, evidence=[{"id": "E1", "domain": "log_template"}])
+        state, _ = self.run_case([{"action": "finish", "assessment": assessment()}], max_checks=0)
+        self.assertEqual(state["status"], "incomplete")
+        self.assertIn("Search source logs", state["validation_error"])
+
 
 class InvestigationToolTests(unittest.TestCase):
     def setUp(self):

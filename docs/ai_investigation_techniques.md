@@ -36,6 +36,10 @@ There are no model-generated percentages presented as calibrated confidence.
 
 ### 2. Hypothesis-Directed Tool Use
 
+For live captures containing log evidence, a bounded source-log search is required
+before finalizing, so a log investigation is not simply handed back to the operator.
+An unavailable query remains a recorded limitation, not fabricated evidence.
+
 After early preservation, the model returns either a structured check request or a
 final assessment. Each check includes a short diagnostic question and the
 explanations it is intended to distinguish. FCAPSule validates the tool and its

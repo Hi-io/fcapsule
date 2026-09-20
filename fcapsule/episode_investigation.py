@@ -86,6 +86,9 @@ Use cautious mechanism language (consistent with, may, likely) even when a hypot
 Use episode_lifecycle and current_status: describe resolved incidents in the past tense. Never claim a
 historical failing job or failure persists now without a current observation of that specific failure.
 Before concluding, perform at least one discriminating check beyond automatic workload preservation.
+For a live capture with log evidence, also execute search_logs before concluding. Choose short literal search terms
+that could support or challenge the mechanism. Do not delegate an available evidence query back to the operator
+unless it was attempted and unavailable, or the budget is exhausted. A source-query attempt may legitimately return nothing.
 For retained/imported cases, review_omitted is available without source access. Do not keep querying once evidence is sufficient.
 Never execute remediation, invent commands, probabilities or a definitive root cause. No shell/URL/PromQL is allowed.
 Give concise observations and a discriminating next action with an expected finding, not generic advice.
@@ -110,7 +113,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                       publish: Callable[[dict[str, Any]], None], max_checks: int = 4,
                       client: Any = None) -> dict[str, Any]:
     state = {"version": "1", "episode_id": context["episode_id"], "status": "running", "started_at": now(),
-             "policy_version": "episode-investigation-1.2", "max_completion_tokens_per_call": max_tokens,
+             "policy_version": "episode-investigation-1.3", "max_completion_tokens_per_call": max_tokens,
              "model": model, "context": context, "checks": [], "calls": [], "assessment": None,
              "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
              "source_retention": "unknown", "preservation": "Mutable workload state is checked early; no source expiry is assumed."}
@@ -181,6 +184,8 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 if decision.get("action") == "finish":
                     if max_checks > 0 and len(state["checks"]) < 2:
                         raise ValueError("Run one discriminating check beyond automatic preservation before concluding")
+                    if context.get("live_capture") and any(item.get("domain") == "log_template" for item in context["evidence"]) and not any(item["tool"] == "search_logs" for item in state["checks"]):
+                        raise ValueError("Search source logs for a discriminating observation before concluding this live episode")
                     state["assessment"] = validate_assessment(decision.get("assessment"), evidence_ids,
                                                               {item["incident_id"] for item in context["alerts"]})
             except ValueError as error:

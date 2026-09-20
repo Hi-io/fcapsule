@@ -80,7 +80,8 @@ def episode_context(episode: dict[str, Any], entries: list[dict[str, Any]]) -> d
                     "alert": next((alert for alert in report.get("fault_alerts", []) if alert.get("evidence_id") == item["evidence_id"]), None),
                     "provenance": []}
             evidence[ref]["provenance"].append({"incident_id": incident_id, "evidence_id": item["evidence_id"]})
-    return scrub({"episode_id": episode["episode_id"], "episode_lifecycle": {key: episode.get(key) for key in
+    return scrub({"episode_id": episode["episode_id"], "live_capture": any(entry["incident"].get("source_kind") == "live" for entry in entries),
+        "episode_lifecycle": {key: episode.get(key) for key in
                   ("status", "started_at", "ended_at", "last_activity_at")}, "alerts": alerts,
         "evidence": list(evidence.values())[:80],
         "impact": [item for entry in entries for item in entry["report"].get("impact", [])][:15],
