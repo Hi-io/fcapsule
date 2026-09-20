@@ -162,6 +162,14 @@ at or after that alert. A healthy earlier baseline is not evidence that a later
 connection leak recovered. `mysql_up` identifies exporter collection failure;
 it does not by itself establish that the MySQL process stopped.
 
+The live CPU case identified PBKDF2 work correctly but suggested reducing its round
+count. This is recorded as a recommendation-quality failure: reducing cryptographic
+cost can weaken security. The investigation and final review instructions now prefer
+reversible load controls and prohibit weakening cryptography, authentication, TLS,
+validation or durability as a performance shortcut. Queue-data deletion likewise
+requires preservation and an explicit operator decision. These are model instructions,
+not a formal guarantee of safe advice; the product never executes remediation.
+
 Live queries require an incident captured through the live integration, matching
 configured cluster identity and allowed namespace. Imported cases use retained
 evidence only. The model cannot provide URLs, PromQL, OpenSearch DSL, shell commands,

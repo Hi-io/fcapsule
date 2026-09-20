@@ -4,6 +4,10 @@
 
 ### Changed
 
+- Added bounded same-namespace dependency investigation through declared Kubernetes Services after external workload tests exposed upstream-only diagnoses.
+- Prioritized log matches around the latest episode alert, separated post-alert metric summaries, and retained MySQL error codes and exporter reachability gaps.
+- Distinguished capture-window boundaries from alert resolution and currently firing signals from historical episode severity; documented independent failure phases within temporal groups.
+
 - Replaced the Operations per-alert briefing with a joint, evidence-seeking episode investigation: fixed read-only tools, competing explanations, cited alert relationships, baseline/peer checks and omitted-log inspection.
 - Added mutable workload preservation, CPU/memory limits, last termination/exit code, throttling and OOM metric context without inferring source retention.
 - Added persisted check progress, separate agent timeline, small token accounting, investigation JSON exports and explicit reassessment with bounded history.

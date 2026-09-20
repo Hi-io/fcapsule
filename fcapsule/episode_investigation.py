@@ -117,6 +117,10 @@ that could support or challenge the mechanism. Do not delegate an available evid
 unless it was attempted and unavailable, or the budget is exhausted. A source-query attempt may legitimately return nothing.
 For retained/imported cases, review_omitted is available without source access. Do not keep querying once evidence is sufficient.
 Never execute remediation, invent commands, probabilities or a definitive root cause. No shell/URL/PromQL is allowed.
+Prefer reversible mitigations that preserve evidence. Do not recommend weakening cryptographic work factors,
+authentication, TLS, validation or durability to relieve load. For security-sensitive computation, prefer bounded
+concurrency, scheduling or capacity review; algorithm/work-factor changes require a separate security-policy review.
+Do not recommend deleting queued business data without preservation and an explicit operator decision.
 Give concise observations and a discriminating next action with an expected finding, not generic advice.
 Return JSON. To check: {"action":"check","tool":"catalog name","arguments":{},
 "question":"short question this check will answer","distinguishes":"which explanations it separates"}.
