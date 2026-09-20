@@ -49,3 +49,30 @@ Shared presentation tokens and component refinements live in `visual.css`, loade
 after the existing structural stylesheet. The Python server serves the local icon
 allowlist. Neither package builds nor Kubernetes installations require Node.js;
 Node is only used for the optional UI-helper regression tests.
+
+## Verification
+
+1. **Operations: verified.** Retained incidents were rendered with the new workspace
+   shell. Overview, evidence tabs and nested raw-log disclosures work. At 390px the
+   report stacks without page-level horizontal overflow; the log viewer remains
+   independently scrollable. Screenshots: `04-mobile-evidence.png` and
+   `05-operations-after.png`.
+2. **Targets: verified.** All three real source connections tested healthy. Configure
+   opens and focuses connection settings. Namespace disclosures work with Enter.
+   The coverage table remains horizontally scrollable within its section on mobile,
+   not across the entire page. Screenshots: `06-targets-mobile.png` and
+   `09-targets-after.png`.
+3. **Settings: verified.** Heading and form columns align on desktop and stack on
+   mobile. Retention and token-count inputs have bounded widths; all original fields
+   remain available. No credentials or retention values were changed for this review.
+   Screenshots: `07-settings-mobile.png` and `08-settings-after.png`.
+
+Automated checks: 56 Python tests, three Node UI-helper tests, JavaScript syntax and
+Git whitespace checks pass. All 14 deployed SVG endpoints returned valid responses.
+The deployment reports one ready replica. No JavaScript errors were observed during
+the final deployed browser checks. Tests used retained cluster data; this visual pass
+did not induce new faults or request new model analyses.
+
+The desktop and 390px screenshots were inspected after saving, and temporary viewport
+overrides were reset. Native keyboard and focus behaviour were exercised, but this is
+not a complete assistive-technology or cross-browser accessibility certification.

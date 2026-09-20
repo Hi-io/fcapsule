@@ -48,6 +48,7 @@ function disclosure(id, title, content, count = '') {
   return `<details class="evidence-disclosure" data-disclosure="${safe(id)}" ${openDisclosures.has(id) ? 'open' : ''}><summary id="disclosure-${safe(id)}"><span class="disclosure-title">${domainIcon ? icon(domainIcon) : ''}<span>${safe(title)}</span></span>${count !== '' ? `<span class="detail-count">${safe(count)}</span>` : ''}</summary><div class="disclosure-body">${content}</div></details>`;
 }
 function icon(name) { return `<span class="ui-icon" data-icon="${safe(name)}" aria-hidden="true"></span>`; }
+function quantity(count, noun) { return `${count} ${noun}${count === 1 ? '' : 's'}`; }
 function reportId() { return selectedReport?.incident?.incident_id || selectedReport?.report?.incident?.incident_id; }
 function allEpisodes(state = lastState) { return [...state.overview.episodes, ...state.overview.archived_episodes]; }
 function updateLocation() {
@@ -203,7 +204,7 @@ function applicationTable(items) {
   });
   return [...groups].sort(([a],[b]) => a.localeCompare(b)).map(([key, apps]) => `
     <details class="namespace-group" data-namespace="${safe(key)}" ${closedNamespaces.has(key) ? '' : 'open'}>
-    <summary><span class="namespace-heading">${icon('layers')}<span><small>${safe(apps[0].cluster)}</small><strong>${safe(apps[0].namespace)}</strong></span></span><span>${apps.length} app${apps.length === 1 ? '' : 's'} · ${apps.reduce((n,item)=>n+(item.source_config?.pods?.length || 0),0)} pods</span></summary>
+    <summary><span class="namespace-heading">${icon('layers')}<span><small>${safe(apps[0].cluster)}</small><strong>${safe(apps[0].namespace)}</strong></span></span><span>${quantity(apps.length, 'app')} · ${quantity(apps.reduce((n,item)=>n+(item.source_config?.pods?.length || 0),0), 'pod')}</span></summary>
     <div class="table-wrap"><table><thead><tr><th>Application</th><th>State</th><th>Pods</th><th>Telemetry</th><th>Latest capture</th></tr></thead><tbody>${apps.map(item => `
     <tr><td><strong>${safe(item.name)}</strong><small class="cell-note">${safe(item.environment)}</small></td><td>${status(item.status)}</td>
     <td>${disclosure('pods-' + item.app_id, (item.source_config?.pods?.length || 0) + ' observed', `<div class="pod-list">${(item.source_config?.pods || []).map(pod=>`<span class="pod-line"><code>${safe(pod.name)}</code>${status(pod.ready ? 'ready' : pod.phase || 'unknown')}</span>`).join('')}</div>`)}</td>
