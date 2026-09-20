@@ -110,7 +110,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                       publish: Callable[[dict[str, Any]], None], max_checks: int = 4,
                       client: Any = None) -> dict[str, Any]:
     state = {"version": "1", "episode_id": context["episode_id"], "status": "running", "started_at": now(),
-             "policy_version": "episode-investigation-1.1", "max_completion_tokens_per_call": max_tokens,
+             "policy_version": "episode-investigation-1.2", "max_completion_tokens_per_call": max_tokens,
              "model": model, "context": context, "checks": [], "calls": [], "assessment": None,
              "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
              "source_retention": "unknown", "preservation": "Mutable workload state is checked early; no source expiry is assumed."}
@@ -118,6 +118,28 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
     evidence_ids = {item["id"] for item in context["evidence"]}
     seen = set()
     validation_feedback = None
+
+    def request_model(payload, effort, phase):
+        if time.monotonic() - started > 420:
+            raise ValueError("Investigation time budget reached")
+        encoded = json.dumps(payload, ensure_ascii=True)
+        if len(encoded) > 160000:
+            raise ValueError("Input size budget reached")
+        call = {"started_at": now(), "status": "running", "reasoning_effort": effort, "phase": phase}
+        state["calls"].append(call)
+        publish(state)
+        response = client.chat(ChatRequest(model=model, messages=[{"role": "system", "content": SYSTEM},
+            {"role": "user", "content": encoded}], max_tokens=max_tokens, reasoning_effort=effort, json_output=True))
+        usage = response.get("usage") or {}
+        call.update({"status": "completed", "finished_at": now(), "usage": usage,
+                     "latency_seconds": response.get("latency_seconds"), "finish_reason": response.get("finish_reason")})
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            if not isinstance(usage.get(key), int):
+                state["usage"]["complete"] = False
+            else:
+                state["usage"][key] += usage[key]
+        publish(state)
+        return response, call
 
     def check(name, arguments, question, distinguishes, automatic=False):
         row = {"id": f"Q{len(state['checks']) + 1:03d}", "tool": name, "arguments": arguments,
@@ -152,26 +174,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                        "instruction": "Finish using collected evidence now." if turn == max_checks else "Choose the most useful remaining check, or finish when further queries would not help."}
             state["message"] = "Assessing episode evidence" if turn == 0 else "Reviewing check results"
             publish(state)
-            call = {"started_at": now(), "status": "running"}
-            call["reasoning_effort"] = "none" if validation_feedback else "low"
-            state["calls"].append(call)
-            publish(state)
-            encoded = json.dumps(payload, ensure_ascii=True)
-            if len(encoded) > 160000:
-                call.update(status="not_sent", finished_at=now())
-                raise ValueError("Input size budget reached")
-            response = client.chat(ChatRequest(model=model, messages=[{"role": "system", "content": SYSTEM},
-                {"role": "user", "content": encoded}], max_tokens=max_tokens,
-                reasoning_effort="none" if validation_feedback else "low", json_output=True))
-            usage = response.get("usage") or {}
-            call.update({"status": "completed", "finished_at": now(), "usage": usage,
-                         "latency_seconds": response.get("latency_seconds"), "finish_reason": response.get("finish_reason")})
-            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-                if not isinstance(usage.get(key), int):
-                    state["usage"]["complete"] = False
-                else:
-                    state["usage"][key] += usage[key]
-            publish(state)
+            response, call = request_model(payload, "none" if validation_feedback else "low", "investigation")
             try:
                 decision = parse_object(str(response.get("content", "")))
                 call["decision"] = scrub(decision)
@@ -201,10 +204,26 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             if any(not isinstance(text, str) or not 1 <= len(text) <= 400 for text in (question, distinguishes)):
                 raise ValueError("Missing purpose for check")
             check(name, arguments, scrub(question), scrub(distinguishes))
+        if state["assessment"] is not None:
+            draft = state.pop("assessment")
+            state.update(status="running", assessment=None, draft_assessment=draft, review={"status": "running"}, message="Checking the conclusion against its evidence")
+            publish(state)
+            response, call = request_model({**context, "checks": state["checks"], "available_evidence_ids": sorted(evidence_ids),
+                "assessment_to_review": draft,
+                "instruction": "Evidence review only. Return action=finish with a corrected full assessment; do not call tools. Remove any claim not supported by observations. Resolution means alerts stopped firing, NOT that a job was cleared or a particular fix was applied. Never assert removal, remediation or recovery mechanism without an actual observation of it. Keep historical versus current state distinct. Do not invent metrics or actions. Preserve genuine OOM evidence despite low sampled working set. Keep mechanisms conditional and next actions safe and conditional. Existing text is a draft, not evidence."}, "none", "evidence_review")
+            decision = parse_object(str(response.get("content", "")))
+            call["decision"] = scrub(decision)
+            if decision.get("action") != "finish":
+                raise ValueError("Evidence review did not return an assessment")
+            reviewed = validate_assessment(decision.get("assessment"), evidence_ids, {item["incident_id"] for item in context["alerts"]})
+            state.update(assessment=reviewed, status="ready", review={"status": "completed", "changed": reviewed != draft,
+                         "limitation": "Model-assisted consistency review, not independent proof."})
     except Exception as error:
         state["status"] = "incomplete"
         state["message"] = "No validated conclusion was produced. Retained observations remain available; retry is explicit."
         state["error_type"] = type(error).__name__
+        if state.get("review", {}).get("status") == "running":
+            state["review"]["status"] = "failed"
         if isinstance(error, ValueError):
             state["validation_error"] = str(error)[:240]
         if state["calls"] and state["calls"][-1]["status"] == "running":

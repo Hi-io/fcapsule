@@ -185,6 +185,16 @@ class ControlPlaneTests(unittest.TestCase):
                 with urlopen(retention_request, timeout=3) as response:
                     general = json.loads(response.read())
                 self.assertEqual(general["incident_retention_days"], 45)
+                incident = server.control_plane.ingest_case(REFERENCE_CASE, "checkout")
+                server.control_plane._build_capsule(incident["incident_id"])
+                episode = server.control_plane.store.episode_for_incident(incident["incident_id"])
+                endpoint = f"{base}/api/episodes/{episode['episode_id']}/investigation"
+                with urlopen(endpoint, timeout=3) as response:
+                    self.assertEqual(json.loads(response.read())["status"], "not_configured")
+                with urlopen(Request(endpoint, data=b"", method="POST"), timeout=3) as response:
+                    result = json.loads(response.read())
+                    self.assertEqual(result["episode_id"], episode["episode_id"])
+                    self.assertEqual(result["status"], "not_configured")
             finally:
                 server.shutdown()
                 server.server_close()

@@ -5,6 +5,7 @@ import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from zipfile import ZipFile
 
 from fcapsule.control_plane import ControlPlane
 from tests.common import REFERENCE_CASE
@@ -100,3 +101,27 @@ class AutomaticInvestigationTests(unittest.TestCase):
             self.control.briefing_executor.shutdown(wait=True)
             self.assertEqual(generate.call_count, 1)
             self.assertEqual(json.loads(path.read_text())["status"], "ready")
+
+    def test_joint_job_waits_for_members_and_deletion_invalidates_shared_exports(self):
+        self.control.store.record_incident({**self.incident, "incident_id": "second-signal"})
+
+        def provider(context, kit, model, limit, publish):
+            self.assertEqual(len(context["alerts"]), 2)
+            publish({"status": "ready", "checks": [], "assessment": {"summary": "Joint"}, "context": context})
+
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}), patch(
+            "fcapsule.investigation_service.run_investigation", side_effect=provider
+        ) as generate:
+            first = self.control._build_capsule(self.id)
+            self.assertEqual(self.control.investigator.read(self.episode_id)["status"], "waiting")
+            generate.assert_not_called()
+            second = self.control._build_capsule("second-signal")
+            self.control.briefing_executor.shutdown(wait=True)
+            self.assertEqual(generate.call_count, 1)
+            for record in (first, second):
+                with ZipFile(record["archive_path"]) as archive:
+                    self.assertIn("episode_investigation.json", archive.namelist())
+            self.control.delete_incident(self.id)
+            self.assertEqual(self.control.investigator.read(self.episode_id)["status"], "not_started")
+            with ZipFile(second["archive_path"]) as archive:
+                self.assertNotIn("episode_investigation.json", archive.namelist())

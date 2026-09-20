@@ -72,7 +72,7 @@ class InvestigationService:
                      "attempt": previous.get("attempt", 0) + 1}
             history = list(previous.get("previous_runs", []))
             if previous.get("started_at"):
-                history.append({key: previous.get(key) for key in ("attempt", "started_at", "finished_at", "status", "usage", "assessment", "checks")})
+                history.append({key: previous.get(key) for key in ("attempt", "started_at", "finished_at", "status", "usage", "assessment", "checks", "calls", "draft_assessment", "review", "policy_version")})
             state["previous_runs"] = history[-3:]
             if previous.get("usage"):
                 prior = previous.get("lifetime_usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True})

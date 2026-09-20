@@ -37,6 +37,8 @@ class InvestigationEngineTests(unittest.TestCase):
         self.progress = []
 
     def run_case(self, decisions, **kwargs):
+        if decisions and isinstance(decisions[-1], dict) and decisions[-1].get("action") == "finish":
+            decisions = [*decisions, copy.deepcopy(decisions[-1])]
         client = FakeClient(decisions)
         state = run_investigation(self.context, self.kit, "test-model", 1000,
                                   lambda state: self.progress.append(copy.deepcopy(state)), client=client, **kwargs)
@@ -48,7 +50,7 @@ class InvestigationEngineTests(unittest.TestCase):
             {"action": "finish", "assessment": assessment("Q002")},
         ])
         self.assertEqual(state["status"], "ready")
-        self.assertEqual(state["usage"]["total_tokens"], 260)
+        self.assertEqual(state["usage"]["total_tokens"], 390)
         self.assertEqual(len(state["checks"]), 2)
         self.assertTrue(state["checks"][0]["automatic_preservation"])
         self.assertIn('"reason": "Error"', client.requests[1].messages[1]["content"])
@@ -80,12 +82,25 @@ class InvestigationEngineTests(unittest.TestCase):
                                        {"action": "finish", "assessment": assessment("invented")},
                                        {"action": "finish", "assessment": assessment()}])
         self.assertEqual(state["status"], "ready")
-        self.assertEqual(len(client.requests), 3)
+        self.assertEqual(len(client.requests), 4)
         self.assertEqual(client.requests[0].reasoning_effort, "low")
         self.assertEqual(client.requests[2].reasoning_effort, "none")
         self.assertTrue(client.requests[1].json_output)
         self.assertIn("validation_error", state["calls"][1])
-        self.assertEqual(state["usage"]["total_tokens"], 390)
+        self.assertEqual(state["usage"]["total_tokens"], 520)
+
+    def test_review_corrects_draft_before_it_is_published(self):
+        corrected = assessment()
+        corrected["summary"] = "Worker restarted; recovery mechanism is unknown."
+        state, client = self.run_case([
+            {"action": "finish", "assessment": assessment()},
+            {"action": "finish", "assessment": corrected},
+        ], max_checks=0)
+        self.assertEqual(state["assessment"]["summary"], corrected["summary"])
+        self.assertTrue(state["review"]["changed"])
+        self.assertEqual(state["calls"][-1]["phase"], "evidence_review")
+        self.assertEqual(len(client.requests), 2)
+        self.assertFalse(any(item["status"] == "ready" and item["assessment"] == assessment() for item in self.progress))
 
     def test_hard_call_budget_and_disallowed_tools(self):
         decision = {"action": "check", "tool": "resource_history", "arguments": {}, "question": "Resource pressure?", "distinguishes": "CPU or memory"}

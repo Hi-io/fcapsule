@@ -51,6 +51,12 @@ executed checks (`Q001`, `Q002`, etc.). Failed checks cannot be cited as success
 observations. A successful empty query is still an observation of that bounded
 query, never proof that an event did not occur.
 
+A separate final model call checks the draft against the same observations before
+publication. It specifically removes unsupported recovery/remediation claims,
+distinguishes historical from current state and checks metric interpretation.
+The draft and revised result are retained. This is model-assisted consistency
+review, not an independent verifier or a guarantee of factual correctness.
+
 ### 3. Reference Comparisons
 
 `compare_baseline` compares the affected pod's incident window with a currently
@@ -119,10 +125,11 @@ SQL, arbitrary paths or Kubernetes mutations. Configured sources remain a truste
 administrator boundary, not a multi-tenant authorization system.
 
 Each attempt allows one automatic preservation check, at most four model-selected
-checks and at most five provider calls. The completion limit in Settings applies
+checks and at most six provider calls (five investigation decisions plus one final
+evidence review). The completion limit in Settings applies
 per call. Calls request JSON output and low reasoning effort. One schema repair can
 use a remaining call with reasoning disabled; it does not increase the total call
-budget. This avoids spending a small completion budget entirely on non-visible
+budget. Final evidence review also disables private reasoning output. This avoids spending a small completion budget entirely on non-visible
 reasoning. These controls follow the [DeepSeek API contract](https://api-docs.deepseek.com/api/create-chat-completion/).
 Encoded user context is limited to 160,000 characters before transmission.
 Repeated identical checks are rejected. A 420-second soft elapsed-time budget is

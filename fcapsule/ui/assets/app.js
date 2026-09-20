@@ -515,7 +515,10 @@ function investigationEvidence(run = {}) {
 
 function investigationTimeline(run = {}) {
   const rows = (run.checks || []).map(item=>'<li><time>' + formatDate(item.started_at) + '</time><div><strong>' + safe(item.question) + '</strong><small>' + safe(item.status) + ' · ' + safe(item.tool) + '</small><button class="evidence-link" data-investigation-ref="' + safe(item.id) + '">View observation</button></div></li>').join('');
-  return '<section class="timeline-view"><h3>Agent activity</h3><ol class="event-timeline">' + rows + (run.finished_at ? '<li><time>' + formatDate(run.finished_at) + '</time><div><strong>' + (run.status === 'ready' ? 'Assessment saved' : 'Stopped without a validated conclusion') + '</strong></div></li>' : '') + '</ol></section>';
+  const review = (run.calls || []).find(item=>item.phase === 'evidence_review');
+  return '<section class="timeline-view"><h3>Agent activity</h3><ol class="event-timeline">' + rows +
+    (review ? '<li><time>' + formatDate(review.started_at) + '</time><div><strong>Conclusion checked against evidence</strong><small>' + safe(run.review?.status || review.status) + '</small></div></li>' : '') +
+    (run.finished_at ? '<li><time>' + formatDate(run.finished_at) + '</time><div><strong>' + (run.status === 'ready' ? 'Assessment saved' : 'Stopped without a validated conclusion') + '</strong></div></li>' : '') + '</ol></section>';
 }
 function metricMatters(item) {
   if (item.label === 'Pod readiness') return item.value !== 'Ready';
