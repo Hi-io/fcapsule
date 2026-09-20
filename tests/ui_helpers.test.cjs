@@ -84,3 +84,42 @@ test('domain disclosures retain native semantics, count and decorative icon', ()
   assert.match(html, /detail-count">2/);
   assert.match(html, /<pre>retained log<\/pre>/);
 });
+
+test('episode overview does not imply it is the selected individual alert', () => {
+  const context = helper('episodeContext', 'formatDate', {
+    reportId:()=> 'one', reportTab:'overview',
+  });
+  const html = context({signal_count:2, signals:[{incident_id:'one'},{incident_id:'two'}]});
+  assert.match(html, /Episode investigation/);
+  assert.doesNotMatch(html, /select/);
+});
+
+test('investigation citations are escaped and point to unique observations', () => {
+  const refs = helper('investigationRefs','investigationProgress', {
+    safe: value => String(value ?? '').replaceAll('<','&lt;').replaceAll('"','&quot;'),
+    logLabel: value=>value,
+  });
+  const html = refs({checks:[{id:'Q001',question:'<script>source text</script>'}]},['Q001']);
+  assert.match(html,/data-investigation-ref="Q001"/);
+  assert.doesNotMatch(html,/<script>/);
+});
+
+test('partial token usage is not displayed as complete accounting', () => {
+  const progress = helper('investigationProgress','investigationResult', {
+    safe:value=>String(value ?? ''), icon:()=>'', formatDate:value=>value,
+    disclosure:(id,title,body)=>title+body,
+  });
+  const html = progress({status:'incomplete', checks:[], usage:{total_tokens:42,complete:false}, calls:[]});
+  assert.match(html,/At least 42 tokens/);
+  assert.match(html,/not a full billing total/);
+});
+
+test('agent event times remain separate from the historical incident sequence', () => {
+  const timeline = helper('investigationTimeline','metricMatters', {
+    safe:value=>String(value ?? ''), formatDate:value=>value, investigationRefs:()=>'',
+  });
+  const html = timeline({status:'ready',checks:[{id:'Q1',question:'Why restarted?',status:'completed',tool:'resource_history',started_at:'analysis-time'}],finished_at:'done-time'});
+  assert.match(html,/Agent activity/);
+  assert.match(html,/analysis-time/);
+  assert.match(html,/Assessment saved/);
+});

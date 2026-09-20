@@ -68,7 +68,8 @@ def episode_context(episode: dict[str, Any], entries: list[dict[str, Any]]) -> d
     for entry in entries:
         report = entry["report"]
         incident_id = entry["incident"]["incident_id"]
-        alerts.append({"incident_id": incident_id, **report["incident"]})
+        alerts.append({**report["incident"], "incident_id": incident_id,
+                       "current_status": entry["incident"].get("status"), "ended_at": entry["incident"].get("ended_at")})
         for item in report.get("supporting_evidence", []):
             identity = [item.get("type"), item.get("title"), item.get("summary"), item.get("time_range"), item.get("linked_entities"), item.get("configuration")]
             ref = "E" + hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:12]
@@ -79,7 +80,8 @@ def episode_context(episode: dict[str, Any], entries: list[dict[str, Any]]) -> d
                     "alert": next((alert for alert in report.get("fault_alerts", []) if alert.get("evidence_id") == item["evidence_id"]), None),
                     "provenance": []}
             evidence[ref]["provenance"].append({"incident_id": incident_id, "evidence_id": item["evidence_id"]})
-    return scrub({"episode_id": episode["episode_id"], "alerts": alerts,
+    return scrub({"episode_id": episode["episode_id"], "episode_lifecycle": {key: episode.get(key) for key in
+                  ("status", "started_at", "ended_at", "last_activity_at")}, "alerts": alerts,
         "evidence": list(evidence.values())[:80],
         "impact": [item for entry in entries for item in entry["report"].get("impact", [])][:15],
         "source_retention": "Unknown. Do not infer expiry from incident age or FCAPSule's own cleanup policy.",
@@ -153,6 +155,12 @@ class InvestigationTools:
         if name == "resource_history":
             return scrub({"source": "Prometheus", "pod": pod, "observations": metric_summary(
                 prometheus.collect_pod_metrics(self.namespace, pod, self.window_start, self.window_end)),
+                "metric_semantics": {
+                    "pod_oom_terminated": "Kubernetes last-termination reason OOMKilled (1=yes); a state flag, not an event count. Correlate its onset with the restart counter. A concurrent flag/restart is positive OOM evidence even if the peak was not sampled.",
+                    "pod_memory_working_set_bytes": "Sampled working set is not peak total cgroup-accounted memory. Low samples cannot exclude an OOM or establish a false OOM alert.",
+                    "pod_cpu_throttled_ratio": "Fraction of CFS periods throttled, not percentage of CPU time or throughput lost. Low average CPU does not exclude brief throttling.",
+                    "pod_container_restarts_total": "Cumulative counter; use increase, not its absolute value, for window restart activity.",
+                    "pod_memory_limit_bytes": "Configured pod-summed limit, not measured memory peak. Multi-container attribution needs individual limits/termination state."},
                 "limitation": "Historical samples may be missing or miss short peaks; no source TTL was inferred."})
         if name == "search_logs":
             logs = opensearch.collect_logs(self.namespace, pod, self.window_start, self.window_end, limit=300, terms=terms)

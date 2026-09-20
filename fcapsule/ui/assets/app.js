@@ -456,17 +456,19 @@ function briefingPanel(payload) {
 }
 
 function investigationRefs(run, ids = []) {
+  const labels = new Map();
   return ids.map(id => {
     const item = [...(run.checks || []), ...(run.context?.evidence || [])].find(item=>item.id === id);
     const label = item?.question || (item?.domain === 'log_template' ? logLabel(item.title) : item?.title) || id;
-    return '<button class="evidence-link" data-investigation-ref="' + safe(id) + '" title="' + safe(label) + '">' + safe(label) + '</button>';
+    const occurrence = (labels.get(label) || 0) + 1; labels.set(label,occurrence);
+    return '<button class="evidence-link" data-investigation-ref="' + safe(id) + '" title="' + safe(label) + '">' + safe(label) + (occurrence > 1 ? ' · additional capture' : '') + '</button>';
   }).join('');
 }
 
 function investigationProgress(run = {}) {
   const checks = run.checks || [];
   const usage = run.usage;
-  const tokenText = usage ? (usage.complete ? '' : 'At least ') + Number(usage.total_tokens || 0).toLocaleString('en') + ' tokens' : 'Usage pending';
+  const tokenText = usage ? (usage.complete ? '' : 'At least ') + Number(usage.total_tokens || 0).toLocaleString('en') + (run.status === 'running' ? ' reported tokens' : ' tokens') : 'Usage pending';
   const rows = checks.map(item => '<li class="agent-step ' + safe(item.status) + '"><span class="step-marker" aria-hidden="true">' + (item.status === 'running' ? '<span class="spinner"></span>' : icon(item.status === 'completed' ? 'activity' : 'bell-ring')) + '</span><div><strong>' + safe(item.question) + '</strong><small>' + safe(item.status) + (item.finished_at ? ' · ' + formatDate(item.finished_at) : '') + '</small></div></li>').join('');
   const details = '<dl class="coverage-details"><div><dt>Input tokens</dt><dd>' + Number(usage?.prompt_tokens || 0).toLocaleString('en') + '</dd></div><div><dt>Output tokens</dt><dd>' + Number(usage?.completion_tokens || 0).toLocaleString('en') + '</dd></div><div><dt>Model calls</dt><dd>' + (run.calls?.length || 0) + '</dd></div><div><dt>Earlier attempts</dt><dd>' + Number(run.lifetime_usage?.total_tokens || 0).toLocaleString('en') + ' tokens</dd></div></dl><p class="queue-note">' + (usage?.complete ? 'Provider-reported usage for this attempt.' : 'Some usage is unavailable; displayed counts are not a full billing total.') + '</p>';
   return '<aside class="agent-progress"><h3>Investigation activity</h3>' + (rows ? '<ol class="agent-steps">' + rows + '</ol>' : '<p class="queue-note">No checks recorded yet.</p>') +
@@ -475,12 +477,19 @@ function investigationProgress(run = {}) {
 }
 
 function investigationResult(result = {}, checkId = '') {
-  const numeric = value => Number(value).toLocaleString('en',{maximumSignificantDigits:5});
+  const labels = {pod_cpu_cores:'CPU used',pod_cpu_limit_cores:'CPU limit',pod_memory_working_set_bytes:'Memory working set',pod_memory_limit_bytes:'Memory limit',pod_cpu_throttled_ratio:'CPU periods throttled',pod_container_restarts_total:'Restart counter',pod_ready:'Pod readiness',pod_oom_terminated:'Last termination was OOM',mysql_global_status_threads_connected:'MySQL connections',mysql_global_status_threads_running:'MySQL active threads',mysql_global_variables_max_connections:'MySQL connection limit'};
+  const numeric = (value, metric) => {
+    if (metric.endsWith('_bytes')) return (Number(value)/1048576).toLocaleString('en',{maximumFractionDigits:2}) + ' MiB';
+    if (metric.endsWith('_cores')) return (Number(value)*1000).toLocaleString('en',{maximumFractionDigits:2}) + ' mCPU';
+    if (metric.endsWith('_ratio')) return (Number(value)*100).toLocaleString('en',{maximumFractionDigits:1}) + '%';
+    if (metric === 'pod_ready') return Number(value) >= 1 ? 'Ready' : Number(value) === 0 ? 'Not ready' : 'Mixed samples';
+    return Number(value).toLocaleString('en',{maximumSignificantDigits:5});
+  };
   const series = result.observations?.filter(item=>item.metric) || result.affected || [];
   let body = '<p class="queue-note">' + safe(result.source || '') + (result.pod ? ' · ' + safe(result.pod) : '') + '</p>';
   if (series.length) body += '<div class="table-scroll"><table class="check-metrics"><thead><tr><th>Metric</th><th>Min</th><th>Max</th><th>Median</th>' + (result.reference ? '<th>Reference median</th>' : '') + '</tr></thead><tbody>' + series.map(item=>{
     const reference = result.reference?.find(other=>other.metric === item.metric);
-    return '<tr><th scope="row">' + safe(item.metric) + '<small>' + formatDate(item.start) + ' to ' + formatDate(item.end) + '</small></th><td>' + numeric(item.min) + '</td><td>' + numeric(item.max) + '</td><td>' + numeric(item.median) + '</td>' + (result.reference ? '<td>' + (reference ? numeric(reference.median) : 'No samples') + '</td>' : '') + '</tr>';
+    return '<tr><th scope="row" title="' + safe(item.metric) + '">' + safe(labels[item.metric] || item.metric) + '<small>' + formatDate(item.start) + ' to ' + formatDate(item.end) + '</small></th><td>' + numeric(item.min,item.metric) + '</td><td>' + numeric(item.max,item.metric) + '</td><td>' + numeric(item.median,item.metric) + '</td>' + (result.reference ? '<td>' + (reference ? numeric(reference.median,item.metric) : 'No samples') + '</td>' : '') + '</tr>';
   }).join('') + '</tbody></table></div>';
   if (result.reference) body += '<p class="queue-note">Reference: ' + safe(result.method?.replaceAll('_',' ')) + ' · ' + safe(result.reference_pod) + '</p>';
   const patterns = result.patterns || result.observations?.filter(item=>item.pattern) || [];
@@ -501,11 +510,11 @@ function investigationEvidence(run = {}) {
     (item.examples?.length ? '<pre class="log-lines">' + safe(item.examples.join('\n')) + '</pre>' : '') +
     (item.configuration || item.alert ? '<pre class="log-lines">' + safe(JSON.stringify(item.configuration || item.alert,null,2)) + '</pre>' : '') +
     '<small>Captured in ' + (item.provenance || []).map(ref=>safe(ref.incident_id)).join(', ') + '</small>')).join('');
-  return disclosure('agent-evidence','Investigation evidence',checks + evidence || '<p>No investigation evidence yet.</p>', (run.checks?.length || 0) + cited.size);
+  return disclosure('agent-evidence','Investigation evidence',checks + evidence || '<p>No investigation evidence yet.</p>', (run.checks?.length || 0) + (run.context?.evidence || []).filter(item=>cited.has(item.id)).length);
 }
 
 function investigationTimeline(run = {}) {
-  const rows = (run.checks || []).map(item=>'<li><time>' + formatDate(item.started_at) + '</time><div><strong>' + safe(item.question) + '</strong><small>' + safe(item.status) + ' · ' + safe(item.tool) + '</small><div class="citations">' + investigationRefs(run,[item.id]) + '</div></div></li>').join('');
+  const rows = (run.checks || []).map(item=>'<li><time>' + formatDate(item.started_at) + '</time><div><strong>' + safe(item.question) + '</strong><small>' + safe(item.status) + ' · ' + safe(item.tool) + '</small><button class="evidence-link" data-investigation-ref="' + safe(item.id) + '">View observation</button></div></li>').join('');
   return '<section class="timeline-view"><h3>Agent activity</h3><ol class="event-timeline">' + rows + (run.finished_at ? '<li><time>' + formatDate(run.finished_at) + '</time><div><strong>' + (run.status === 'ready' ? 'Assessment saved' : 'Stopped without a validated conclusion') + '</strong></div></li>' : '') + '</ol></section>';
 }
 function metricMatters(item) {
@@ -575,7 +584,7 @@ function reportPanel(payload) {
   const incident = report.incident;
   const exports = capsuleExport(payload);
   const ai = payload.investigation;
-  const fallback = ai?.status !== 'ready' ? '<section class="observed-summary"><h3>Observed</h3><p>' + safe(report.fault_alerts?.[0]?.description || incident.summary) + '</p></section>' : '';
+  const fallback = ai?.status !== 'ready' ? '<section class="observed-summary"><h3>Alert context</h3><p>' + safe(report.fault_alerts?.[0]?.description || incident.summary) + '</p></section>' : '';
   const d = report.engineering_diagnostics;
   const diagnostics = disclosure('diagnostics', 'Engineering diagnostics', '<dl class="coverage-details"><div><dt>Selected evidence</dt><dd>' + d.selected_evidence + '</dd></div><div><dt>Log reduction</dt><dd>' + pct(d.log_compression_ratio) + '</dd></div><div><dt>Signal preservation</dt><dd>' + pct(d.important_signal_preservation) + '</dd></div><div><dt>Grounding</dt><dd>' + pct(d.hypothesis_grounding_score) + '</dd></div><div><dt>Runtime</dt><dd>' + Number(d.runtime_seconds || 0).toFixed(2) + 's</dd></div></dl><p class="queue-note">Rule-based hypothesis: ' + safe(report.primary_hypothesis.statement) + '</p>');
   const tabs = ['overview','evidence','timeline'];

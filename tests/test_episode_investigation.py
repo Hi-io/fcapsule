@@ -76,15 +76,16 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertNotIn("do-not-save", json.dumps(state))
 
     def test_one_schema_repair_uses_existing_budget_and_keeps_rejected_decision(self):
-        state, client = self.run_case([{"action": "finish", "assessment": assessment("invented")},
+        state, client = self.run_case([{"action": "check", "tool": "review_omitted", "arguments": {}, "question": "Other failures?", "distinguishes": "A competing cause"},
+                                       {"action": "finish", "assessment": assessment("invented")},
                                        {"action": "finish", "assessment": assessment()}])
         self.assertEqual(state["status"], "ready")
-        self.assertEqual(len(client.requests), 2)
+        self.assertEqual(len(client.requests), 3)
         self.assertEqual(client.requests[0].reasoning_effort, "low")
-        self.assertEqual(client.requests[1].reasoning_effort, "none")
+        self.assertEqual(client.requests[2].reasoning_effort, "none")
         self.assertTrue(client.requests[1].json_output)
-        self.assertIn("validation_error", state["calls"][0])
-        self.assertEqual(state["usage"]["total_tokens"], 260)
+        self.assertIn("validation_error", state["calls"][1])
+        self.assertEqual(state["usage"]["total_tokens"], 390)
 
     def test_hard_call_budget_and_disallowed_tools(self):
         decision = {"action": "check", "tool": "resource_history", "arguments": {}, "question": "Resource pressure?", "distinguishes": "CPU or memory"}

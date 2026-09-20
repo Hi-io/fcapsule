@@ -79,6 +79,14 @@ Compare a peer or preceding window when it helps; different load/configuration i
 Inspect measurements instead of trusting an alert title. Time correlation does not prove causation.
 Current workload state may differ from incident-time state. Missing samples do not mean normal/zero usage;
 low sampled memory cannot exclude a brief OOM. Namespace proximity does not establish a dependency.
+Respect tool metric_semantics. An OOMKilled flag with a contemporaneous restart is positive termination evidence;
+low sampled working set or missing cache logs alone do not weaken OOM. Separate observed termination from its unconfirmed mechanism.
+Describe a next manual observation without inventing metric names, paths or APIs. memory.max is a configured cgroup limit, not measured peak usage.
+Use cautious mechanism language (consistent with, may, likely) even when a hypothesis is supported.
+Use episode_lifecycle and current_status: describe resolved incidents in the past tense. Never claim a
+historical failing job or failure persists now without a current observation of that specific failure.
+Before concluding, perform at least one discriminating check beyond automatic workload preservation.
+For retained/imported cases, review_omitted is available without source access. Do not keep querying once evidence is sufficient.
 Never execute remediation, invent commands, probabilities or a definitive root cause. No shell/URL/PromQL is allowed.
 Give concise observations and a discriminating next action with an expected finding, not generic advice.
 Return JSON. To check: {"action":"check","tool":"catalog name","arguments":{},
@@ -102,6 +110,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                       publish: Callable[[dict[str, Any]], None], max_checks: int = 4,
                       client: Any = None) -> dict[str, Any]:
     state = {"version": "1", "episode_id": context["episode_id"], "status": "running", "started_at": now(),
+             "policy_version": "episode-investigation-1.1", "max_completion_tokens_per_call": max_tokens,
              "model": model, "context": context, "checks": [], "calls": [], "assessment": None,
              "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
              "source_retention": "unknown", "preservation": "Mutable workload state is checked early; no source expiry is assumed."}
@@ -144,6 +153,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             state["message"] = "Assessing episode evidence" if turn == 0 else "Reviewing check results"
             publish(state)
             call = {"started_at": now(), "status": "running"}
+            call["reasoning_effort"] = "none" if validation_feedback else "low"
             state["calls"].append(call)
             publish(state)
             encoded = json.dumps(payload, ensure_ascii=True)
@@ -166,6 +176,8 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 decision = parse_object(str(response.get("content", "")))
                 call["decision"] = scrub(decision)
                 if decision.get("action") == "finish":
+                    if max_checks > 0 and len(state["checks"]) < 2:
+                        raise ValueError("Run one discriminating check beyond automatic preservation before concluding")
                     state["assessment"] = validate_assessment(decision.get("assessment"), evidence_ids,
                                                               {item["incident_id"] for item in context["alerts"]})
             except ValueError as error:
