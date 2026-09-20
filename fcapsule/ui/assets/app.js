@@ -42,7 +42,7 @@ function renderPreservingFocus(render) {
   }
 }
 function disclosure(id, title, content, count = '') {
-  return `<details class="evidence-disclosure" data-disclosure="${safe(id)}" ${openDisclosures.has(id) ? 'open' : ''}><summary>${safe(title)}${count !== '' ? `<span class="detail-count">${safe(count)}</span>` : ''}</summary><div class="disclosure-body">${content}</div></details>`;
+  return `<details class="evidence-disclosure" data-disclosure="${safe(id)}" ${openDisclosures.has(id) ? 'open' : ''}><summary id="disclosure-${safe(id)}">${safe(title)}${count !== '' ? `<span class="detail-count">${safe(count)}</span>` : ''}</summary><div class="disclosure-body">${content}</div></details>`;
 }
 function reportId() { return selectedReport?.incident?.incident_id || selectedReport?.report?.incident?.incident_id; }
 function allEpisodes(state = lastState) { return [...state.overview.episodes, ...state.overview.archived_episodes]; }
@@ -368,7 +368,14 @@ function evidenceReferences(report, ids) {
 }
 
 function logLabel(pattern) {
-  try { const parsed = JSON.parse(pattern); return parsed.message || parsed.msg || pattern; } catch (_) { return pattern; }
+  try { const parsed = JSON.parse(pattern); return parsed.message || parsed.msg || pattern; } catch (_) {
+    // Numeric placeholders can invalidate JSON without changing its quoted message.
+    const message = pattern.match(/"(?:message|msg)"\s*:\s*("(?:\\.|[^"\\])*")/);
+    if (message) {
+      try { return JSON.parse(message[1]); } catch (_) { /* Keep the original pattern below. */ }
+    }
+    return pattern.length > 140 ? pattern.slice(0, 137) + '...' : pattern;
+  }
 }
 function briefingPanel(payload) {
   const ai = payload.ai_briefing;
