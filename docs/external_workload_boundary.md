@@ -7,10 +7,7 @@ container orchestrator, database simulator, or Prometheus replacement. A user op
 their applications and observability stack independently. FCAPSule observes the bounded
 incident context, preserves the selected evidence, and produces an investigation report.
 
-The local Docker workload used for demonstrations and adapter validation therefore lives
-in the separate `fcapsule-lab` repository. It contains exactly five Compose services:
-PostgreSQL, inventory API, orders API, traffic generator, and Prometheus. Its failure
-controls belong to the lab terminal workflow rather than the FCAPSule operator console.
+Workloads used for demonstrations and adapter validation live in the separate `fcapsule-lab` repository. It owns Compose/Kubernetes deployments, databases, traffic and failure controls. Its current inventory is defined in that repository, not in the FCAPSule product contract. No failure controls appear in the operator console.
 
 ## User Value
 
@@ -29,14 +26,13 @@ AI briefing provides a second reading only after that evidence is retained.
 
 ## Integration Contract
 
-The hand-off is a normalized case directory. The producer owns collection from its
+One hand-off is a normalized case directory. The producer owns collection from its
 sources and writes `metadata.yaml`, `alert.json`, `prometheus_metrics.json`, and
 `opensearch_logs.json` for one bounded window. FCAPSule validates that contract and
 records the incident with `fcapsule ingest-case`. It does not copy source retention
-systems or keep a permanent raw log/trace mirror.
+systems or keep a permanent raw log/trace mirror. The other path is the built-in live-source integration, which stages bounded inputs on the state volume until incident retention/deletion.
 
-For local verification, FCAPSule Lab queries its independent Prometheus instance and
-Docker's structured stdout logs to export a case. In Kubernetes, the implemented live
+External exporters can query independent sources and structured stdout logs. In Kubernetes, the implemented live
 adapters perform read-only bounded queries against Prometheus and OpenSearch and resolve
 pods plus referenced ConfigMaps through the Kubernetes API. Both paths preserve the same normalized contract.
 

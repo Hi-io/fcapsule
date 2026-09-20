@@ -195,6 +195,16 @@ Application reference, scenario, severity, time range, normalized case location,
 
 Incident/application reference, artifact location, retained bytes, selected evidence count, reduction, signal preservation, grounding, runtime, model winner, and creation time.
 
+`size_bytes` in this table is the size of `capsule.json`, not the ZIP or all managed storage. The report API's `storage` object separately reports actual `archive_bytes`, `report_bytes`, artifact `directory`, `retention_days`, and `expires_at` (cleanup eligibility based on incident capture time).
+
+### `incident_episodes` and `episode_incidents`
+
+Episode lifecycle, application/time correlation and membership of individually retained alert signals. Archiving affects visibility, not deletion or retention age.
+
+### `settings`
+
+Non-secret general configuration and runtime preferences. Provider keys are not stored in SQLite.
+
 ### `model_profiles`
 
 Model ID, provider, enabled state, maximum tokens, and update time.
@@ -208,6 +218,10 @@ The derived ZIP contains:
 - `evidence.json`;
 - `evaluation.json`;
 - `baselines.json`;
-- optional comparison outputs.
+- `incident_report.json` when a control-plane report exists;
+- `ai_briefing.json` when present;
+- `dashboard.html` when rendered.
 
-It excludes normalized raw input files and raw traces.
+Only these allowlisted files are included if present. Offline comparison prompts/responses, normalized raw inputs and raw traces are excluded. Selected log examples and retained PM trend values are still telemetry-derived content and may be sensitive.
+
+Live normalized inputs are separately staged in `state_dir/live-cases/` until incident cleanup. External input directories remain at their original path. Artifact exclusion is not evidence that no raw data exists on the state volume.

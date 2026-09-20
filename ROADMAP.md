@@ -10,6 +10,7 @@ FCAPSule provides a single-replica Kubernetes control plane, live Prometheus/Ope
 - bearer token, TLS client certificate, and external Secret references;
 - retries, backoff, circuit breaking, pagination, and source rate limits;
 - multi-cluster target registry and per-source query diagnostics.
+- independent staging TTL after successful capture, with explicit rebuild guarantees.
 
 ## 2. Service Deployment
 
@@ -20,7 +21,7 @@ FCAPSule provides a single-replica Kubernetes control plane, live Prometheus/Ope
 - Helm chart and environment-specific overlays;
 - internal FCAPSule Prometheus metrics endpoint;
 - role-based access and audit logging;
-- retention policies and integrity hashes.
+- integrity hashes, backup/restore verification and per-application retention policies (global retention exists).
 
 ## 3. Evidence Quality
 
@@ -48,9 +49,9 @@ FCAPSule provides a single-replica Kubernetes control plane, live Prometheus/Ope
 - source query history and detailed diagnostics;
 - incident filters and search;
 - capsule comparison and version history;
-- downloadable reports and shareable links;
+- authenticated sharing and portable human-readable export (JSON/ZIP downloads and local incident URLs exist);
 - reviewer notes;
-- configurable evidence limits and retention.
+- configurable evidence budgets; global incident retention is already available in Settings.
 
 ## 6. Evaluation
 

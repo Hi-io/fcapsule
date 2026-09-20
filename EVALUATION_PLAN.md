@@ -2,6 +2,8 @@
 
 ## Evaluation Question
 
+This is an offline research/regression protocol, not the operator UI contract. Historical numbers live in `docs/evaluation_record.md`; current UI checks live in `docs/product_audit.md`.
+
 Can FCAPSule reduce a large cross-domain incident window while preserving representative diagnostic signal, grounding every investigation claim, and lowering retained size and model context?
 
 ## Reference Scenario
@@ -31,6 +33,8 @@ The expected chain is an investigation path, not a root-cause label.
 | Storage reduction | retained capsule bytes compared with observed raw bytes |
 
 Important signals are representative groups, not every correlated series. Counting every derivative metric as independently important would reward redundancy and conflict with the attention objective.
+
+The metric named grounding measures valid references, not factual entailment or causal accuracy. Reduction measures capsule content, not the total disk footprint of staged live inputs. Model comparisons must retain the same input and fixed rubric, report ties/regressions, and avoid tuning a scenario after observing a desired winner. Human usefulness review is separate from citation validity.
 
 ## Baselines
 

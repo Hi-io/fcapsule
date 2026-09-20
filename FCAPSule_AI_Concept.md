@@ -2,6 +2,8 @@
 
 > **Stable concept document:** This file defines the long-lived problem, purpose, and research framing. Current product requirements are in `FCAPSule_AI_Project_Guide.md`.
 
+> **Reading this document:** The research ambitions, proposed pretrained model roles, illustrative workflows and MVP acceptance ideas below preserve the original concept. They are not a shipped-feature inventory. The current product uses deterministic log/PM selection plus one optional runtime LLM assessment, with offline same-input comparisons. Live Prometheus, OpenSearch and Kubernetes configuration capture are implemented; live traces and separate pretrained log/time-series models are not. See the current guide and privacy policy for actual UI and on-disk capture behavior.
+
 **Project subtitle:** A Multimodal Telemetry Attention Engine for Cloud Incident Evidence
 
 **Public tagline:** *A flight recorder for cloud incidents.*
@@ -37,7 +39,7 @@ The final system should demonstrate orchestration of multiple pre-trained models
 
 ### 2.1 One-sentence version
 
-**FCAPSule AI uses multiple AI models to compress noisy production telemetry into compact evidence capsules for cloud incident investigation.**
+**FCAPSule AI turns noisy production telemetry into compact evidence capsules for investigation, with pretrained model orchestration as a research direction.**
 
 ### 2.2 Product-style explanation
 

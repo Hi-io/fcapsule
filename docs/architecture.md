@@ -11,11 +11,11 @@ Prometheus firing alert or explicit incident window
                   v
 +------------------------------------------------+
 | Read-only source adapters                      |
-| Prometheus | OpenSearch | Kubernetes | trace probe |
+| Prometheus | OpenSearch | Kubernetes            |
 +----------------------+-------------------------+
                        |
                        v
-              Normalized incident case
+       Bounded case staged in live-cases/
                        |
          +-------------+-------------+
          |             |             |
@@ -28,7 +28,7 @@ Prometheus firing alert or explicit incident window
                        |
              domain-balanced selection
                        |
-          grounded reasoning + verifier
+       deterministic reasoning + ID verifier
                        |
                        v
 +------------------------------------------------+
@@ -37,6 +37,8 @@ Prometheus firing alert or explicit incident window
 +----------------------+-------------------------+
                        |
               Operations / API / CLI
+                       |
+       optional automatic model assessment
 ```
 
 ## Control Plane
@@ -45,13 +47,15 @@ Prometheus firing alert or explicit incident window
 
 ## Source Ownership
 
-FCAPSule owns derived evidence. Observability systems own raw telemetry.
+Observability systems are the system of record. FCAPSule owns derived evidence and also stages bounded live inputs until incident cleanup. The statements below describe derived artifacts, not the staging directory.
 
 - FM alerts may be copied into the capsule because they define the event.
-- PM series are analyzed; only anomaly descriptions and selected values are retained.
+- PM series are analyzed; selected values and captured trend samples support retained charts.
 - Logs are grouped; only anonymized representative lines are retained.
 - Topology and relevant configuration facts may be retained.
 - Trace availability and derived findings may be retained; raw spans may not.
+
+Current-format reports are read from retained JSON without loading source files. Legacy reports can be rebuilt from the capsule, but missing raw PM samples cannot be recovered. Background AI assessment is optional and has queued/running/error states; evidence is available before it completes. Citation checking verifies IDs, not truth. Live trace retrieval is future work.
 
 ## Deployment Shape
 
@@ -61,7 +65,7 @@ The current Kubernetes deployment is single-replica:
 FCAPSule pod
   |-- HTTP/API server
   |-- source polling and capsule threads
-  |-- SQLite + derived artifacts on a PVC
+  |-- SQLite + staged captures + derived artifacts on a PVC
   |-- ConfigMap source configuration
   |-- optional Secret model credential
   |-- read-only ServiceAccount

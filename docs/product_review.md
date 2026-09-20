@@ -84,10 +84,12 @@ figures for maintainers without making them the incident response workflow.
 
 FCAPSule Lab remains optional and separate. It creates a deterministic local failing
 scenario, then exports a bounded normalized case through the same ingestion contract
-used by future source adapters. It is not required to run the operations console, and a
+used by live source adapters. It is not required to run the operations console, and a
 deployment ships FCAPSule independently of the lab containers.
 
 ## Validation Evidence
+
+The remainder of this section records earlier checkout validation. These measurements were not rerun during the September 2026 product audit and must not be treated as current-cluster results.
 
 The current verification scenario used the `orders-checkout` service with concurrent
 checkout requests, inventory-pool contention, retry amplification, slow responses, and
@@ -108,14 +110,12 @@ incident capture or report generation.
 
 ## Remaining Production Work
 
-The repository implements the product contract and a local demonstration source. A
-distributed deployment should add:
+The repository now implements live Prometheus, OpenSearch and Kubernetes adapters and a single-replica pod deployment; the demonstration source is external. Remaining hardening includes:
 
-- Collectors/adapters for real log, metrics, alert, topology, and trace systems.
+- Broader source authentication, pagination, retries and a live trace adapter.
 - Source-system deep links and authenticated trace retrieval.
 - Incident acknowledgement, ownership, escalation, and notification integrations.
-- Multi-tenant access control, audit controls, encryption, and retention policy
-  configuration.
+- Multi-tenant access control, audit controls, encryption and independent raw-capture TTL. Global incident retention is already configurable.
 - Durable background workers, back-pressure limits, and health monitoring for the
   collectors and archive store.
 
@@ -123,6 +123,8 @@ These are deployment and integration concerns. They do not change the operator-f
 reporting contract established by this review.
 
 ## Report Interaction Review (1.2)
+
+Historical interaction decisions and measurements follow. The current Overview/Evidence/Timeline experience and automatic assessments supersede the old manual briefing trigger; see the implemented product shape above and `product_audit.md`.
 
 An operator review of the first report view identified that a standalone report below
 the queue broke the investigation flow, raw metric names were too ambiguous, and a

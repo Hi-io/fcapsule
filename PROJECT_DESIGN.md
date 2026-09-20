@@ -2,7 +2,7 @@
 
 ## Design Summary
 
-FCAPSule is implemented as a dependency-light Python control plane with a normalized evidence pipeline, SQLite metadata, CLI commands, three operator views, and live Kubernetes source adapters. Raw telemetry is not treated as product storage. The system receives or captures a bounded normalized incident window, derives evidence, retains the capsule, and leaves raw data in the source platform.
+FCAPSule is a dependency-light Python control plane with a normalized evidence pipeline, SQLite metadata, CLI commands, three operator views, and live Kubernetes source adapters. It captures a bounded incident window, derives evidence and retains a capsule. Source systems remain authoritative, but live raw captures are also staged on disk until managed retention/deletion; see [storage policy](docs/data_privacy.md).
 
 The architecture deliberately separates four responsibilities:
 
@@ -24,7 +24,7 @@ The architecture deliberately separates four responsibilities:
 | `fcapsule/control_plane.py` | external-case ingestion, capsule jobs, and local AI configuration |
 | `fcapsule/live_sources.py` | discovery, source health, alert polling, and bounded live capture |
 | `fcapsule/adapters/` | Prometheus, OpenSearch, Kubernetes, and HTTP transport boundaries |
-| `fcapsule/ui/app.py` | Operations, Targets, and AI settings web application |
+| `fcapsule/ui/app.py` | Operations, Targets, and general Settings web application |
 | `fcapsule/cli.py` | operator and automation entry point |
 | `deploy/kubernetes/` | RBAC, state volume, Deployment, Service, alert rule, and development overlay |
 
@@ -55,7 +55,7 @@ Within logs and PM, representatives for errors, retries, latency, pool saturatio
 
 The deterministic reasoner provides a credential-free baseline. For the reference incident it can connect retry evidence, pool evidence, related PM changes, and the FM trigger into a tentative investigation path.
 
-The verifier rejects unknown evidence IDs, bounds confidence, and reduces confidence when required data is missing. Optional external models receive only compact evidence and must return structured JSON.
+The deterministic verifier rejects unknown evidence IDs, bounds confidence, and reduces confidence when required data is missing. The automatic model assessment receives compact retained evidence and must return structured JSON with valid references and uncertainty. Neither mechanism proves that cited evidence entails every generated claim.
 
 ## Storage
 
@@ -63,17 +63,20 @@ SQLite stores metadata, not source telemetry. The schema includes:
 
 - `applications`;
 - `incidents`;
+- `incident_episodes` and `episode_incidents`;
 - `capsules`;
 - `model_profiles`;
 - `settings`.
 
-Case exports and generated capsule artifacts live under the configured state directory. In local mode the default is `.fcapsule/`.
+Live captures and generated artifacts live under the configured state directory (default `.fcapsule/`). External input directories are referenced in place. Retention defaults to 30 days from capture for active and archived incidents. A current report is read directly from its retained JSON without reopening the input case. Export sizes are measured from actual artifact files, not the capsule JSON metadata size.
 
 ## Web Application
 
 The web application uses the Python standard library HTTP server. This keeps local setup small and makes the CLI the primary contract. The pages use a shared JSON API:
 
 - `GET /api/state`;
+- `GET /api/incidents/<id>/report`;
+- `GET` and `POST /api/settings/general`;
 - `GET /api/capsules/<id>`;
 - `POST /api/capsules`;
 - `GET /api/settings/ai`;
@@ -83,11 +86,11 @@ The web application uses the Python standard library HTTP server. This keeps loc
 - `POST /api/sources/sync`;
 - `GET /healthz`.
 
-Long-running pipeline work executes on background threads. The client polls current state while a report is being built. Source simulation remains outside this repository.
+Long-running pipeline work executes on background threads. Two workers generate optional automatic assessments after evidence is saved. The client polls every four seconds while visible and preserves report selection, disclosure state and editable target fields. Source simulation remains outside this repository.
 
 ## Trace Policy
 
-The lab exposes an ephemeral trace probe. FCAPSule records:
+External normalized cases may supply trace metadata describing:
 
 - whether the source was available;
 - the source retention window;
@@ -95,15 +98,11 @@ The lab exposes an ephemeral trace probe. FCAPSule records:
 - the number of ephemeral spans observed;
 - that zero raw spans were retained.
 
-A production adapter may fetch trace-derived facts during the incident window, but raw span payloads must not enter the capsule archive.
+A live trace-backend adapter is not implemented. Supplied historical metadata is not a live connectivity check. A future adapter may fetch trace-derived facts, but raw spans must not enter the archive.
 
 ## Workload Validation Boundary
 
-The separate FCAPSule Lab project owns a realistic checkout/inventory workload,
-PostgreSQL, traffic, Prometheus, and controlled lock-contention failures. It exports
-bounded Prometheus alerts/metrics and Docker JSON logs using the normalized case
-contract. The product neither embeds the lab nor controls its containers. This lets the
-same FCAPSule pipeline exercise lab exports and live production adapters.
+The separate FCAPSule Lab project owns its workloads, databases, traffic and controlled failures. It can export normalized cases or run as Kubernetes workloads observed by the configured sources. The product neither embeds the lab nor controls its containers. Its service inventory is not part of this repository's contract.
 
 ## Extension Boundaries
 

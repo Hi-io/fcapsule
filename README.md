@@ -2,7 +2,9 @@
 
 FCAPSule is a telemetry attention and incident evidence retention engine. It observes fault-management events, performance metrics, application logs, topology, and on-demand trace availability, then produces a compact evidence capsule that remains useful after raw telemetry expires.
 
-It is not another root-cause chatbot and it does not replace Prometheus, OpenSearch, Alertmanager, Kafka, or a tracing backend. FCAPSule sits above those systems as an investigation layer: it opens a bounded incident window, extracts the strongest cross-domain evidence, records why each item was selected, and stores derived evidence instead of copying raw telemetry.
+It does not replace Prometheus, OpenSearch, Alertmanager, Kafka, or a tracing backend. FCAPSule opens a bounded incident window, selects cross-domain evidence, records its provenance, and retains an investigation report. Live capture currently also stages bounded source responses on disk; the downloadable capsule excludes those raw inputs.
+
+**Deployment status:** functional, single-replica software for a trusted environment. The reference service has no built-in authentication or TLS and is not a hardened, Internet-facing service. See the [deployment constraints](docs/kubernetes_deployment.md#current-constraints).
 
 ## Product Surfaces
 
@@ -14,10 +16,7 @@ FCAPSule provides one control plane with three operator views:
 
 The CLI remains fully usable without the web application.
 
-Workload simulation is deliberately outside this repository. The separate FCAPSule Lab
-project runs a five-container Compose workload with
-PostgreSQL, application services, traffic, Prometheus, and failure injection. It exports
-a bounded normalized case for FCAPSule; it is not a product screen or runtime dependency.
+Workload simulation is deliberately outside this repository. FCAPSule Lab owns its own Compose/Kubernetes workloads and failure controls. Real applications and lab workloads use the same observability sources; neither a simulator nor a database is bundled into FCAPSule.
 
 ## Operational Domains
 
@@ -29,17 +28,20 @@ The project uses the word *domain* for telemetry families with different data sh
 | Performance management (PM) | numeric time series | baseline comparison and anomaly selection |
 | Application logs | semi-structured text | masking, template reduction, severity and proximity scoring |
 | Topology and configuration | service relationships and runtime changes | cross-source entity alignment and dependency context |
-| On-demand traces | temporary source buffer | availability and retention-window probe; raw spans are not retained |
+| On-demand traces | optional case metadata | retain declared availability and source retention; a live trace-backend adapter is not implemented |
 | AI reasoning | selected evidence only | cited investigation paths, limitations, and next checks |
 
 These are operational modalities, not media modalities. FCAPSule does not generate or process images to satisfy multidomain behavior.
 
 ## Quickstart
 
-Requirements: Python 3.11+ and PyYAML.
+Requirements: Python 3.11+. From the repository directory:
 
 ```bash
-python3 -m fcapsule.cli serve
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+python -m fcapsule.cli serve
 ```
 
 Open:
@@ -48,7 +50,7 @@ Open:
 - Settings: `http://127.0.0.1:8765/settings`
 - Targets: `http://127.0.0.1:8765/targets`
 
-The control plane stores local metadata under `.fcapsule/`. That directory is ignored by Git.
+On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`. The control plane stores metadata, bounded live captures, reports and local settings under `.fcapsule/`, which is ignored by Git. No source is connected until configured in Targets or supplied through environment variables.
 
 ### Run in Kubernetes with live sources
 
@@ -114,7 +116,7 @@ python3 -m fcapsule.cli compare-llms \
   --models deepseek-v4-flash deepseek-v4-pro
 ```
 
-Model comparison is an offline evaluation workflow. It does not run in the operator path and does not delay an incident report. The production report is built from deterministic detection, selected evidence, verified hypotheses, and explicit uncertainty. Operators may request an optional DeepSeek Pro briefing after the report is ready; it is retained only when it cites existing evidence IDs and states an uncertainty.
+Model comparison is an offline evaluation workflow, not an operator dashboard. The evidence report is built deterministically. When a key is configured, a background worker automatically generates an assessment using the selected model. Valid evidence references and an uncertainty are required, but citation checks do not prove that the model's explanation is true. There is no automatic remediation.
 
 Re-score stored responses after a rubric change without making provider calls:
 
@@ -126,7 +128,7 @@ python3 -m fcapsule.cli rescore-llms \
 
 ## Capsule Outputs
 
-An investigation writes:
+The control-plane flow produces the artifacts below. Standalone `investigate` writes the core capsule/evaluation files; responder reports and automatic briefings belong to the control plane. Comparison artifacts are written only by explicit evaluation commands.
 
 ```text
 capsule.json          structured evidence and provenance
@@ -139,24 +141,26 @@ baselines.json        comparison baselines
 dashboard.html        static detailed review
 llm_comparison.json   optional same-input model comparison
 llm_prompt.json       optional recorded prompt
-fcapsule_<id>.zip     derived evidence only; no raw telemetry
+fcapsule_<id>.zip     derived evidence, report and available briefing; no raw inputs
 ```
 
 ## Data and Retention Policy
 
 - Raw telemetry is read from configured sources for a bounded incident window.
-- Capsule archives exclude raw logs and raw trace spans.
-- Representative log lines are anonymized before entering evidence.
-- Trace integrations are query-on-demand. FCAPSule records availability, source retention, and derived findings, not the underlying span set.
+- Live responses are staged under `.fcapsule/live-cases/` until incident retention or deletion. They may contain sensitive raw logs and metric samples; protect the state volume.
+- Capsule archives exclude raw input files and raw trace spans, but include selected log examples and retained metric/chart values.
+- Representative log lines are masked before entering evidence. Heuristic masking is not a guarantee of complete anonymization.
+- Trace availability can be supplied by an external case. The live Kubernetes integration does not yet query a trace backend.
 - Every generated hypothesis must cite selected evidence IDs and remains an investigation path rather than a final root-cause claim.
 
 ## Tests
 
 ```bash
 python3 -m unittest discover -s tests -v
+node --test tests/ui_helpers.test.cjs
 ```
 
-The suite covers validation, processing, domain-balanced selection, hypothesis grounding,
+Node is needed only for frontend tests, not to run FCAPSule. The suite covers validation, processing, domain-balanced selection, hypothesis references,
 model comparison scoring, external-case ingestion, SQLite control-plane state, HTTP
 routes, and the full capsule pipeline.
 
@@ -164,9 +168,11 @@ routes, and the full capsule pipeline.
 
 The reference deployment runs as a Kubernetes pod with read-only access to Prometheus, OpenSearch, and the Kubernetes API. Prometheus firing alerts trigger bounded capture; range queries provide PM data; OpenSearch supplies Filebeat-indexed logs; and the Kubernetes API supplies workload identity, PodSpec state, and referenced ConfigMaps. Secrets are never read as configuration evidence.
 
-Raw telemetry remains in the source systems. The pod retains application registrations, incident metadata, responder reports, capsules, evaluation results, and source references on its state volume. SQLite and in-process workers remain single-replica constraints; PostgreSQL, object storage, durable jobs, authentication, and multi-cluster control are later scaling work.
+Source systems remain the telemetry system of record. The pod retains bounded live captures as well as applications, incidents, reports, capsules and settings on its state volume. Retention defaults to 30 days from capture, including archived incidents; external case directories outside the managed state directory are never deleted by FCAPSule. SQLite and in-process workers are single-replica constraints. See [privacy and retention](docs/data_privacy.md).
 
 ## Documentation
+
+Start with the [documentation index](docs/README.md), which separates current operating guides, research framing and historical evaluations. The repository is [MIT licensed](LICENSE).
 
 - `FCAPSule_AI_Concept.md`: stable problem, purpose, and research framing.
 - `FCAPSule_AI_Project_Guide.md`: current product requirements and operating boundaries.

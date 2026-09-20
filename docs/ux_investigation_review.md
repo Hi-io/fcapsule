@@ -1,5 +1,7 @@
 # Investigation Experience Review
 
+Review snapshot: 20 September 2026. Later storage/export fixes and documentation reconciliation are recorded in [product_audit.md](product_audit.md). Historical runs below are not repeated automatically by subsequent visual changes.
+
 ## Goal
 
 Help an on-call engineer understand the affected workload, distinguish observations from possible causes, and choose a useful next check without reading every retained field. The evidence remains available for verification and export.

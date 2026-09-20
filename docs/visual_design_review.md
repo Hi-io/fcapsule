@@ -1,5 +1,7 @@
 # Visual Design Review
 
+Review snapshot: 20 September 2026. The follow-up brand, export and documentation audit is recorded in [product_audit.md](product_audit.md). Test counts below describe that earlier pass.
+
 ## Scope
 
 Refine the complete operations interface without changing collection, correlation,

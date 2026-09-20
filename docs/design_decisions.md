@@ -6,7 +6,7 @@ The reference implementation uses `argparse`, the standard library HTTP server, 
 
 ## SQLite Metadata, Source-Owned Telemetry
 
-SQLite is sufficient for one local process and makes multi-application state durable. Raw telemetry remains in observability sources. This avoids turning FCAPSule into a second telemetry warehouse.
+SQLite is sufficient for one process and makes multi-application metadata durable. Observability sources remain authoritative. Bounded live inputs are currently staged on the state volume until incident cleanup; derived-only ZIP exports must not be confused with a raw-free volume. A shorter staging TTL is future work.
 
 ## Three Views, One Control Plane
 
@@ -33,7 +33,7 @@ A large system can expose many correlated derivatives of the same behavior. Sign
 
 ## On-Demand Traces
 
-Raw spans are high-volume and short-lived. FCAPSule verifies that they can be queried during the incident and retains only availability and derived evidence. This preserves investigative capability without violating the product's compact-retention goal.
+Raw spans are high-volume and short-lived. The contract accepts externally supplied availability and retention metadata without retaining spans. Live trace verification/query is a future adapter, not part of the deployed Kubernetes path.
 
 ## Cautious Causality
 
@@ -43,7 +43,11 @@ evidence before calling a final root cause.
 
 ## Background Jobs and Polling
 
-Simulation and model calls cannot block HTTP requests. The control plane runs jobs in background threads and exposes a snapshot polled by the browser. A distributed deployment should replace threads with a durable job queue.
+Capture and model calls must not block HTTP requests. The control plane uses background threads and a polled snapshot. A distributed deployment should replace threads with a durable job queue. Simulation is outside the product.
+
+## Durable Report Reading
+
+A current report is served from retained JSON rather than reopening the original case on every view. This keeps incident review usable after source expiration. A legacy rebuild falls back to retained capsule evidence when input files are missing; it does not invent replacement raw samples.
 
 ## No Autonomous Remediation
 

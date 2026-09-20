@@ -1,6 +1,6 @@
 # FCAPSule Implementation Proposal
 
-**Status:** Implemented baseline for version 1.0.  
+**Status:** Implemented reference architecture and proposed hardening, September 2026.
 **Stable concept:** `FCAPSule_AI_Concept.md`  
 **Implemented design:** `PROJECT_DESIGN.md`
 
@@ -14,7 +14,7 @@ Implement FCAPSule as a source-neutral telemetry attention service with:
 - compact evidence selection;
 - grounded deterministic and optional pretrained-model reasoning;
 - durable capsule metadata;
-- CLI, API, Operations, and AI settings surfaces.
+- CLI, API, Operations, Targets, and Settings surfaces.
 
 ## Implemented Local Stack
 
@@ -25,6 +25,8 @@ Implement FCAPSule as a source-neutral telemetry attention service with:
 - background threads for local jobs;
 - filesystem artifacts under `.fcapsule/`;
 - optional DeepSeek API client.
+- live Prometheus, OpenSearch and Kubernetes API adapters;
+- a single-replica Kubernetes deployment with persistent state.
 
 This stack is intentionally small. The component boundaries support migration to a production HTTP framework, PostgreSQL, object storage, and queue-backed workers.
 
@@ -47,9 +49,10 @@ Every source adapter normalizes its bounded response into:
 - `alert.json`;
 - `prometheus_metrics.json`;
 - `opensearch_logs.json`;
+- optional `kubernetes_config.json`;
 - optional expected regression notes.
 
-Live adapters should query source APIs directly and may use an in-memory normalized object in a later implementation. File serialization remains valuable for reproducible evaluation.
+Implemented live adapters query source APIs and stage bounded normalized inputs under `state_dir/live-cases/`. They remain until incident retention/deletion. In-memory processing or a shorter staging TTL would be a future privacy/storage improvement, not current behavior.
 
 ## Attention Pipeline
 
@@ -68,7 +71,7 @@ Live adapters should query source APIs directly and may use an in-memory normali
 
 The control plane stores applications, incidents, capsules, and non-secret model preferences. It provides external-case ingestion and background capsule jobs to the web API.
 
-Operations and AI settings are the product views. The FCAPSule Lab workload is a separate Compose project that exports the normalized case contract, so it exercises the same lifecycle without becoming a product dependency.
+Operations groups incidents and opens reports; Targets owns source configuration and namespace-grouped coverage; Settings owns retention and the automatic briefing model. Lab workloads remain in a separate project and can use normalized exports or the live Kubernetes path.
 
 ## Trace Approach
 
@@ -92,14 +95,14 @@ Replace local implementation details without changing the normalized contracts:
 | background thread | durable job queue |
 | SQLite | PostgreSQL |
 | local artifact directory | object storage |
-| file adapters | authenticated source API clients |
+| current API adapters and file import | broader authentication, pagination and backoff |
 | local configuration | mounted config and secret references |
-| single process | Kubernetes deployment |
+| single-process Kubernetes pod | multi-replica coordination after storage/job redesign |
 
 ## Engineering Priorities
 
 1. Preserve evidence provenance and cautious causal language.
-2. Keep raw telemetry source-owned.
+2. Keep telemetry source-owned and document the bounded local staging lifetime explicitly.
 3. Make source availability and selection state visually distinct.
 4. Keep deterministic behavior available without external credentials.
 5. Evaluate model changes on identical evidence.

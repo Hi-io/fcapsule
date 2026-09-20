@@ -2,6 +2,8 @@
 
 ## Purpose
 
+These are operator-first acceptance principles. For the implemented inventory and known gaps, use the [current guide](../FCAPSule_AI_Project_Guide.md). In particular, live trace retrieval and comprehensive source deep links remain future work.
+
 FCAPSule protects the investigation context around an operational incident before source telemetry expires. It is not a generic log summarizer and it is not a model-evaluation dashboard. Its job is to turn a fault-triggered, short-lived observation window into a compact, traceable incident record that an SRE or application engineer can act on.
 
 The product must remain useful when raw logs, metrics, or traces are retained by their source systems for only a short period. A capsule keeps derived, attributable evidence and investigation context; it does not become a second long-term raw telemetry store.
@@ -33,7 +35,7 @@ The owner needs to see which applications are protected, whether their FM, PM, l
 - **Retention is operational context.** A trace source available for the next few minutes is a time-sensitive action, not a storage implementation detail.
 - **No model contest in the operator workflow.** Model selection is an administrator and evaluation concern. The runtime uses the configured model, while users see grounded findings and evidence rather than scores, latency, or token counts.
 - **Technical evaluation stays available, but out of the way.** Compression, signal-preservation, grounding, and model-evaluation details may be exposed in an expandable engineering diagnostics section for maintainers and research reports.
-- **Do not duplicate observability storage.** FCAPSule stores the compact capsule, source references, and report; raw telemetry stays with the source system.
+- **Do not become a telemetry warehouse.** Sources remain authoritative. Current live capture stages bounded raw inputs until incident cleanup; the compact export excludes those inputs. A shorter staging lifetime remains a privacy/storage improvement.
 
 ## Required Operator Experience
 
@@ -52,7 +54,7 @@ An alert is a signal, not automatically a separate operator task. Pending rules 
 
 ### Incident report
 
-Opening a report must provide a focused investigation surface with these sections in order:
+The following information must be accessible without a wall of text. The implementation uses Overview (assessment and material impact), Evidence (domain disclosures) and Timeline, rather than displaying every section simultaneously:
 
 1. **Incident status and impact:** severity, service, environment, start time, user-facing symptom, and material impact metrics.
 2. **Likely failure path:** evidence-grounded, probabilistic hypothesis with explicit confidence and uncertainty.
@@ -64,7 +66,7 @@ Opening a report must provide a focused investigation surface with these section
 
 ## Data Contract
 
-The current local implementation already supplies the required inputs:
+Available input contracts include the following; actual coverage depends on connected sources and must not be assumed:
 
 - FM: alert name, severity, timestamp, labels, and annotations;
 - PM: anomaly baseline, incident peak, percentage change, timestamp, component, and metric name;
@@ -79,7 +81,7 @@ For a deployed integration, source adapters must additionally provide a stable s
 
 FCAPSule should run as a pod or service alongside existing observability systems. It receives incident triggers, resolves the configured application identity, gathers a bounded investigation window from FM, PM, logs, topology/configuration, and optional trace access, then writes a capsule and report to durable storage.
 
-FCAPSule Lab remains an optional, separate Compose repository. It validates adapters and
+FCAPSule Lab remains an optional, separate workload repository. It validates adapters and
 produces reproducible sample data, but is not part of the FCAPSule operator workflow or
 deployment artifact.
 

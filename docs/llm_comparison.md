@@ -1,6 +1,6 @@
 # Model Comparison
 
-FCAPSule initially provides profiles for `deepseek-v4-flash` and `deepseek-v4-pro`. The comparison asks whether a stronger pretrained model makes better grounded use of the exact same evidence capsule.
+FCAPSule provides comparison profiles for `deepseek-v4-flash` and `deepseek-v4-pro`. This offline workflow tests differences on identical evidence without presupposing a winner. Operations uses one selected model for automatic background assessment, not simultaneous comparisons. Valid citations are reference checks, not proof of diagnosis accuracy.
 
 ## Fair-Input Rule
 

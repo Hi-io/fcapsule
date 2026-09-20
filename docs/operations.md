@@ -21,17 +21,18 @@ The Operations view treats an incident episode, not an individual alert notifica
 The view shows:
 
 - an episode queue ordered by latest activity;
+- active episodes prioritized before resolved ones;
 - severity and lifecycle state, affected application, latest signal time, related-signal count, and report readiness;
 - a clickable episode row that expands its investigation, with an alert selector when several reports are available;
 - archive and restore controls that keep an episode out of the active queue without deleting its signals or evidence;
-- incident impact, a verified investigation path, uncertainty, and concrete next checks;
+- incident impact, a cited investigation path, uncertainty, and concrete next checks;
 - FM sequence, PM changes, representative evidence, topology, and trace-source retention context;
 
 Overview presents the automatic AI assessment and material observed impact. Evidence groups alerts, anonymized log examples, performance charts and configuration into disclosures. Timeline shows all alerts in the episode. AI evidence references open the relevant evidence directly. Charts include the captured time range; their values describe the incident window, not current workload health. Export provides the retained JSON report and capsule archive. Compression, preservation, grounding and runtime remain in collapsed engineering diagnostics.
 
 ## Targets View
 
-Targets is the live-source control surface. It shows connection health for Prometheus, OpenSearch, and the Kubernetes API and lets an operator change source URLs, the OpenSearch index pattern, cluster identity, namespace scope, poll interval, incident window, and automatic report generation. **Test connections** checks credentials and reachability without changing settings; **Sync now** performs immediate discovery and alert polling.
+Targets is the live-source control surface. It shows connection health for Prometheus, OpenSearch, and the Kubernetes API and lets an operator change source URLs, the OpenSearch index pattern, cluster identity, namespace scope, poll interval, incident window, and automatic report generation. **Test connections** checks saved settings without erasing unsaved edits; save changes before testing them. **Sync now** performs immediate discovery and alert polling.
 
 For high-volume workloads, the OpenSearch capture budget is alert-focused. One quarter is reserved for the newest records immediately before the alert and three quarters for records from the alert onward. This preserves a small behavioral baseline without allowing routine traffic at the beginning of the incident window to displace the failure evidence.
 
@@ -67,8 +68,7 @@ The command validates the case and records metadata without copying raw telemetr
 `.fcapsule`. In Operations, select **Build report** for that incident, wait for the
 background evidence job to finish, and then expand the episode.
 
-FCAPSule Lab is a separate Docker Compose project for local source-adapter validation
-and demonstrations. It is not served by FCAPSule or required in deployment.
+FCAPSule Lab is a separate workload project for source-adapter validation and demonstrations, including Kubernetes scenarios. It is not served by FCAPSule or required in deployment.
 
 ## CLI
 
@@ -133,6 +133,7 @@ written to SQLite. The non-secret selection is persisted in `.fcapsule/ai-settin
 
 ```text
 .fcapsule/
+  .env
   fcapsule.db
   ai-settings.json
   source-settings.json
@@ -140,7 +141,15 @@ written to SQLite. The non-secret selection is persisted in `.fcapsule/ai-settin
   capsules/<incident-id>/
 ```
 
-The directory is ignored by Git. To preserve results outside local development, back up capsule artifacts and the metadata database according to the deployment retention policy.
+The directory is ignored by Git. `live-cases/` contains bounded raw captures, not only summaries. Managed incident deletion/retention removes these inputs and capsule artifacts. External input directories outside managed state are not removed. See [privacy and retention](data_privacy.md) before backing up or sharing the volume.
+
+## Export and Saved Reports
+
+Expand an episode and choose **Export**. Download the capsule ZIP for the retained evidence/analysis bundle or the report JSON for structured incident details. The menu shows actual file sizes, the cleanup eligibility date and an expandable server-side storage path. It is not a full observability backup. Existing downloaded copies are not removed by FCAPSule retention.
+
+Current-format reports do not need the original source directory to open. If an old report needs rebuilding after its source disappears, only retained capsule evidence is available; missing raw time-series samples cannot be reconstructed. Trace availability in an imported case is historical context, not proof of a currently reachable trace backend.
+
+Cleanup is checked while control-plane snapshots are served, at most once per minute. Archiving does not reset capture time or extend retention. The displayed date is eligibility, not a guarantee of deletion at that exact second.
 
 ## Troubleshooting
 

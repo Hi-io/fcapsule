@@ -4,6 +4,15 @@
 
 ### Changed
 
+- Added live Prometheus, OpenSearch and Kubernetes discovery/configuration capture, namespace-grouped coverage and source settings in Targets.
+- Grouped related firing signals into expandable episodes; split reports into Overview, Evidence and Timeline with automatic background AI assessment.
+- Combined retention and model configuration in Settings; added archive/restore and managed incident cleanup.
+- Refined the shared visual system, navigation, disclosure controls and blue capture-mark branding, with a local favicon and keyboard skip link.
+- Made export sizes, cleanup eligibility and storage location inspectable; current retained reports no longer reopen expired source inputs.
+- Preserved unsaved target edits during connection tests and corrected disconnected status coloring.
+- Reconciled operating, storage, privacy and architecture documentation with implemented behavior; labeled historical research results explicitly.
+- Added frontend regression checks to CI.
+
 - Moved the incident workload and fault controls out of FCAPSule into the separate
   FCAPSule Lab Compose project.
 - Replaced simulator controls with external normalized-case ingestion and per-incident

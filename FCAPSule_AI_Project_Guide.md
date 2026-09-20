@@ -1,239 +1,94 @@
 # FCAPSule Project Guide
 
-**Status:** Version 1.0 product requirements  
-**Audience:** maintainers, contributors, evaluators, and operators  
-**Source of truth:** stable product behavior and engineering boundaries
+**Status:** Current implementation and product requirements, September 2026.
 
-## 1. Purpose
+**Audience:** operators, maintainers and evaluators.
 
-FCAPSule reduces a bounded cloud incident window into a compact, explainable evidence capsule. It is designed for teams that already have observability systems but need a faster and more durable way to identify which evidence matters.
+**Concept:** [Stable purpose and research framing](FCAPSule_AI_Concept.md).
 
-The stable product goal is:
+**Design:** [Implemented architecture](PROJECT_DESIGN.md).
 
-> Preserve the strongest cross-domain investigation evidence while reducing the volume, token cost, and retention burden of raw telemetry.
+## Purpose
 
-FCAPSule does not need to know the final root cause to be useful. It must show what happened, what changed, which entities are involved, why evidence was selected, what remains uncertain, and which checks should happen next.
+Preserve useful incident context before source telemetry expires, and help an SRE or application engineer decide what to investigate next. A compact capsule should explain what was observed, why it matters, what could explain it and what remains uncertain.
 
-## 2. Product Boundaries
+FCAPSule complements observability infrastructure. It is not a replacement telemetry warehouse, a guaranteed root-cause detector, an autonomous remediation agent or a model-comparison dashboard.
 
-FCAPSule is:
+## User Workflow
 
-- a telemetry attention engine;
-- an alert-centered evidence collector;
-- a compact incident flight recorder;
-- a source-neutral normalization pipeline;
-- an explainable evidence selector;
-- an optional orchestration point for pretrained AI models;
-- a retained evidence store and review surface.
+1. Configure Prometheus, OpenSearch and Kubernetes access in Targets.
+2. Check current applications, grouped by namespace, and observed telemetry coverage.
+3. A firing alert opens a bounded capture; pending alerts do not open incidents.
+4. Related signals for the same application within the correlation window join an episode.
+5. The deterministic pipeline retains evidence and builds an immediately usable report.
+6. With a provider key, the selected model produces an automatic background assessment.
+7. Open the episode in Operations, inspect Overview, then follow citations into Evidence.
+8. Use Timeline for ordering, Export for handoff, and archive to clear the working queue.
+9. Retention removes old incidents and their managed files, including archived incidents.
 
-FCAPSule is not:
+The CLI remains usable independently. External normalized cases may be ingested manually. Simulation belongs to a separate project; the product neither deploys workloads nor injects failures.
 
-- a replacement for Prometheus, OpenSearch, Alertmanager, Kafka, or tracing systems;
-- a raw telemetry warehouse;
-- an autonomous remediation system;
-- a guarantee of final root cause;
-- a chat interface over unrestricted production data;
-- a system that must retain distributed traces.
+## Operational Domains
 
-## 3. Users and Workflows
-
-### Operator
-
-Registers applications, checks source availability, reviews open incidents, opens capsules, and configures model profiles.
-
-### Investigator
-
-Starts from an alert or incident window, reviews the strongest FM, PM, log, topology, and trace-availability evidence, then follows grounded next checks.
-
-### Maintainer
-
-Adds source adapters, updates scoring, runs regression scenarios, compares models, and validates retention/privacy behavior.
-
-### Evaluator
-
-Reproduces the incident lab, inspects objective metrics, compares identical model inputs, and reviews evidence provenance.
-
-## 4. Operational Signal Domains
-
-Each domain has a distinct shape and method. The system must keep the distinction visible in data contracts and the UI.
-
-| Domain | Shape | Required behavior |
+| Domain | Implemented input | Operator value |
 |---|---|---|
-| Fault management (FM) | discrete alerts/events | define trigger, severity, sequence, and affected scope |
-| Performance management (PM) | numeric series | compare baseline and incident values; rank anomalies |
-| Application logs | semi-structured text | anonymize, group, count, and retain representatives |
-| Topology/configuration | entity graph and change events | align services, pods, namespaces, clusters, and dependencies |
-| On-demand traces | temporary queryable spans | probe availability and retrieve only when needed; do not retain raw spans |
-| AI reasoning | structured generated text | cite evidence IDs, express uncertainty, and produce actionable checks |
+| Fault management | Prometheus firing alerts, optional matching rule expression and duration | Why the alert fired, its scope and sequence |
+| Performance | Prometheus numeric series | Baseline/incident changes and retained trends |
+| Logs | OpenSearch bounded log documents | Counted patterns, masked examples and timing |
+| Configuration | Kubernetes pod context and referenced ConfigMaps | Runtime limits, images and configuration associated with the affected workload |
+| Trace context | Optional metadata in imported cases | Declared availability and retention; no live trace backend yet |
 
-A domain with no selected evidence must not be presented as broken. The UI should distinguish source availability, raw items observed, candidates analyzed, and evidence retained.
+These are operational data domains, not audio/image/text media modalities. A source connection, recently observed data and selected incident evidence are different states. An empty domain must remain explicit rather than be filled with invented values.
 
-## 5. Core Workflow
-
-1. Receive an alert trigger or an explicit application/time window.
-2. Resolve the application and source configuration.
-3. Query FM, PM, logs, topology, and trace availability for the bounded window.
-4. Normalize timestamps, labels, entity identity, and source provenance.
-5. Reduce log volume into templates and representative anonymized lines.
-6. detect explainable PM anomalies against a baseline.
-7. Build the FM timeline and correlate affected entities.
-8. Score evidence using visible components.
-9. Select a domain-balanced capsule.
-10. Generate deterministic investigation paths.
-11. Verify every cited evidence ID.
-12. Optionally run enabled pretrained models over the exact same capsule input.
-13. Persist the capsule, evaluation, provenance, and derived-only archive.
-14. Expose the result through CLI, API, Operations, and static report surfaces.
-
-## 6. Capsule Requirements
-
-Every capsule must include:
-
-- stable capsule and incident identity;
-- application, namespace, cluster, and incident window;
-- FM alert context and timeline;
-- selected evidence with evidence IDs and domain labels;
-- scoring components and inclusion rationale;
-- reduced log templates with anonymized representatives;
-- PM anomaly measurements and baseline comparison;
-- topology/configuration context when available;
-- trace-source availability and retention notes;
-- grounded hypotheses;
-- contradicting or missing evidence;
-- concrete next checks;
-- objective reduction and preservation metrics;
-- limitations and provenance.
-
-The derived archive must exclude raw logs, full metric exports, credentials, and raw spans.
-
-## 7. Control Plane Requirements
-
-The local control plane uses SQLite and must track:
-
-- application registrations and signal-source configuration;
-- current application health;
-- incident metadata and raw data volume observed;
-- capsule metadata, retained size, and evaluation;
-- model profiles, enablement, and token limits.
-
-The control plane must support multiple applications and multiple incidents. Generated control-plane state lives under `.fcapsule/` and must remain outside Git.
-
-## 8. User Interfaces
+## Screens and Priorities
 
 ### Operations
 
-The Operations view must make these questions answerable at a glance:
+The first screen answers: what needs attention, which application is affected, what is the observed impact, and where is its investigation?
 
-- Which applications are tracked?
-- Which are healthy or degraded?
-- Which FM, PM, log, and trace sources are available?
-- When was the last incident?
-- Which capsules exist?
-- How much raw data was inspected and how much evidence was retained?
-- Which models are enabled?
-- What is the strongest evidence in a selected capsule?
+An expandable episode owns its report selector. Overview shows the AI assessment when available, material impact, a likely explanation, a first check, expected finding, conditional mitigation and uncertainty. Provider errors or a missing key must not block retained evidence. Evidence and Timeline provide progressive detail. Engineering metrics stay collapsed and model comparisons remain offline.
+
+Export makes artifact size, retention eligibility and server-side location inspectable. A current retained report must remain readable after its source capture disappears.
 
 ### Targets
 
-The Targets view must make source operation explicit:
+Connection health, discovery counts and namespace-grouped coverage are the primary information. Source configuration is expandable. Background refresh and connection tests must not erase unsaved input. Tests use saved connection settings; save edited values before testing them.
 
-- Are Prometheus, OpenSearch, and the Kubernetes API reachable?
-- Which namespaces are in scope?
-- Which pods are currently visible and mapped to applications?
-- Are metrics, recent logs, and referenced configuration observed for each workload?
-- When did the last discovery run complete?
-- Can an operator test and update source settings without rebuilding the deployment?
+### Settings
 
-### External Workload Integration
+Incident retention and automatic AI briefing configuration share one page. Retention defaults to 30 days from capture and includes archived incidents. Model choice, completion budget and replacement key are editable. No additional screen is required for the current workflow.
 
-The product must accept a normalized bounded incident case from a source adapter or
-external workload project. The ingestion flow must validate the input, register incident
-metadata without retaining raw source telemetry, and expose a **Build report** action in
-Operations. The FCAPSule Lab Compose workload is intentionally separate and owns its
-traffic, failures, Prometheus instance, and Docker logs.
+## Evidence and Reasoning Contract
 
-## 9. Incident Scenario Requirements
+The deterministic path validates inputs, aligns entities, reduces logs, identifies PM changes, constructs the alert timeline, scores candidates and selects domain-balanced evidence. It works without external credentials.
 
-The reference scenario must be more complex than a direct endpoint failure. It uses:
+The optional runtime model sees compact retained evidence. Its structured response must cite existing evidence IDs and state uncertainty. Reference validity does not establish causal truth, diagnosis quality or complete factual grounding. Human review remains necessary; no changes are executed against monitored systems.
 
-- checkout and inventory HTTP services;
-- concurrent baseline and incident traffic;
-- a runtime configuration change;
-- inventory partition lock contention;
-- database-pool saturation;
-- checkout retries with a circuit breaker that remains closed;
-- retry amplification;
-- rising latency and error rate;
-- a three-alert FM sequence;
-- thousands of structured logs and at least eighteen PM series;
-- ephemeral trace-source access.
+Offline comparison can run multiple compatible models over identical input. Fixed rubrics, latency and token usage support evaluation, not a predetermined winner. Ties and worse results are valid outcomes.
 
-The evidence must support a tentative chain: lock contention may create dependency latency; checkout retries may amplify load; pool saturation may sustain the failure. The capsule must not claim this chain as proven final root cause without database diagnostics and request traces.
+## Storage and Privacy Contract
 
-## 10. AI Model Requirements
+SQLite holds metadata; managed files live under the configured state directory. Live capture currently stages bounded raw inputs in `live-cases/` until incident deletion/retention. The capsule ZIP excludes those inputs, retaining derived evidence, representative lines and chart values. External cases outside managed state remain producer-owned.
 
-The core pipeline must work without an external model.
+Masking is heuristic and cannot guarantee removal of every sensitive value. Configuration collection does not read Kubernetes Secrets. A UI-saved provider key lives in plaintext in the ignored state-directory `.env`, not SQLite or API responses. See [privacy and retention](docs/data_privacy.md) for exact boundaries.
 
-When offline model comparison is enabled:
+Archiving is not deletion and does not reset retention. Exported copies are independent of the service's cleanup.
 
-- all models receive the same compact capsule and prompt;
-- provider, model, latency, tokens, parse status, and finish reason are recorded;
-- every generated citation is checked against selected evidence;
-- scoring covers JSON validity, citation validity, domain coverage, expected-signal coverage, actionability, evidence breadth, and cautious causal language;
-- a winner is recorded only when the fixed rubric produces a measurable score delta;
-- the evaluation runner may configure model enablement and maximum-token limits outside the operator UI.
+## Deployment and Maturity
 
-The initial comparison profiles are `deepseek-v4-flash` and `deepseek-v4-pro`. The model boundary must remain provider-extensible.
+The implemented deployment is a single Kubernetes replica with read-only ServiceAccount access, PVC-backed state, health probes and an optional model credential. Live Prometheus/OpenSearch/Kubernetes adapters exist today.
 
-## 11. Evaluation Requirements
+The reference HTTP server has no built-in authentication, authorization or TLS. SQLite and in-process workers are not a distributed service. Trusted-network operation is supported; production hardening, durable queues, source scaling and live trace integration remain [roadmap work](ROADMAP.md). A polished UI must not be used as evidence that those controls exist.
 
-Required objective measures:
+## Acceptance Criteria
 
-- raw log lines and bytes;
-- selected representative lines;
-- log and template reduction;
-- estimated raw and capsule tokens;
-- token reduction;
-- representative signal groups identified, preserved, and missing;
-- PM anomaly preservation;
-- citation grounding;
-- capsule runtime;
-- retention-section completeness;
-- capsule bytes versus raw bytes;
-- model latency, usage, and rubric score when enabled.
-
-Regression cases must define expected diagnostic signal groups without treating them as root-cause truth.
-
-## 12. Privacy and Safety
-
-- Read-only source access is the default.
-- Secrets must come from environment variables or external secret stores.
-- `.env`, `.fcapsule/`, and generated outputs must not be committed unintentionally.
-- IPs, emails, UUID-like values, tokens, passwords, and variable identifiers are masked before representative lines enter capsules.
-- Raw spans are never written to capsule storage.
-- Model calls receive selected evidence, not unrestricted raw telemetry.
-- The system does not execute remediation.
-
-## 13. Deployment Contract
-
-The local version is a reference control plane. A pod deployment should mount configuration and durable metadata storage, expose the web/API port, and receive read-only credentials for configured adapters.
-
-Future live adapters must normalize to the same case contract. Pipeline behavior must not depend on whether the source is a file export, direct HTTP API, webhook trigger, or external workload exporter.
-
-The service may later use PostgreSQL and distributed workers, but SQLite and in-process jobs are the supported local mode.
-
-## 14. Definition of Done
-
-A release is complete when:
-
-- CLI and both operator views start from one command;
-- a user can register an application or ingest a bounded external case;
-- a workload exporter can trigger and capture expected alerts outside the product runtime;
-- the ingested incident appears in Operations;
-- a capsule can be built without an API key;
-- enabled models can run over identical input when credentials are available;
-- artifacts exclude raw telemetry;
-- objective metrics and missing signals are visible;
-- automated tests pass;
-- both desktop and mobile layouts are visually usable;
-- documentation matches current commands, storage, and behavior.
+- An engineer can identify the affected workload, observed symptom and next check without opening engineering diagnostics.
+- Related alerts are grouped without losing individual reports or provenance.
+- Missing evidence, source failures and incomplete AI analysis remain visible.
+- Report and archive retrieval work independently of expired source telemetry.
+- Targets show currently observed workloads, not deleted pods as active coverage.
+- No automatic comparison or simulator is required in the operator path.
+- Archive, restore, deletion and retention have distinct behavior.
+- Tests cover pipeline, lifecycle, report persistence, HTTP routes and UI helpers.
+- Desktop and narrow layouts preserve usable controls, focus and readable evidence.
+- Documentation separates implemented behavior, historical measurements and remaining limitations.

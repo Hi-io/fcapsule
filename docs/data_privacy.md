@@ -1,54 +1,45 @@
 # Data Privacy and Retention
 
-## Collection Boundary
+This describes implemented behavior, not a guarantee of complete anonymization or a production security certification.
 
-FCAPSule queries only the application and bounded time window required for an incident. Source credentials should be read-only and scoped to the minimum required indices, queries, and namespaces.
+## Collection and Storage Boundaries
 
-## Stored Data
+Prometheus, OpenSearch and Kubernetes remain the source systems of record. FCAPSule reads a bounded incident window using read-only access.
 
-FCAPSule stores:
+| Layer | Contents | Lifetime |
+|---|---|---|
+| `state_dir/live-cases/<id>/` | Bounded source logs, PM samples, alerts, metadata and configuration snapshot | Until managed incident deletion or retention cleanup |
+| `state_dir/capsules/<id>/` | Selected evidence, masked log examples, metric trends, report, assessment, evaluation and ZIP | Same incident lifetime |
+| `state_dir/fcapsule.db` | Application registry, episodes, incident/capsule metadata and non-secret settings | Incident records are cleaned up; registry/settings persist |
 
-- application and incident metadata;
-- FM alert context;
-- ranked evidence and score explanations;
-- PM anomaly summaries;
-- anonymized representative log lines;
-- topology/configuration facts relevant to the incident;
-- trace-source availability and derived findings;
-- grounded hypotheses, next checks, and evaluation;
-- model prompts and outputs when comparison is explicitly enabled.
+Live capture is **not memory-only**. Staged inputs may contain sensitive logs and metrics. An independent staging TTL is not implemented. External `ingest-case` directories are referenced without copying; FCAPSule never deletes an input directory outside its managed state directory.
 
-FCAPSule does not store:
+The ZIP contains derived artifacts, including representative log lines and retained chart values. It excludes normalized raw input files, raw trace spans and the provider credential. Offline comparison prompts/responses can exist alongside artifacts when explicitly requested, but are not included in the ZIP allowlist.
 
-- unrestricted raw log collections;
-- complete PM exports in capsule archives;
-- raw distributed trace spans;
-- provider API keys;
-- passwords or observability credentials;
-- remediation commands.
+## Retention and Export
 
-## Anonymization
+Retention defaults to 30 days and is configurable from 1 to 3650 days in Settings. Age is measured from capture (`created_at`), not original event time. Archiving hides an episode; it does not extend retention. Cleanup is checked during control-plane snapshots, at most once per minute, and when retention changes. It is not an exact wall-clock deletion scheduler.
 
-Before representative log lines enter evidence, processing masks:
+Expired or explicitly deleted incidents lose their managed input/output directories and incident/capsule metadata. Exported copies and backups outside FCAPSule are not affected. Export shows actual ZIP/JSON sizes, cleanup eligibility date and server-side artifact directory. A current report remains readable without reopening its source capture. Rebuilding a legacy/missing report without source metrics uses retained evidence; it cannot recreate lost raw series.
 
-- IP addresses;
-- email addresses;
-- UUID-shaped identifiers;
-- long hexadecimal identifiers;
-- token, secret, and password assignments;
-- variable numeric values used for template grouping.
+## Masking and Configuration
 
-Adapters should add organization-specific field removal before normalization when required.
+Log evidence masks known IP, email, UUID, long-identifier and credential-assignment patterns. Variable numbers are also masked for template grouping. These are heuristics, not a comprehensive DLP system. Bounded staging inputs are not protected by the representative-line masking step.
 
-## Trace Policy
-
-Trace systems remain the source of truth. FCAPSule may probe or query them while the source retention window is active. It retains availability, timing, derived evidence, and source references. It does not copy the raw span set.
+Kubernetes collection reads referenced ConfigMaps and pod context. Credential-shaped configuration keys are redacted. RBAC does not permit reading Kubernetes Secrets. Sensitive values can still be present under innocent-looking keys; review what workloads expose and narrow collection permissions.
 
 ## Model Boundary
 
-External models receive the selected capsule evidence, not unrestricted source telemetry. Every response is recorded with provider/model metadata and checked for valid evidence citations.
+The optional automatic briefing sends compact retained evidence and configuration context to the configured DeepSeek-compatible provider, not the unrestricted source window. This is an external disclosure and a paid API operation. Confirm organizational approval before enabling it. Selected evidence can still contain sensitive information despite masking.
 
-## Local Secrets and State
+The briefing stores a structured result and provider metadata. Offline evaluation separately records prompts and responses. Citation validation checks reference integrity, not factual entailment or causal truth. The tool does not execute remediation.
 
-`.env` and `.fcapsule/` are ignored by Git. Production deployments should use a secret manager and encrypted durable storage with explicit retention, access control, and audit policies.
+## Secrets and Deployment
 
+Keys entered in Settings are saved in plaintext in `state_dir/.env` and loaded into the process environment. They are not returned by settings APIs, stored in SQLite or included in capsule archives. A root `.env` or mounted environment Secret can also supply credentials. Git ignores `.env` and managed state, but that is not encryption or access control.
+
+The HTTP service has no built-in authentication, authorization, TLS or audit trail. Keep it on a trusted network, restrict filesystem/PVC access and protect backups. Use an authenticated TLS proxy and scoped source credentials before shared deployment. Do not expose the reference NodePort to the public Internet.
+
+## Traces
+
+Normalized external cases can describe source trace availability and retention. No live Tempo/Jaeger adapter is implemented. FCAPSule does not retain raw trace spans; supplied availability metadata must not be mistaken for a currently verified backend connection.
