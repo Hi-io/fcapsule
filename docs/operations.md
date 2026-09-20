@@ -20,9 +20,9 @@ The Operations view shows:
 
 - an incident queue ordered by severity and capture time;
 - an **Open report** action for each incident with a retained capsule; the report expands directly below that queue row;
+- archive and restore controls that keep resolved incidents out of the active queue without deleting evidence;
 - incident impact, a verified investigation path, uncertainty, and concrete next checks;
 - FM sequence, PM changes, representative evidence, topology, and trace-source retention context;
-- application coverage across FM, PM, logs, and trace access.
 
 The report distinguishes its evidence by domain: FM alert records, PM trend lines with normal/peak values, and expandable anonymized log patterns. Compression, signal preservation, grounding, runtime, and model-evaluation details are available only inside the collapsed engineering diagnostics section. They support maintainers and evaluation work; they are not the first information presented to an on-call responder.
 
@@ -30,7 +30,13 @@ The report distinguishes its evidence by domain: FM alert records, PM trend line
 
 Targets is the live-source control surface. It shows connection health for Prometheus, OpenSearch, and the Kubernetes API and lets an operator change source URLs, the OpenSearch index pattern, cluster identity, namespace scope, poll interval, incident window, and automatic report generation. **Test connections** checks credentials and reachability without changing settings; **Sync now** performs immediate discovery and alert polling.
 
-Application coverage is current inventory, not a permanent registration claim. A discovered workload is mapped by cluster, namespace, workload, and pod. If it disappears, historical incidents remain available but the application is marked `not observed` and its current pod list is cleared.
+Application coverage is shown on Targets because it describes current source discovery rather than incident state. A discovered workload is mapped by cluster, namespace, workload, and pod. Workloads that disappear are omitted from current coverage while their historical incidents remain available.
+
+## Settings View
+
+Settings combines lifecycle and optional AI configuration. Incident retention defaults to 30 days and accepts values from 1 to 3650 days. FCAPSule permanently removes expired active or archived incidents, their metadata, and managed report/capsule files. The age is measured from the time FCAPSule captured the incident, so importing an older event does not immediately discard it.
+
+Archiving is separate from retention: it hides an incident from the active queue but preserves the report and capsule. Archived incidents can be restored or permanently deleted from the archived view.
 
 For Kubernetes installation and source prerequisites, use `docs/kubernetes_deployment.md`.
 
@@ -109,9 +115,9 @@ DEEPSEEK_API_KEY=...
 
 Capsule creation always completes with deterministic detection and evidence-grounded reasoning, whether or not a provider key is available. A configured model may be evaluated or added later as a non-blocking enrichment.
 
-## AI Settings
+## AI Briefing Settings
 
-Open **AI settings** in the console to choose the DeepSeek-compatible model and
+Open **Settings** in the console to choose the DeepSeek-compatible model and
 completion budget for an optional cited briefing. Paste a replacement API key only when
 necessary. It is saved to the configured state directory's `.env` file and never returned to the browser or
 written to SQLite. The non-secret selection is persisted in `.fcapsule/ai-settings.json`.

@@ -12,7 +12,7 @@ SQLite is sufficient for one local process and makes multi-application state dur
 
 Operations is the product surface. The source/test harness is now the separate FCAPSule
 Lab project, which exports the same normalized incident contract used by live-source
-adapters. Targets configures production data sources; AI settings configures optional cited reasoning. Keeping the contract shared while keeping runtime ownership
+adapters. Targets configures production data sources and shows current workload coverage; Settings combines retention policy with optional cited reasoning. Keeping the contract shared while keeping runtime ownership
 separate prevents the product from becoming a simulator or container controller.
 
 ## Deterministic Core

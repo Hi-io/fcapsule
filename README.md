@@ -8,9 +8,9 @@ It is not another root-cause chatbot and it does not replace Prometheus, OpenSea
 
 FCAPSule provides one control plane with three operator views:
 
-- **Operations** (`/console`) starts with an incident queue. A report expands beneath its incident and separates FM alerts, PM trends, anonymized log patterns, urgent retention actions, exports, and application coverage.
-- **Targets** (`/targets`) configures and tests Prometheus, OpenSearch, and Kubernetes API access, controls namespace scope and polling, and reports current discovery coverage.
-- **AI settings** (`/settings`) selects the optional cited-briefing model. The provider key remains local in `.env` and is never returned through the console or stored in SQLite.
+- **Operations** (`/console`) contains the active incident queue, archived incidents, and responder reports. A report expands beneath its incident and separates FM alerts, PM trends, anonymized log patterns, urgent retention actions, and exports.
+- **Targets** (`/targets`) configures and tests Prometheus, OpenSearch, and Kubernetes API access, controls namespace scope and polling, and shows coverage for currently observed applications.
+- **Settings** (`/settings`) controls incident retention and the optional cited-briefing model. The default retention is 30 days. The provider key remains local in `.env` and is never returned through the console or stored in SQLite.
 
 The CLI remains fully usable without the web application.
 
@@ -45,7 +45,7 @@ python3 -m fcapsule.cli serve
 Open:
 
 - Operations: `http://127.0.0.1:8765/console`
-- AI settings: `http://127.0.0.1:8765/settings`
+- Settings: `http://127.0.0.1:8765/settings`
 - Targets: `http://127.0.0.1:8765/targets`
 
 The control plane stores local metadata under `.fcapsule/`. That directory is ignored by Git.

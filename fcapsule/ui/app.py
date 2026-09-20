@@ -23,11 +23,11 @@ HTML = """<!doctype html>
 </head>
 <body>
   <header class="product-bar">
-    <a class="wordmark" href="/console"><span>FC</span>APSule</a>
+    <a class="wordmark" href="/console"><span>FCAPS</span>ule</a>
     <nav aria-label="Primary">
       <a href="/console" data-nav="console">Operations</a>
       <a href="/targets" data-nav="targets">Targets</a>
-      <a href="/settings" data-nav="settings">AI settings</a>
+      <a href="/settings" data-nav="settings">Settings</a>
     </nav>
     <div class="system-state"><i></i><span id="system-state">Ready</span></div>
   </header>
@@ -184,6 +184,12 @@ details.engineering summary { cursor:pointer; padding:10px 11px; font-weight:650
 .diagnostics dl { display:grid; grid-template-columns:1fr auto; gap:5px 12px; margin:0; }
 .diagnostics dd { margin:0; color:var(--ink); font-weight:650; }
 .report-tools { display:flex; gap:7px; flex-wrap:wrap; margin-top:11px; }
+.row-actions { display:flex; gap:6px; justify-content:flex-end; flex-wrap:wrap; min-width:190px; }
+.row-actions button { min-height:32px; padding:5px 9px; font-size:12px; }
+.queue-tabs { display:flex; gap:7px; align-items:center; }
+.alert-rule { margin-top:8px; border-top:1px solid #ead9bc; padding-top:6px; }
+.alert-rule summary { cursor:pointer; color:#6d4b22; font-size:12px; font-weight:650; }
+.alert-rule code { display:block; margin-top:7px; padding:7px; background:#fff; border:1px solid #ead9bc; overflow-wrap:anywhere; font-size:11px; }
 .button-link { display:inline-flex; align-items:center; min-height:32px; padding:6px 9px; border:1px solid #aeb8be; background:#fff; color:var(--ink); text-decoration:none; font-size:12px; font-weight:650; }
 .button-link:hover { border-color:#65737d; background:#f5f7f8; }
 .evidence-domain { margin:0 0 23px; }
@@ -242,6 +248,7 @@ const shortTime = value => value ? new Date(value).toLocaleTimeString([], {hour:
 document.querySelector(`[data-nav="${view}"]`)?.classList.add('active');
 let lastState = null;
 let selectedReport = null;
+let showArchived = false;
 const requestedReportId = new URLSearchParams(location.search).get('incident');
 
 function setSystem(state) {
@@ -258,18 +265,23 @@ function sources(config) {
 }
 
 function renderConsole(state) {
-  const data = state.overview; const apps = data.applications; const incidents = data.incidents;
+  const data = state.overview;
+  const incidents = showArchived ? data.archived_incidents : data.incidents;
   app.innerHTML = `
     <div class="page-head"><div><div class="eyebrow">Incident workspace</div><h1>Operations</h1><p>Captured incidents and the evidence needed to investigate them.</p></div><a href="/targets"><button class="secondary">Manage targets</button></a></div>
-    <section class="sheet"><div class="sheet-head"><h2>Incident queue</h2><span class="queue-note">${incidents.length} captured incident${incidents.length === 1 ? '' : 's'} · reports stay available after source telemetry expires</span></div><div class="table-wrap">${incidentTable(incidents, data.capsules)}</div></section>
-    <section class="sheet" style="margin-top:14px"><div class="sheet-head"><h2>Application coverage</h2><span class="queue-note">FM, PM, logs, and trace access configured per application</span></div><div class="table-wrap">${applicationTable(apps)}</div></section>`;
+    <section class="sheet"><div class="sheet-head"><div><h2>${showArchived ? 'Archived incidents' : 'Incident queue'}</h2><span class="queue-note">${incidents.length} incident${incidents.length === 1 ? '' : 's'}${showArchived ? ' hidden from the active queue' : ' requiring or retaining investigation context'}</span></div><div class="queue-tabs"><button class="secondary" id="queue-mode">${showArchived ? `Active (${data.incidents.length})` : `Archived (${data.archived_incidents.length})`}</button></div></div><div class="table-wrap">${incidentTable(incidents, data.capsules, showArchived)}</div></section>`;
+  document.querySelector('#queue-mode').addEventListener('click', () => { selectedReport = null; showArchived = !showArchived; renderConsole(lastState); });
   document.querySelectorAll('[data-incident-report]').forEach(button => button.addEventListener('click', () => openReport(button.dataset.incidentReport)));
   document.querySelectorAll('[data-build-capsule]').forEach(button => button.addEventListener('click', () => buildCapsule(button.dataset.buildCapsule)));
   document.querySelectorAll('[data-ai-briefing]').forEach(button => button.addEventListener('click', () => generateAiBriefing(button.dataset.aiBriefing)));
+  document.querySelectorAll('[data-archive]').forEach(button => button.addEventListener('click', () => changeIncidentState(button.dataset.archive, 'archive')));
+  document.querySelectorAll('[data-restore]').forEach(button => button.addEventListener('click', () => changeIncidentState(button.dataset.restore, 'restore')));
+  document.querySelectorAll('[data-delete]').forEach(button => button.addEventListener('click', () => deleteIncident(button.dataset.delete)));
 }
 
 function renderTargets(state) {
   const config = state.sources.configuration; const targets = state.sources.targets || {};
+  const observedApps = state.overview.applications.filter(item => item.status !== 'not_observed');
   const targetCard = (name, label) => {
     const item = targets[name] || {}; const ok = item.ok === true;
     const details = name === 'prometheus' ? [['Healthy targets', `${item.healthy_targets ?? '--'} / ${item.active_targets ?? '--'}`], ['Version', item.version || '--']]
@@ -295,7 +307,8 @@ function renderTargets(state) {
     <section class="sheet"><div class="sheet-head"><h2>Discovery</h2><span class="queue-note">${state.sources.last_sync_at ? formatDate(state.sources.last_sync_at) : 'Not synchronized'}</span></div><div class="sheet-body">
       <div class="kpis" style="grid-template-columns:repeat(3,1fr);margin:0"><div class="kpi"><span>Pods visible</span><strong>${state.sources.pods_visible || 0}</strong></div><div class="kpi"><span>Applications</span><strong>${state.sources.applications_visible || 0}</strong></div><div class="kpi"><span>Active alerts</span><strong>${state.sources.active_alerts || 0}</strong></div></div>
       ${state.sources.error ? `<p class="target-error">${safe(state.sources.error)}</p>` : '<p class="queue-note" style="margin-top:12px">Discovery maps Kubernetes pods to Prometheus metrics, OpenSearch logs, and referenced configuration.</p>'}
-    </div></section></div>`;
+    </div></section></div>
+    <section class="sheet" style="margin-top:14px"><div class="sheet-head"><h2>Application coverage</h2><span class="queue-note">${observedApps.length} currently observed application${observedApps.length === 1 ? '' : 's'}</span></div><div class="table-wrap">${applicationTable(observedApps)}</div></section>`;
   document.querySelector('#save-targets').addEventListener('click', saveTargets);
   document.querySelector('#test-targets').addEventListener('click', testTargets);
   document.querySelector('#sync-targets').addEventListener('click', syncTargets);
@@ -306,15 +319,20 @@ function renderSettings(state) {
   const options = ai.models.map(item => `<option value="${safe(item.model_id)}">${safe(item.model_id)}</option>`).join('');
   const keyState = ai.api_key_configured ? 'Configured locally' : 'Not configured';
   app.innerHTML = `
-    <div class="page-head"><div><div class="eyebrow">Runtime configuration</div><h1>AI settings</h1><p>Choose the optional briefing model used after a report is ready.</p></div></div>
-    <section class="sheet" style="max-width:720px"><div class="sheet-head"><h2>Provider connection</h2><span class="queue-note">${safe(keyState)}</span></div><div class="sheet-body">
+    <div class="page-head"><div><div class="eyebrow">Runtime configuration</div><h1>Settings</h1><p>Manage incident lifecycle and optional AI-assisted briefings.</p></div></div>
+    <div class="grid-2"><section class="sheet"><div class="sheet-head"><h2>Incident lifecycle</h2><span class="queue-note">Automatic cleanup</span></div><div class="sheet-body">
+      <div class="field"><label for="retention-days">Incident retention (days)</label><input id="retention-days" type="number" min="1" max="3650" value="${safe(state.settings.incident_retention_days)}"><small>Active and archived incidents older than this are permanently removed with their managed reports and capsules. Default: 30 days.</small></div>
+      ${window.generalSettingsNotice ? `<p class="notice">${safe(window.generalSettingsNotice)}</p>` : ''}
+      <div class="actions"><button id="save-general-settings">Save retention</button></div>
+    </div></section><section class="sheet"><div class="sheet-head"><h2>AI briefing</h2><span class="queue-note">${safe(keyState)}</span></div><div class="sheet-body">
       <div class="field"><label for="ai-provider">Provider</label><input id="ai-provider" value="DeepSeek-compatible" disabled></div>
       <div class="field"><label for="ai-model">Model ID</label><input id="ai-model" list="ai-model-options" value="${safe(ai.model)}"><datalist id="ai-model-options">${options}</datalist><small>Configured models are available here; a compatible model ID may also be entered.</small></div>
       <div class="field"><label for="ai-max-tokens">Maximum completion tokens</label><input id="ai-max-tokens" type="number" min="256" max="16000" value="${safe(ai.max_tokens)}"></div>
       <div class="field"><label for="ai-key">API key</label><input id="ai-key" type="password" autocomplete="new-password" placeholder="${ai.api_key_configured ? 'Leave blank to keep the saved key' : 'Paste a key to enable briefings'}"><small>Saved only to the local .env file. It is never shown in this console or saved in the database.</small></div>
       ${window.settingsNotice ? `<p class="notice">${safe(window.settingsNotice)}</p>` : ''}
-      <div class="actions"><button id="save-ai-settings">Save settings</button><a class="button-link" href="/console">Back to operations</a></div>
-    </div></section>`;
+      <div class="actions"><button id="save-ai-settings">Save AI settings</button></div>
+    </div></section></div>`;
+  document.querySelector('#save-general-settings').addEventListener('click', saveGeneralSettings);
   document.querySelector('#save-ai-settings').addEventListener('click', saveAiSettings);
 }
 
@@ -342,7 +360,7 @@ async function syncTargets() {
   window.targetNotice = 'Source synchronization started.'; await refresh();
 }
 
-function incidentTable(items, capsules) {
+function incidentTable(items, capsules, archived = false) {
   if (!items.length) return '<div class="empty">No incidents have been captured yet.</div>';
   const reports = new Set(capsules.map(item => item.incident_id));
   const openId = selectedReport?.incident?.incident_id || selectedReport?.report?.incident?.incident_id;
@@ -350,8 +368,9 @@ function incidentTable(items, capsules) {
     const ready = reports.has(item.incident_id);
     const isOpen = openId === item.incident_id;
     const reportRow = isOpen ? `<tr class="report-row"><td colspan="6">${reportPanel(selectedReport)}</td></tr>` : '';
-    const action = ready ? `<button class="secondary" data-incident-report="${safe(item.incident_id)}" aria-expanded="${isOpen}">${isOpen ? 'Close report' : 'Open report'}</button>` : `<button data-build-capsule="${safe(item.incident_id)}" ${lastState?.running ? 'disabled' : ''}>Build report</button>`;
-    return `<tr class="incident-row ${isOpen ? 'open' : ''}"><td>${status(item.severity)}</td><td><span class="incident-title">${safe(item.summary || item.scenario)}</span><small class="mono">${safe(item.incident_id)}</small></td><td class="wide-only">${safe(item.app_id)}</td><td class="wide-only">${shortTime(item.started_at)}</td><td><span class="impact-line">${safe(item.alert_count)} FM alerts · ${fmt.format(item.log_count)} logs captured · ${fmt.format(item.metric_series_count)} PM series</span></td><td>${action}</td></tr>${reportRow}`;
+    const reportAction = ready ? `<button class="secondary" data-incident-report="${safe(item.incident_id)}" aria-expanded="${isOpen}">${isOpen ? 'Close report' : 'Open report'}</button>` : archived ? '' : `<button data-build-capsule="${safe(item.incident_id)}" ${lastState?.running ? 'disabled' : ''}>Build report</button>`;
+    const lifecycleAction = archived ? `<button class="secondary" data-restore="${safe(item.incident_id)}">Restore</button><button class="danger" data-delete="${safe(item.incident_id)}">Delete</button>` : `<button class="secondary" data-archive="${safe(item.incident_id)}">Archive</button>`;
+    return `<tr class="incident-row ${isOpen ? 'open' : ''}"><td>${status(item.severity)}</td><td><span class="incident-title">${safe(item.summary || item.scenario)}</span><small class="mono">${safe(item.incident_id)}</small></td><td class="wide-only">${safe(item.app_id)}</td><td class="wide-only">${shortTime(item.started_at)}</td><td><span class="impact-line">${safe(item.alert_count)} FM alerts · ${fmt.format(item.log_count)} logs captured · ${fmt.format(item.metric_series_count)} PM series</span></td><td><div class="row-actions">${reportAction}${lifecycleAction}</div></td></tr>${reportRow}`;
   }).join('')}</tbody></table>`;
 }
 
@@ -407,6 +426,29 @@ async function saveAiSettings() {
   renderSettings(lastState);
 }
 
+async function saveGeneralSettings() {
+  const payload = {incident_retention_days:Number(document.querySelector('#retention-days').value)};
+  const response = await fetch('/api/settings/general', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+  const result = await response.json();
+  if (!response.ok) { alert(result.error || 'Unable to save retention'); return; }
+  lastState.settings = result; window.generalSettingsNotice = 'Retention policy saved.'; renderSettings(lastState);
+}
+
+async function changeIncidentState(id, action) {
+  const response = await fetch(`/api/incidents/${encodeURIComponent(id)}/${action}`, {method:'POST'});
+  const result = await response.json();
+  if (!response.ok) { alert(result.error || `Unable to ${action} incident`); return; }
+  selectedReport = null; await refresh();
+}
+
+async function deleteIncident(id) {
+  if (!confirm('Permanently delete this incident, report, and capsule?')) return;
+  const response = await fetch(`/api/incidents/${encodeURIComponent(id)}`, {method:'DELETE'});
+  const result = await response.json();
+  if (!response.ok) { alert(result.error || 'Unable to delete incident'); return; }
+  selectedReport = null; await refresh();
+}
+
 function sparkline(signal) {
   const values = signal.values || [];
   if (values.length < 2) return '';
@@ -429,7 +471,7 @@ function reportPanel(payload) {
   const impact = report.impact.length ? report.impact.map(item => `<div class="impact-item"><span>${safe(item.label)}</span><strong>${safe(item.value)}</strong><small>${safe(item.component || 'service')} · ${safe(item.baseline_text)}</small><p>${safe(item.meaning)}</p></div>`).join('') : '<p class="queue-note">No material metric anomalies were retained.</p>';
   const timeline = report.timeline.length ? report.timeline.map(item => `<li class="timeline-item ${safe(item.severity)}"><strong>${safe(item.title)}</strong><small>${formatDate(item.timestamp)} · ${safe(item.description || '')}</small></li>`).join('') : '<li class="queue-note">No ordered incident events are available.</li>';
   const actions = report.actions.length ? report.actions.slice(0,6).map((item, index) => `<li class="${safe(item.priority)}" data-step="${index + 1}"><b>${item.priority === 'urgent' ? 'Preserve now' : index === 0 ? 'Start here' : 'Then'}</b>${safe(item.action)}${item.reason ? `<small class="queue-note">${safe(item.reason)}</small>` : ''}</li>`).join('') : '<li>No follow-up action was generated.</li>';
-  const faultAlerts = report.fault_alerts.map(item => `<div class="alert-record ${safe(item.severity)}"><strong>${safe(item.name)}</strong><small>${formatDate(item.timestamp)}${item.service ? ` · ${safe(item.service)}` : ''}</small><span>${safe(item.description)}</span></div>`).join('');
+  const faultAlerts = report.fault_alerts.map(item => `<div class="alert-record ${safe(item.severity)}"><strong>${safe(item.name)}</strong><small>${formatDate(item.timestamp)}${item.service ? ` · ${safe(item.service)}` : ''}</small><span>${safe(item.description)}</span>${item.rule?.query ? `<details class="alert-rule"><summary>Why this alert fired</summary><code>${safe(item.rule.query)}</code><p class="queue-note">Condition must hold for ${safe(item.rule.duration || 0)} seconds · rule health: ${safe(item.rule.health || 'unknown')}</p></details>` : ''}</div>`).join('');
   const pmSignals = report.pm_signals.map(item => `<article class="pm-signal"><h4>${safe(item.label)}</h4><p>${safe(item.meaning)}</p>${sparkline(item)}<div class="pm-values"><span>Typical<b>${safe(item.baseline)}</b></span><span>Peak<b>${safe(item.peak)}</b></span></div></article>`).join('');
   const logPatterns = report.log_patterns.map(item => `<details class="log-pattern"><summary><strong>${safe(item.pattern)}</strong><span class="queue-note"> · ${safe(item.summary)}</span></summary><p>${safe(formatDate(item.first_seen))}${item.last_seen ? ` to ${safe(formatDate(item.last_seen))}` : ''} · retained pattern ${safe(item.evidence_id)}</p>${item.examples?.length ? `<pre class="log-lines">${safe(item.examples.join('\n'))}</pre>` : ''}</details>`).join('');
   const configuration = (report.configuration_evidence || []).map(item => `<div class="alert-record"><strong>${safe(item.kind)} · ${safe(item.name)}</strong><small>${safe(item.namespace)}${item.content_hash ? ` · snapshot ${safe(item.content_hash)}` : ''}</small><span>${safe(item.summary)}</span>${item.images?.length ? `<p class="queue-note">Images: ${safe(item.images.join(', '))}</p>` : ''}${item.keys?.length ? `<p class="queue-note">Config keys: ${safe(item.keys.join(', '))}</p>` : ''}</div>`).join('');
@@ -529,6 +571,9 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
         if path == "/api/settings/ai":
             self._json(self.server.control_plane.ai_configuration())
             return
+        if path == "/api/settings/general":
+            self._json(self.server.control_plane.general_configuration())
+            return
         if path == "/api/settings/sources":
             self._json(self.server.control_plane.source_configuration())
             return
@@ -587,6 +632,9 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             if path == "/api/settings/ai":
                 self._json(self.server.control_plane.update_ai_configuration(self._payload()))
                 return
+            if path == "/api/settings/general":
+                self._json(self.server.control_plane.update_general_configuration(self._payload()))
+                return
             if path == "/api/settings/sources":
                 self._json(self.server.control_plane.update_source_configuration(self._payload()))
                 return
@@ -606,9 +654,29 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
                 status = HTTPStatus.OK if result.get("status") == "ready" else HTTPStatus.SERVICE_UNAVAILABLE
                 self._json(result, status)
                 return
+            if path.startswith("/api/incidents/") and path.endswith("/archive"):
+                incident_id = unquote(path.removeprefix("/api/incidents/").removesuffix("/archive").rstrip("/"))
+                self._json(self.server.control_plane.set_incident_archived(incident_id, True))
+                return
+            if path.startswith("/api/incidents/") and path.endswith("/restore"):
+                incident_id = unquote(path.removeprefix("/api/incidents/").removesuffix("/restore").rstrip("/"))
+                self._json(self.server.control_plane.set_incident_archived(incident_id, False))
+                return
             self._json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
         except (ValueError, KeyError, json.JSONDecodeError) as exc:
             self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        path = urlparse(self.path).path
+        try:
+            if path.startswith("/api/incidents/"):
+                incident_id = unquote(path.removeprefix("/api/incidents/").rstrip("/"))
+                self.server.control_plane.delete_incident(incident_id)
+                self._json({"ok": True})
+                return
+            self._json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
+        except KeyError as exc:
+            self._json({"error": str(exc)}, HTTPStatus.NOT_FOUND)
 
 
 def create_app_server(
@@ -626,7 +694,7 @@ def serve_app(host: str = "127.0.0.1", port: int = 8765, state_dir: str | Path =
     server = create_app_server(host, port, state_dir)
     print(f"FCAPSule is running at http://{host}:{server.server_port}/console")
     print(f"Source targets: http://{host}:{server.server_port}/targets")
-    print(f"AI settings: http://{host}:{server.server_port}/settings")
+    print(f"Settings: http://{host}:{server.server_port}/settings")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

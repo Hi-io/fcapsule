@@ -27,7 +27,7 @@ The owner needs to see which applications are protected, whether their FM, PM, l
 
 ## Product Principles
 
-- **Incident first.** The default view is an incident queue and application coverage, not pipeline statistics.
+- **Incident first.** The default view is an incident queue, not source inventory or pipeline statistics. Current application coverage belongs with source targets.
 - **Action before explanation.** Impact, likely failure path, urgent checks, and expiring evidence appear before supporting detail.
 - **Evidence over prose.** Every hypothesis must link back to selected FM, PM, log, topology, or trace-access evidence. Uncertainty stays visible.
 - **Retention is operational context.** A trace source available for the next few minutes is a time-sensitive action, not a storage implementation detail.

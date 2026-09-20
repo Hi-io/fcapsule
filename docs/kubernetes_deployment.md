@@ -100,7 +100,7 @@ kubectl create secret generic fcapsule-secrets \
 kubectl rollout restart deployment/fcapsule -n fcapsule
 ```
 
-The console reports only whether a key is configured. A replacement entered in AI settings is written to `/var/lib/fcapsule/.env`, never SQLite or the API response.
+The console reports only whether a key is configured. A replacement entered in Settings is written to `/var/lib/fcapsule/.env`, never SQLite or the API response.
 
 ## RBAC and Configuration Evidence
 
@@ -115,7 +115,7 @@ Restrict the ClusterRole to namespace Roles when cluster-wide discovery is unnec
 
 ## Alert Trigger
 
-The included `PrometheusRule` fires `FCAPSulePodRestartDetected` when a non-system workload restarts in a five-minute window. FCAPSule also consumes existing firing Prometheus alerts that carry namespace and pod labels. `Watchdog` and `InfoInhibitor` are ignored.
+The included `PrometheusRule` fires `FCAPSulePodRestartDetected` when a non-system workload restarts in a five-minute window. FCAPSule also consumes existing firing Prometheus alerts that carry namespace and pod labels. When the Prometheus rules API is available, FCAPSule captures the matching PromQL expression, pending duration, rule group, and health so the responder can inspect why the alert fired. `Watchdog` and `InfoInhibitor` are ignored.
 
 An incident ID is derived from alert name, start time, namespace, and pod. Repeated polls of the same firing alert are idempotent. A later firing period can create a new incident.
 
@@ -128,7 +128,7 @@ curl http://<node-ip>:30765/healthz
 curl http://<node-ip>:30765/api/state
 ```
 
-In **Targets**, all three targets should be healthy. **Application coverage** should show each discovered workload, its current pods, and FM/PM/LOG/CFG status. A removed workload is retained for incident history but becomes `not observed` after the next sync.
+In **Targets**, all three targets should be healthy. **Application coverage** should show each currently discovered workload, its pods, and FM/PM/LOG/CFG status. A removed workload disappears from current coverage after the next sync while its incident history remains available in Operations.
 
 ## Current Constraints
 
