@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Enabled reasoning in the reserved evidence-review call and added explicit unit, sampled-peak and event-order checks after a live investigation retained an invalid memory comparison. This remains model-assisted review, not numerical proof.
 - Added bounded same-namespace dependency investigation through declared Kubernetes Services after external workload tests exposed upstream-only diagnoses.
 - Prioritized log matches around the latest episode alert, separated post-alert metric summaries, and retained MySQL error codes and exporter reachability gaps.
 - Distinguished capture-window boundaries from alert resolution and currently firing signals from historical episode severity; documented independent failure phases within temporal groups.

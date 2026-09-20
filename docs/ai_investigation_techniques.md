@@ -256,6 +256,15 @@ solely because sampled memory is low. These interpretations follow the
 and [Kubernetes resource behavior](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/).
 They constrain interpretation, not the observed outcome of any particular case.
 
+Policy `episode-investigation-1.7` uses low reasoning effort for the already reserved
+final review, with explicit byte conversion, component-versus-total memory and
+termination-versus-alert time checks. This replaced a non-reasoning review after a
+real investigation repeated a false below-limit memory comparison. The review has
+the same call and completion budget; latency and reasoning-token consumption can
+increase. It is still model-assisted consistency review, not a deterministic
+numerical validator. Original and revised assessments must both remain in evaluation
+records, including unsuccessful corrections.
+
 Telemetry is treated as untrusted input, and the prompt explicitly rejects
 instructions embedded in it. Server-side tool dispatch restricts actions even if a
 model ignores that instruction. No semantic validator can guarantee that every

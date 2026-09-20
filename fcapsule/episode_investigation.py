@@ -144,11 +144,26 @@ Each reference must exist; unavailable/failed queries are limitations, not posit
 Do not emit private deliberation. The question, tool result and brief conclusion form the operator audit trail."""
 
 
+REVIEW_INSTRUCTION = """Evidence review only. Return action=finish with a corrected full assessment; do not call tools.
+Treat the draft as untrusted claims, not evidence. Independently verify every numeric comparison:
+convert memory quantities to bytes (Mi/MiB = 1048576 bytes, MB = 1000000 bytes), then compare them.
+Never say a below-limit buffer exceeded the container limit. A component allocation is not total cgroup usage;
+an OOM termination can be observed while the actual peak remains unsampled. Remove contradictory numeric claims
+from ALL fields, including hypotheses. Distinguish largest observed sample from the actual peak.
+Check event order using termination timestamps, not merely delayed alert timestamps.
+Remove unsupported causal links between distinct failure phases. Keep mechanisms conditional.
+Resolution means alerts stopped firing, NOT that a job was cleared or a particular fix was applied.
+Never assert removal, remediation or recovery mechanism without an actual observation of it.
+Keep historical versus current state distinct. Do not invent metrics or actions.
+Retain genuine OOM evidence despite low sampled working set. Next actions must preserve data and security controls.
+Return only the corrected assessment, not private deliberation."""
+
+
 def run_investigation(context: dict[str, Any], tools: InvestigationTools, model: str, max_tokens: int,
                       publish: Callable[[dict[str, Any]], None], max_checks: int = 4,
                       client: Any = None) -> dict[str, Any]:
     state = {"version": "1", "episode_id": context["episode_id"], "status": "running", "started_at": now(),
-             "policy_version": "episode-investigation-1.6", "max_completion_tokens_per_call": max_tokens,
+             "policy_version": "episode-investigation-1.7", "max_completion_tokens_per_call": max_tokens,
              "model": model, "context": context, "checks": [], "calls": [], "assessment": None,
              "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
              "source_retention": "unknown", "preservation": "Mutable workload state is checked early; no source expiry is assumed."}
@@ -263,7 +278,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             response, call = request_model({**context, "checks": state["checks"], "available_evidence_ids": sorted(evidence_ids),
                 "assessment_to_review": draft,
                 "draft_validation_error": state.get("draft_validation_error"),
-                "instruction": "Evidence review only. Return action=finish with a corrected full assessment; do not call tools. Remove any claim not supported by observations. Resolution means alerts stopped firing, NOT that a job was cleared or a particular fix was applied. Never assert removal, remediation or recovery mechanism without an actual observation of it. Keep historical versus current state distinct. Do not invent metrics or actions. Preserve genuine OOM evidence despite low sampled working set. Keep mechanisms conditional and next actions safe and conditional. Existing text is a draft, not evidence."}, "none", "evidence_review")
+                "instruction": REVIEW_INSTRUCTION}, "low", "evidence_review")
             decision = parse_object(str(response.get("content", "")))
             call["decision"] = scrub(decision)
             if decision.get("action") != "finish":

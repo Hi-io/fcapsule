@@ -99,6 +99,10 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(state["assessment"]["summary"], corrected["summary"])
         self.assertTrue(state["review"]["changed"])
         self.assertEqual(state["calls"][-1]["phase"], "evidence_review")
+        self.assertEqual(client.requests[-1].reasoning_effort, "low")
+        instruction = json.loads(client.requests[-1].messages[1]["content"])["instruction"]
+        self.assertIn("convert memory quantities to bytes", instruction)
+        self.assertIn("actual peak remains unsampled", instruction)
         self.assertEqual(len(client.requests), 2)
         self.assertFalse(any(item["status"] == "ready" and item["assessment"] == assessment() for item in self.progress))
 
