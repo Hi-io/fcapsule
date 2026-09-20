@@ -370,11 +370,13 @@ function evidenceReferences(report, ids) {
 }
 
 function logLabel(pattern) {
-  try { const parsed = JSON.parse(pattern); return parsed.message || parsed.msg || pattern; } catch (_) {
+  const caption = (message, level) => level ? `${level}: ${message}` : message;
+  try { const parsed = JSON.parse(pattern); return caption(parsed.message || parsed.msg || pattern, parsed.level); } catch (_) {
     // Numeric placeholders can invalidate JSON without changing its quoted message.
     const message = pattern.match(/"(?:message|msg)"\s*:\s*("(?:\\.|[^"\\])*")/);
     if (message) {
-      try { return JSON.parse(message[1]); } catch (_) { /* Keep the original pattern below. */ }
+      const level = pattern.match(/"level"\s*:\s*("(?:\\.|[^"\\])*")/);
+      try { return caption(JSON.parse(message[1]), level ? JSON.parse(level[1]) : ''); } catch (_) { /* Keep the original pattern below. */ }
     }
     return pattern.length > 140 ? pattern.slice(0, 137) + '...' : pattern;
   }

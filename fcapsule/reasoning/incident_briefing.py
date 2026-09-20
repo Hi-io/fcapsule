@@ -40,10 +40,14 @@ def build_briefing_prompt(report: dict[str, Any]) -> list[dict[str, str]]:
         "incident": {
             "title": incident.get("title"),
             "service": incident.get("service"),
+            "cluster": incident.get("cluster"),
+            "namespace": incident.get("namespace"),
+            "started_at": incident.get("started_at"),
             "summary": incident.get("summary"),
         },
         "impact": report.get("impact", []),
         "timeline": report.get("timeline", []),
+        "configuration_inventory": report.get("configuration_evidence", []),
         "available_evidence": evidence,
     }
     schema = {
@@ -62,6 +66,8 @@ def build_briefing_prompt(report: dict[str, Any]) -> list[dict[str, str]]:
             "content": (
                 "You are an incident-response assistant. Use only the provided retained evidence. "
                 "Do not invent telemetry, do not claim a final root cause, and return valid JSON only. "
+                "The incident's cluster and namespace are authoritative. Use only supplied resource names; "
+                "if an identifier is missing, refer to the affected workload rather than guessing a name. "
                 "Every response must cite at least two evidence IDs exactly as supplied. Independently reason "
                 "from telemetry, not the alert title alone. A ConfigMap's presence does not establish a "
                 "configuration fault. Metrics are sampled within a limited window: low memory samples "

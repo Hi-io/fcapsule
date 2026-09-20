@@ -37,6 +37,12 @@ class IncidentBriefingTests(unittest.TestCase):
         self.assertIn("do not prove CPU saturation", prompt)
         self.assertIn("termination reason", prompt)
 
+    def test_prompt_preserves_authoritative_workload_identity(self):
+        self.report["incident"].update(cluster="test-cluster", namespace="test-namespace")
+        payload = build_briefing_prompt(self.report)[1]["content"]
+        self.assertIn('"namespace": "test-namespace"', payload)
+        self.assertIn('"cluster": "test-cluster"', payload)
+
     @patch("fcapsule.reasoning.incident_briefing.DeepSeekChatClient")
     def test_valid_cited_response_is_retained(self, client_class):
         client_class.return_value.chat.return_value = {
