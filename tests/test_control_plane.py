@@ -182,6 +182,32 @@ class ControlPlaneTests(unittest.TestCase):
             control_plane.delete_incident(incident_id)
             self.assertIsNone(control_plane.store.get_incident(incident_id))
 
+    def test_episode_lifecycle_applies_to_every_related_signal(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
+            control_plane = ControlPlane(Path(directory) / "state")
+            first = control_plane.ingest_case(REFERENCE_CASE, "checkout-platform", "Checkout Platform")
+            second_payload = dict(first)
+            second_payload.update(
+                {
+                    "incident_id": "case_002",
+                    "started_at": first["started_at"],
+                    "case_dir": str(REFERENCE_CASE),
+                    "summary": "Related checkout signal",
+                }
+            )
+            control_plane.store.record_incident(second_payload)
+            episode = control_plane.store.list_episodes()[0]
+            self.assertEqual(episode["signal_count"], 2)
+
+            control_plane.set_episode_archived(episode["episode_id"], True)
+            self.assertEqual(control_plane.store.list_episodes(), [])
+            self.assertEqual(control_plane.store.list_episodes(archived=True)[0]["signal_count"], 2)
+
+            control_plane.set_episode_archived(episode["episode_id"], False)
+            control_plane.delete_episode(episode["episode_id"])
+            self.assertIsNone(control_plane.store.get_incident(first["incident_id"]))
+            self.assertIsNone(control_plane.store.get_incident("case_002"))
+
     def test_retention_removes_incidents_by_capture_age(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
             control_plane = ControlPlane(Path(directory) / "state")

@@ -137,6 +137,15 @@ tbody tr:hover { background:#fafbfb; }
 .impact-line { color:var(--muted); font-size:12px; margin-top:3px; }
 .incident-row.open > td { background:#f3f8f5; }
 .report-row > td { padding:0; background:#fbfcfc; }
+.episode-context { padding:16px 18px; border-bottom:1px solid var(--line); background:#f7faf8; }
+.episode-context-head { display:flex; justify-content:space-between; align-items:end; gap:16px; margin-bottom:11px; }
+.episode-context-head h3 { margin:2px 0 0; font-size:16px; }
+.episode-signals { border:1px solid var(--line); background:#fff; }
+.episode-signal { display:grid; grid-template-columns:160px minmax(240px, 1fr) auto; align-items:center; gap:12px; padding:9px 11px; border-bottom:1px solid #e8ecef; }
+.episode-signal:last-child { border-bottom:0; }
+.episode-signal.selected { box-shadow:inset 3px 0 var(--green); background:#f3f8f5; }
+.episode-signal strong, .episode-signal small { display:block; }
+.episode-signal small { color:var(--muted); margin-top:2px; }
 .report { margin:0; border:0; border-top:3px solid var(--green); }
 .report-banner { padding:18px; border-bottom:1px solid var(--line); background:#f9fbfa; display:flex; justify-content:space-between; align-items:start; gap:16px; }
 .report-banner h2 { margin:4px 0 5px; font-size:20px; }
@@ -228,7 +237,7 @@ details.engineering summary { cursor:pointer; padding:10px 11px; font-weight:650
 .mono { font-family:"Cascadia Mono", Consolas, monospace; font-size:12px; }
 .right { text-align:right; }
 @media (max-width:1050px) { .grid-2, .report-layout, .target-grid { grid-template-columns:1fr; } .target { border-right:0; border-bottom:1px solid var(--line); } .target:last-child { border-bottom:0; } .report-main { border-right:0; border-bottom:1px solid var(--line); } }
-@media (max-width:700px) { .product-bar { height:auto; min-height:58px; padding:10px 14px; grid-template-columns:1fr auto; } nav { grid-column:1/-1; order:3; margin-top:8px; } nav a { min-height:40px; } .system-state { justify-self:end; } main { width:calc(100% - 18px); margin-top:12px; } .page-head, .report-banner { align-items:start; flex-direction:column; } .kpis, .impact-grid { grid-template-columns:1fr 1fr; } .kpi:nth-child(2) { border-right:0; } .kpi { border-bottom:1px solid var(--line); } .impact-item:nth-child(2n) { border-right:0; } .form-pair, .model-compare { grid-template-columns:1fr; } .incident-table .wide-only { display:none; } .incident-table td, .incident-table th { padding:9px 7px; } .incident-table button { padding:6px 8px; font-size:12px; } }
+@media (max-width:700px) { .product-bar { height:auto; min-height:58px; padding:10px 14px; grid-template-columns:1fr auto; } nav { grid-column:1/-1; order:3; margin-top:8px; } nav a { min-height:40px; } .system-state { justify-self:end; } main { width:calc(100% - 18px); margin-top:12px; } .page-head, .report-banner, .episode-context-head { align-items:start; flex-direction:column; } .kpis, .impact-grid { grid-template-columns:1fr 1fr; } .kpi:nth-child(2) { border-right:0; } .kpi { border-bottom:1px solid var(--line); } .impact-item:nth-child(2n) { border-right:0; } .form-pair, .model-compare { grid-template-columns:1fr; } .incident-table .wide-only { display:none; } .incident-table td, .incident-table th { padding:9px 7px; } .incident-table button { padding:6px 8px; font-size:12px; } .episode-signal { grid-template-columns:1fr; gap:6px; } }
 """
 
 
@@ -248,8 +257,10 @@ const shortTime = value => value ? new Date(value).toLocaleTimeString([], {hour:
 document.querySelector(`[data-nav="${view}"]`)?.classList.add('active');
 let lastState = null;
 let selectedReport = null;
+let selectedEpisodeId = null;
 let showArchived = false;
 const requestedReportId = new URLSearchParams(location.search).get('incident');
+const requestedEpisodeId = new URLSearchParams(location.search).get('episode');
 
 function setSystem(state) {
   const node = document.querySelector('.system-state');
@@ -266,17 +277,18 @@ function sources(config) {
 
 function renderConsole(state) {
   const data = state.overview;
-  const incidents = showArchived ? data.archived_incidents : data.incidents;
+  const episodes = showArchived ? data.archived_episodes : data.episodes;
   app.innerHTML = `
-    <div class="page-head"><div><div class="eyebrow">Incident workspace</div><h1>Operations</h1><p>Captured incidents and the evidence needed to investigate them.</p></div><a href="/targets"><button class="secondary">Manage targets</button></a></div>
-    <section class="sheet"><div class="sheet-head"><div><h2>${showArchived ? 'Archived incidents' : 'Incident queue'}</h2><span class="queue-note">${incidents.length} incident${incidents.length === 1 ? '' : 's'}${showArchived ? ' hidden from the active queue' : ' requiring or retaining investigation context'}</span></div><div class="queue-tabs"><button class="secondary" id="queue-mode">${showArchived ? `Active (${data.incidents.length})` : `Archived (${data.archived_incidents.length})`}</button></div></div><div class="table-wrap">${incidentTable(incidents, data.capsules, showArchived)}</div></section>`;
-  document.querySelector('#queue-mode').addEventListener('click', () => { selectedReport = null; showArchived = !showArchived; renderConsole(lastState); });
-  document.querySelectorAll('[data-incident-report]').forEach(button => button.addEventListener('click', () => openReport(button.dataset.incidentReport)));
+    <div class="page-head"><div><div class="eyebrow">Incident workspace</div><h1>Operations</h1><p>Service degradations grouped into investigations.</p></div><a href="/targets"><button class="secondary">Manage targets</button></a></div>
+    <section class="sheet"><div class="sheet-head"><div><h2>${showArchived ? 'Archived episodes' : 'Incident queue'}</h2><span class="queue-note">${episodes.length} episode${episodes.length === 1 ? '' : 's'}${showArchived ? ' hidden from the active queue' : ' with related alert signals grouped together'}</span></div><div class="queue-tabs"><button class="secondary" id="queue-mode">${showArchived ? `Active (${data.episodes.length})` : `Archived (${data.archived_episodes.length})`}</button></div></div><div class="table-wrap">${episodeTable(episodes, data.capsules, showArchived)}</div></section>`;
+  document.querySelector('#queue-mode').addEventListener('click', () => { selectedReport = null; selectedEpisodeId = null; showArchived = !showArchived; renderConsole(lastState); });
+  document.querySelectorAll('[data-episode-report]').forEach(button => button.addEventListener('click', () => openEpisodeReport(button.dataset.episodeReport, button.dataset.incident)));
+  document.querySelectorAll('[data-signal-report]').forEach(button => button.addEventListener('click', () => openEpisodeReport(button.dataset.episode, button.dataset.signalReport, true)));
   document.querySelectorAll('[data-build-capsule]').forEach(button => button.addEventListener('click', () => buildCapsule(button.dataset.buildCapsule)));
   document.querySelectorAll('[data-ai-briefing]').forEach(button => button.addEventListener('click', () => generateAiBriefing(button.dataset.aiBriefing)));
-  document.querySelectorAll('[data-archive]').forEach(button => button.addEventListener('click', () => changeIncidentState(button.dataset.archive, 'archive')));
-  document.querySelectorAll('[data-restore]').forEach(button => button.addEventListener('click', () => changeIncidentState(button.dataset.restore, 'restore')));
-  document.querySelectorAll('[data-delete]').forEach(button => button.addEventListener('click', () => deleteIncident(button.dataset.delete)));
+  document.querySelectorAll('[data-archive]').forEach(button => button.addEventListener('click', () => changeEpisodeState(button.dataset.archive, 'archive')));
+  document.querySelectorAll('[data-restore]').forEach(button => button.addEventListener('click', () => changeEpisodeState(button.dataset.restore, 'restore')));
+  document.querySelectorAll('[data-delete]').forEach(button => button.addEventListener('click', () => deleteEpisode(button.dataset.delete)));
 }
 
 function renderTargets(state) {
@@ -360,36 +372,47 @@ async function syncTargets() {
   window.targetNotice = 'Source synchronization started.'; await refresh();
 }
 
-function incidentTable(items, capsules, archived = false) {
-  if (!items.length) return '<div class="empty">No incidents have been captured yet.</div>';
+function episodeTable(items, capsules, archived = false) {
+  if (!items.length) return `<div class="empty">${archived ? 'No episodes are archived.' : 'No firing incidents require investigation.'}</div>`;
   const reports = new Set(capsules.map(item => item.incident_id));
-  const openId = selectedReport?.incident?.incident_id || selectedReport?.report?.incident?.incident_id;
-  return `<table class="incident-table"><thead><tr><th>Severity</th><th>Incident</th><th class="wide-only">Application</th><th class="wide-only">Started</th><th>Captured context</th><th></th></tr></thead><tbody>${items.map(item => {
-    const ready = reports.has(item.incident_id);
-    const isOpen = openId === item.incident_id;
-    const reportRow = isOpen ? `<tr class="report-row"><td colspan="6">${reportPanel(selectedReport)}</td></tr>` : '';
-    const reportAction = ready ? `<button class="secondary" data-incident-report="${safe(item.incident_id)}" aria-expanded="${isOpen}">${isOpen ? 'Close report' : 'Open report'}</button>` : archived ? '' : `<button data-build-capsule="${safe(item.incident_id)}" ${lastState?.running ? 'disabled' : ''}>Build report</button>`;
-    const lifecycleAction = archived ? `<button class="secondary" data-restore="${safe(item.incident_id)}">Restore</button><button class="danger" data-delete="${safe(item.incident_id)}">Delete</button>` : `<button class="secondary" data-archive="${safe(item.incident_id)}">Archive</button>`;
-    return `<tr class="incident-row ${isOpen ? 'open' : ''}"><td>${status(item.severity)}</td><td><span class="incident-title">${safe(item.summary || item.scenario)}</span><small class="mono">${safe(item.incident_id)}</small></td><td class="wide-only">${safe(item.app_id)}</td><td class="wide-only">${shortTime(item.started_at)}</td><td><span class="impact-line">${safe(item.alert_count)} FM alerts · ${fmt.format(item.log_count)} logs captured · ${fmt.format(item.metric_series_count)} PM series</span></td><td><div class="row-actions">${reportAction}${lifecycleAction}</div></td></tr>${reportRow}`;
+  return `<table class="incident-table"><thead><tr><th>State</th><th>Episode</th><th class="wide-only">Application</th><th class="wide-only">Activity</th><th>Signals</th><th></th></tr></thead><tbody>${items.map(item => {
+    const primary = item.signals.find(signal => signal.incident_id === item.primary_incident_id && reports.has(signal.incident_id)) || item.signals.find(signal => reports.has(signal.incident_id)) || item.signals[0];
+    const ready = primary && reports.has(primary.incident_id);
+    const isOpen = selectedEpisodeId === item.episode_id;
+    const reportRow = isOpen ? `<tr class="report-row"><td colspan="6">${episodeContext(item, reports)}${selectedReport ? reportPanel(selectedReport) : ''}</td></tr>` : '';
+    const reportAction = ready ? `<button class="secondary" data-episode-report="${safe(item.episode_id)}" data-incident="${safe(primary.incident_id)}" aria-expanded="${isOpen}">${isOpen ? 'Close investigation' : 'Open investigation'}</button>` : archived ? '' : `<button data-build-capsule="${safe(primary.incident_id)}" ${lastState?.running ? 'disabled' : ''}>Build report</button>`;
+    const lifecycleAction = archived ? `<button class="secondary" data-restore="${safe(item.episode_id)}">Restore</button><button class="danger" data-delete="${safe(item.episode_id)}">Delete</button>` : `<button class="secondary" data-archive="${safe(item.episode_id)}">Archive</button>`;
+    return `<tr class="incident-row ${isOpen ? 'open' : ''}"><td>${status(item.severity)}<br>${status(item.status)}</td><td><span class="incident-title">${safe(item.title)}</span><small>${formatDate(item.started_at)}${item.signal_count > 1 ? ` · ${item.signal_count} related signals` : ''}</small></td><td class="wide-only"><span class="mono">${safe(item.app_id)}</span></td><td class="wide-only"><strong>${formatDate(item.last_activity_at)}</strong><br><small>${item.status === 'active' ? 'Last firing signal' : 'Resolved'}</small></td><td><span class="impact-line">${item.signal_count} signal${item.signal_count === 1 ? '' : 's'} · ${item.report_count} report${item.report_count === 1 ? '' : 's'} ready</span></td><td><div class="row-actions">${reportAction}${lifecycleAction}</div></td></tr>${reportRow}`;
   }).join('')}</tbody></table>`;
+}
+
+function episodeContext(episode, reports) {
+  const current = selectedReport?.incident?.incident_id || selectedReport?.report?.incident?.incident_id;
+  const signals = episode.signals.map(signal => {
+    const ready = reports.has(signal.incident_id);
+    const action = ready ? `<button class="secondary" data-signal-report="${safe(signal.incident_id)}" data-episode="${safe(episode.episode_id)}">${current === signal.incident_id ? 'Viewing report' : 'View report'}</button>` : `<button data-build-capsule="${safe(signal.incident_id)}" ${lastState?.running ? 'disabled' : ''}>Build report</button>`;
+    return `<div class="episode-signal ${current === signal.incident_id ? 'selected' : ''}"><div>${status(signal.severity)} ${status(signal.status)}</div><div><strong>${safe(signal.summary || signal.scenario)}</strong><small>${formatDate(signal.started_at)}</small></div><div>${action}</div></div>`;
+  }).join('');
+  return `<section class="episode-context"><div class="episode-context-head"><div><div class="eyebrow">Correlated episode</div><h3>${safe(episode.title)}</h3></div><span class="queue-note">${episode.signal_count} signal${episode.signal_count === 1 ? '' : 's'} on ${safe(episode.app_id)}</span></div><div class="episode-signals">${signals}</div></section>`;
 }
 
 function formatDate(value) {
   return value ? new Date(value).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : '--';
 }
 
-async function openReport(id) {
-  const currentId = selectedReport?.incident?.incident_id || selectedReport?.report?.incident?.incident_id;
-  if (currentId === id) {
+async function openEpisodeReport(episodeId, incidentId, keepOpen = false) {
+  if (selectedEpisodeId === episodeId && !keepOpen) {
     selectedReport = null;
+    selectedEpisodeId = null;
     history.replaceState(null, '', '/console');
     renderConsole(lastState);
     return;
   }
-  const response = await fetch('/api/incidents/' + encodeURIComponent(id) + '/report'); const data = await response.json();
+  const response = await fetch('/api/incidents/' + encodeURIComponent(incidentId) + '/report'); const data = await response.json();
   if (!response.ok) { alert(data.error || 'Unable to load incident report'); return; }
   selectedReport = data;
-  history.replaceState(null, '', '/console?incident=' + encodeURIComponent(id));
+  selectedEpisodeId = episodeId;
+  history.replaceState(null, '', '/console?episode=' + encodeURIComponent(episodeId) + '&incident=' + encodeURIComponent(incidentId));
   renderConsole(lastState);
 }
 
@@ -434,19 +457,19 @@ async function saveGeneralSettings() {
   lastState.settings = result; window.generalSettingsNotice = 'Retention policy saved.'; renderSettings(lastState);
 }
 
-async function changeIncidentState(id, action) {
-  const response = await fetch(`/api/incidents/${encodeURIComponent(id)}/${action}`, {method:'POST'});
+async function changeEpisodeState(id, action) {
+  const response = await fetch(`/api/episodes/${encodeURIComponent(id)}/${action}`, {method:'POST'});
   const result = await response.json();
-  if (!response.ok) { alert(result.error || `Unable to ${action} incident`); return; }
-  selectedReport = null; await refresh();
+  if (!response.ok) { alert(result.error || `Unable to ${action} episode`); return; }
+  selectedReport = null; selectedEpisodeId = null; await refresh();
 }
 
-async function deleteIncident(id) {
-  if (!confirm('Permanently delete this incident, report, and capsule?')) return;
-  const response = await fetch(`/api/incidents/${encodeURIComponent(id)}`, {method:'DELETE'});
+async function deleteEpisode(id) {
+  if (!confirm('Permanently delete this episode and every related report and capsule?')) return;
+  const response = await fetch(`/api/episodes/${encodeURIComponent(id)}`, {method:'DELETE'});
   const result = await response.json();
-  if (!response.ok) { alert(result.error || 'Unable to delete incident'); return; }
-  selectedReport = null; await refresh();
+  if (!response.ok) { alert(result.error || 'Unable to delete episode'); return; }
+  selectedReport = null; selectedEpisodeId = null; await refresh();
 }
 
 function sparkline(signal) {
@@ -492,7 +515,10 @@ async function refresh() {
     const response = await fetch('/api/state', {cache:'no-store'}); const state = await response.json(); lastState = state; setSystem(state);
     if (view === 'console' && requestedReportId && !selectedReport) {
       const reportResponse = await fetch('/api/incidents/' + encodeURIComponent(requestedReportId) + '/report');
-      if (reportResponse.ok) selectedReport = await reportResponse.json();
+      if (reportResponse.ok) {
+        selectedReport = await reportResponse.json();
+        selectedEpisodeId = requestedEpisodeId || [...state.overview.episodes, ...state.overview.archived_episodes].find(item => item.signals.some(signal => signal.incident_id === requestedReportId))?.episode_id || null;
+      }
     }
     view === 'settings' ? renderSettings(state) : view === 'targets' ? renderTargets(state) : renderConsole(state);
   } catch (error) { document.querySelector('#system-state').textContent = 'Disconnected'; }
@@ -662,6 +688,14 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
                 incident_id = unquote(path.removeprefix("/api/incidents/").removesuffix("/restore").rstrip("/"))
                 self._json(self.server.control_plane.set_incident_archived(incident_id, False))
                 return
+            if path.startswith("/api/episodes/") and path.endswith("/archive"):
+                episode_id = unquote(path.removeprefix("/api/episodes/").removesuffix("/archive").rstrip("/"))
+                self._json(self.server.control_plane.set_episode_archived(episode_id, True))
+                return
+            if path.startswith("/api/episodes/") and path.endswith("/restore"):
+                episode_id = unquote(path.removeprefix("/api/episodes/").removesuffix("/restore").rstrip("/"))
+                self._json(self.server.control_plane.set_episode_archived(episode_id, False))
+                return
             self._json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
         except (ValueError, KeyError, json.JSONDecodeError) as exc:
             self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
@@ -669,6 +703,11 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
     def do_DELETE(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         try:
+            if path.startswith("/api/episodes/"):
+                episode_id = unquote(path.removeprefix("/api/episodes/").rstrip("/"))
+                self.server.control_plane.delete_episode(episode_id)
+                self._json({"ok": True})
+                return
             if path.startswith("/api/incidents/"):
                 incident_id = unquote(path.removeprefix("/api/incidents/").rstrip("/"))
                 self.server.control_plane.delete_incident(incident_id)

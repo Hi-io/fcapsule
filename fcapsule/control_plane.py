@@ -152,6 +152,20 @@ class ControlPlane:
             self.current_incident_id = active[0]["incident_id"] if active else None
         return incident
 
+    def set_episode_archived(self, episode_id: str, archived: bool) -> dict[str, Any]:
+        episode = self.store.set_episode_archived(episode_id, archived)
+        if archived and self.current_incident_id in self.store.episode_incident_ids(episode_id):
+            active = self.store.list_incidents(limit=1)
+            self.current_incident_id = active[0]["incident_id"] if active else None
+        return episode
+
+    def delete_episode(self, episode_id: str) -> None:
+        incident_ids = self.store.episode_incident_ids(episode_id)
+        if not incident_ids:
+            raise KeyError(f"Unknown episode: {episode_id}")
+        for incident_id in incident_ids:
+            self.delete_incident(incident_id)
+
     def delete_incident(self, incident_id: str) -> None:
         incident = self.store.get_incident(incident_id)
         if not incident:
