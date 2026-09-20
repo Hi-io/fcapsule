@@ -7,9 +7,12 @@ application registrations, incident/capsule metadata, and model preferences.
 from __future__ import annotations
 
 import json
+import hashlib
+import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from statistics import median
 from typing import Any
 
 
@@ -37,6 +40,22 @@ def _decode(value: str | None, fallback: Any) -> Any:
         return json.loads(value)
     except json.JSONDecodeError:
         return fallback
+
+
+def _reference(prefix: str, value: str) -> str:
+    """Provide a stable human-sized reference without replacing source IDs."""
+
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:8].upper()
+    return f"{prefix}-{digest}"
+
+
+def _identity(value: Any) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", str(value or "").lower()))
+
+
+def _recurrence_key(app_id: str, resource_kind: str, resource_name: str, alert_identity: str) -> str:
+    values = (app_id, resource_kind, resource_name, alert_identity)
+    return "|".join(_identity(value) for value in values)
 
 
 class FCAPSuleStore:
@@ -87,7 +106,10 @@ class FCAPSuleStore:
                     summary TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     archived_at TEXT,
-                    source_kind TEXT NOT NULL DEFAULT 'external'
+                    source_kind TEXT NOT NULL DEFAULT 'external',
+                    resource_kind TEXT NOT NULL DEFAULT 'application',
+                    resource_name TEXT NOT NULL DEFAULT '',
+                    recurrence_key TEXT NOT NULL DEFAULT ''
                 );
 
                 CREATE TABLE IF NOT EXISTS incident_episodes (
@@ -102,7 +124,10 @@ class FCAPSuleStore:
                     primary_incident_id TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
-                    archived_at TEXT
+                    archived_at TEXT,
+                    resource_kind TEXT NOT NULL DEFAULT 'application',
+                    resource_name TEXT NOT NULL DEFAULT '',
+                    recurrence_key TEXT NOT NULL DEFAULT ''
                 );
 
                 CREATE TABLE IF NOT EXISTS episode_incidents (
@@ -160,11 +185,35 @@ class FCAPSuleStore:
                 connection.execute("ALTER TABLE incidents ADD COLUMN archived_at TEXT")
             if "source_kind" not in incident_columns:
                 connection.execute("ALTER TABLE incidents ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'external'")
+            for column, definition in (
+                ("resource_kind", "TEXT NOT NULL DEFAULT 'application'"),
+                ("resource_name", "TEXT NOT NULL DEFAULT ''"),
+                ("recurrence_key", "TEXT NOT NULL DEFAULT ''"),
+            ):
+                if column not in incident_columns:
+                    connection.execute(f"ALTER TABLE incidents ADD COLUMN {column} {definition}")
+            episode_columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(incident_episodes)").fetchall()
+            }
+            for column, definition in (
+                ("resource_kind", "TEXT NOT NULL DEFAULT 'application'"),
+                ("resource_name", "TEXT NOT NULL DEFAULT ''"),
+                ("recurrence_key", "TEXT NOT NULL DEFAULT ''"),
+            ):
+                if column not in episode_columns:
+                    connection.execute(f"ALTER TABLE incident_episodes ADD COLUMN {column} {definition}")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_episodes_recurrence "
+                "ON incident_episodes(recurrence_key, started_at DESC)"
+            )
             connection.execute(
                 "UPDATE incidents SET source_kind = 'live' WHERE case_dir LIKE ?",
                 ("%/live-cases/%",),
             )
             self._backfill_episodes(connection)
+            self._backfill_incident_identity(connection)
+            self._backfill_episode_identity(connection)
             now = utc_now()
             for model_id, provider, max_tokens, enabled in DEFAULT_MODEL_PROFILES:
                 connection.execute(
@@ -246,6 +295,12 @@ class FCAPSuleStore:
 
     def record_incident(self, payload: dict[str, Any]) -> dict[str, Any]:
         incident_id = str(payload["incident_id"])
+        resource_kind = str(payload.get("resource_kind") or "application")
+        resource_name = str(payload.get("resource_name") or payload["app_id"])
+        recurrence_key = str(payload.get("recurrence_key") or _recurrence_key(
+            str(payload["app_id"]), resource_kind, resource_name,
+            str(payload.get("alert_identity") or payload.get("summary") or payload.get("scenario", "unknown")),
+        ))
         now = utc_now()
         with self._connect() as connection:
             connection.execute(
@@ -253,8 +308,8 @@ class FCAPSuleStore:
                 INSERT INTO incidents
                     (incident_id, app_id, scenario, status, severity, started_at, ended_at,
                      case_dir, alert_count, log_count, metric_series_count, raw_bytes,
-                     trace_access, summary, created_at, source_kind)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     trace_access, summary, created_at, source_kind, resource_kind, resource_name, recurrence_key)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(incident_id) DO UPDATE SET
                     status=excluded.status,
                     ended_at=excluded.ended_at,
@@ -264,7 +319,10 @@ class FCAPSuleStore:
                     raw_bytes=excluded.raw_bytes,
                     trace_access=excluded.trace_access,
                     summary=excluded.summary,
-                    source_kind=excluded.source_kind
+                    source_kind=excluded.source_kind,
+                    resource_kind=excluded.resource_kind,
+                    resource_name=excluded.resource_name,
+                    recurrence_key=excluded.recurrence_key
                 """,
                 (
                     incident_id,
@@ -283,6 +341,9 @@ class FCAPSuleStore:
                     payload.get("summary", ""),
                     now,
                     payload.get("source_kind", "external"),
+                    resource_kind,
+                    resource_name,
+                    recurrence_key,
                 ),
             )
             if str(payload.get("status", "firing")).lower() != "pending":
@@ -309,6 +370,32 @@ class FCAPSuleStore:
         ).fetchall()
         for row in rows:
             self._assign_episode(connection, str(row["incident_id"]))
+
+    def _backfill_incident_identity(self, connection: sqlite3.Connection) -> None:
+        """Give imported pre-identity records a conservative application identity."""
+
+        rows = connection.execute(
+            """
+            SELECT i.*, a.name AS application_name
+            FROM incidents i JOIN applications a ON a.app_id = i.app_id
+            WHERE i.recurrence_key = '' OR i.resource_name = ''
+            """
+        ).fetchall()
+        for row in rows:
+            resource_kind = str(row["resource_kind"] or "application")
+            resource_name = str(row["resource_name"] or row["application_name"] or row["app_id"])
+            recurrence_key = str(row["recurrence_key"] or _recurrence_key(
+                str(row["app_id"]), resource_kind, resource_name, str(row["summary"] or row["scenario"])
+            ))
+            connection.execute(
+                "UPDATE incidents SET resource_kind = ?, resource_name = ?, recurrence_key = ? WHERE incident_id = ?",
+                (resource_kind, resource_name, recurrence_key, row["incident_id"]),
+            )
+
+    def _backfill_episode_identity(self, connection: sqlite3.Connection) -> None:
+        rows = connection.execute("SELECT episode_id FROM incident_episodes").fetchall()
+        for row in rows:
+            self._refresh_episode(connection, str(row["episode_id"]))
 
     def _assign_episode(self, connection: sqlite3.Connection, incident_id: str) -> str:
         linked = connection.execute(
@@ -346,8 +433,9 @@ class FCAPSuleStore:
                 """
                 INSERT INTO incident_episodes
                     (episode_id, app_id, title, status, severity, started_at, last_activity_at,
-                     ended_at, primary_incident_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     ended_at, primary_incident_id, created_at, updated_at,
+                     resource_kind, resource_name, recurrence_key)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     episode_id,
@@ -361,6 +449,9 @@ class FCAPSuleStore:
                     incident_id,
                     now,
                     now,
+                    incident["resource_kind"],
+                    incident["resource_name"],
+                    incident["recurrence_key"],
                 ),
             )
         connection.execute(
@@ -394,7 +485,8 @@ class FCAPSuleStore:
             """
             UPDATE incident_episodes
             SET title = ?, status = ?, severity = ?, started_at = ?, last_activity_at = ?,
-                ended_at = ?, primary_incident_id = ?, updated_at = ?
+                ended_at = ?, primary_incident_id = ?, updated_at = ?, resource_kind = ?,
+                resource_name = ?, recurrence_key = ?
             WHERE episode_id = ?
             """,
             (
@@ -406,6 +498,9 @@ class FCAPSuleStore:
                 None if active else (max(ended_values) if ended_values else max(str(item["started_at"]) for item in signals)),
                 primary["incident_id"],
                 utc_now(),
+                primary["resource_kind"],
+                primary["resource_name"],
+                primary["recurrence_key"],
                 episode_id,
             ),
         )
@@ -434,6 +529,11 @@ class FCAPSuleStore:
 
     def _episode_row(self, connection: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
         result = dict(row)
+        result["reference"] = _reference("EP", str(row["episode_id"]))
+        result["resource"] = {
+            "kind": str(row["resource_kind"] or "application"),
+            "name": str(row["resource_name"] or ""),
+        }
         signal_rows = connection.execute(
             """
             SELECT i.*, CASE WHEN c.capsule_id IS NULL THEN 0 ELSE 1 END AS report_ready
@@ -451,7 +551,94 @@ class FCAPSuleStore:
         result["signal_count"] = len(signals)
         result["report_count"] = sum(int(item.get("report_ready", 0)) for item in signals)
         result["alert_count"] = sum(int(item["alert_count"]) for item in signals)
+        result["recurrence"] = self._recurrence_summary(connection, row)
         return result
+
+    def _recurrence_summary(self, connection: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
+        key = str(row["recurrence_key"] or "")
+        if not key:
+            return {"previous_count": 0, "occurrence_count": 1, "candidates": []}
+        matches = connection.execute(
+            """
+            SELECT episode_id, title, started_at, ended_at, status, severity, resource_kind, resource_name
+            FROM incident_episodes
+            WHERE recurrence_key = ?
+            ORDER BY started_at ASC
+            """,
+            (key,),
+        ).fetchall()
+        current_start = self._parse_time(str(row["started_at"]))
+        previous = [item for item in matches if item["episode_id"] != row["episode_id"] and self._parse_time(str(item["started_at"])) < current_start]
+        points = sorted(self._parse_time(str(item["started_at"])) for item in matches)
+        intervals = [
+            (later - earlier).total_seconds()
+            for earlier, later in zip(points, points[1:])
+            if later > earlier
+        ]
+        candidates = [
+            {
+                "episode_id": str(item["episode_id"]),
+                "reference": _reference("EP", str(item["episode_id"])),
+                "title": str(item["title"]),
+                "started_at": str(item["started_at"]),
+                "ended_at": item["ended_at"],
+                "status": str(item["status"]),
+                "severity": str(item["severity"]),
+            }
+            for item in previous[-3:][::-1]
+        ]
+        return {
+            "pattern_id": _reference("PAT", key),
+            "previous_count": len(previous),
+            "occurrence_count": len(matches),
+            "first_seen_at": str(matches[0]["started_at"]) if matches else str(row["started_at"]),
+            "last_seen_at": str(matches[-1]["started_at"]) if matches else str(row["started_at"]),
+            "observed_interval_seconds": round(float(median(intervals)), 2) if intervals else None,
+            "candidates": candidates,
+        }
+
+    def list_patterns(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Return recurring episode groups; a pattern is context, never a merged incident."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM incident_episodes
+                WHERE recurrence_key != ''
+                ORDER BY recurrence_key, started_at ASC
+                """
+            ).fetchall()
+        grouped: dict[str, list[sqlite3.Row]] = {}
+        for row in rows:
+            grouped.setdefault(str(row["recurrence_key"]), []).append(row)
+        patterns = []
+        for key, members in grouped.items():
+            if len(members) < 2:
+                continue
+            intervals = [
+                (self._parse_time(str(later["started_at"])) - self._parse_time(str(earlier["started_at"]))).total_seconds()
+                for earlier, later in zip(members, members[1:])
+                if self._parse_time(str(later["started_at"])) > self._parse_time(str(earlier["started_at"]))
+            ]
+            latest = members[-1]
+            patterns.append(
+                {
+                    "pattern_id": _reference("PAT", key),
+                    "title": str(latest["title"]),
+                    "app_id": str(latest["app_id"]),
+                    "resource": {"kind": str(latest["resource_kind"] or "application"), "name": str(latest["resource_name"] or "")},
+                    "occurrence_count": len(members),
+                    "first_seen_at": str(members[0]["started_at"]),
+                    "last_seen_at": str(latest["started_at"]),
+                    "observed_interval_seconds": round(float(median(intervals)), 2) if intervals else None,
+                    "episodes": [
+                        {"episode_id": str(item["episode_id"]), "reference": _reference("EP", str(item["episode_id"])),
+                         "started_at": str(item["started_at"]), "status": str(item["status"])}
+                        for item in members[-4:][::-1]
+                    ],
+                }
+            )
+        return sorted(patterns, key=lambda item: (item["last_seen_at"], item["occurrence_count"]), reverse=True)[:limit]
 
     def set_episode_archived(self, episode_id: str, archived: bool) -> dict[str, Any]:
         archived_at = utc_now() if archived else None
@@ -522,6 +709,34 @@ class FCAPSuleStore:
             row = connection.execute("SELECT * FROM incidents WHERE incident_id = ?", (incident_id,)).fetchone()
         return self._incident_row(row) if row else None
 
+    def update_incident_identity(
+        self,
+        incident_id: str,
+        resource_kind: str,
+        resource_name: str,
+        alert_identity: str,
+    ) -> None:
+        with self._connect() as connection:
+            incident = connection.execute(
+                "SELECT app_id FROM incidents WHERE incident_id = ?", (incident_id,)
+            ).fetchone()
+            if not incident:
+                return
+            key = _recurrence_key(str(incident["app_id"]), resource_kind, resource_name, alert_identity)
+            connection.execute(
+                """
+                UPDATE incidents
+                SET resource_kind = ?, resource_name = ?, recurrence_key = ?
+                WHERE incident_id = ?
+                """,
+                (resource_kind, resource_name, key, incident_id),
+            )
+            episode = connection.execute(
+                "SELECT episode_id FROM episode_incidents WHERE incident_id = ?", (incident_id,)
+            ).fetchone()
+            if episode:
+                self._refresh_episode(connection, str(episode["episode_id"]))
+
     def list_incidents(self, limit: int = 50, archived: bool = False) -> list[dict[str, Any]]:
         with self._connect() as connection:
             rows = connection.execute(
@@ -566,6 +781,11 @@ class FCAPSuleStore:
     def _incident_row(row: sqlite3.Row) -> dict[str, Any]:
         result = dict(row)
         result["trace_access"] = _decode(result.get("trace_access"), {})
+        result["reference"] = _reference("INC", str(result["incident_id"]))
+        result["resource"] = {
+            "kind": str(result.get("resource_kind") or "application"),
+            "name": str(result.get("resource_name") or ""),
+        }
         return result
 
     def record_capsule(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -705,6 +925,7 @@ class FCAPSuleStore:
         archived_incidents = self.list_incidents(archived=True)
         episodes = self.list_episodes()
         archived_episodes = self.list_episodes(archived=True)
+        patterns = self.list_patterns()
         capsules = self.list_capsules()
         observed_applications = [item for item in applications if item["status"] != "not_observed"]
         return {
@@ -713,6 +934,7 @@ class FCAPSuleStore:
             "archived_incidents": archived_incidents,
             "episodes": episodes,
             "archived_episodes": archived_episodes,
+            "patterns": patterns,
             "capsules": capsules,
             "models": self.list_model_profiles(),
             "totals": {

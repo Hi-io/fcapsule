@@ -25,7 +25,12 @@ def parse_object(content: str) -> dict[str, Any]:
     return value
 
 
-def validate_assessment(value: Any, evidence_ids: set[str], incident_ids: set[str]) -> dict[str, Any]:
+def validate_assessment(
+    value: Any,
+    evidence_ids: set[str],
+    incident_ids: set[str],
+    historical_episode_ids: set[str] | None = None,
+) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("Missing assessment")
     result = {}
@@ -70,6 +75,24 @@ def validate_assessment(value: Any, evidence_ids: set[str], incident_ids: set[st
             raise ValueError("Invalid relationship reason")
         result["connections"].append({key: item[key] for key in ("from", "to", "relationship", "reason")}
                                      | {"evidence_ids": citations(item)})
+    comparison = value.get("historical_comparison")
+    if historical_episode_ids:
+        if not isinstance(comparison, dict):
+            raise ValueError("A historical candidate was available; include a cited historical comparison")
+        if comparison.get("episode_id") not in historical_episode_ids:
+            raise ValueError("Historical comparison references an unavailable episode")
+        if comparison.get("status") not in {"similar_mechanism", "changed_or_different", "insufficient_evidence"}:
+            raise ValueError("Invalid historical comparison state")
+        if not isinstance(comparison.get("summary"), str) or not 1 <= len(comparison["summary"]) <= 500:
+            raise ValueError("Historical comparison needs a concise evidence-based summary")
+        result["historical_comparison"] = {
+            "episode_id": comparison["episode_id"],
+            "status": comparison["status"],
+            "summary": comparison["summary"],
+            "evidence_ids": citations(comparison),
+        }
+    elif comparison is not None:
+        raise ValueError("Historical comparison supplied without a recurrence candidate")
     return scrub(result)
 
 
@@ -79,7 +102,7 @@ def assessment_payload(decision: dict[str, Any], call: dict[str, Any]) -> Any:
     if not isinstance(value, dict):
         return value
     value = dict(value)
-    for field in ("hypotheses", "connections"):
+    for field in ("hypotheses", "connections", "historical_comparison"):
         if field not in decision:
             continue
         if field in value and value[field] != decision[field]:
@@ -122,6 +145,7 @@ For a live capture with log evidence, also execute search_logs before concluding
 that could support or challenge the mechanism. Do not delegate an available evidence query back to the operator
 unless it was attempted and unavailable, or the budget is exhausted. A source-query attempt may legitimately return nothing.
 For retained/imported cases, review_omitted is available without source access. Do not keep querying once evidence is sufficient.
+When historical_candidates are provided, inspect exactly one using historical_episode before concluding. A prior assessment is not evidence by itself. Compare retained observations and state whether the mechanism appears similar, changed, or remains insufficiently supported.
 Never execute remediation, invent commands, probabilities or a definitive root cause. No shell/URL/PromQL is allowed.
 Prefer reversible mitigations that preserve evidence. Do not recommend weakening cryptographic work factors,
 authentication, TLS, validation or durability to relieve load. For security-sensitive computation, prefer bounded
@@ -136,7 +160,8 @@ To finish: {"action":"finish","assessment":{"summary":"symptom and scope, <=45 w
 "evidence_ids":["E... or Q..."], "hypotheses":[{"explanation":"candidate mechanism","status":"supported|weakened|unresolved",
 "reason":"observations supporting or contradicting this candidate","evidence_ids":["E... or Q..."]}],
 "connections":[{"from":"incident_id","to":"incident_id","relationship":"possibly_related|same_symptom|no_link_established",
-"reason":"what connects or separates the alerts","evidence_ids":["E... or Q..."]}]}}.
+"reason":"what connects or separates the alerts","evidence_ids":["E... or Q..."]}],
+"historical_comparison":{"episode_id":"supplied prior episode ID","status":"similar_mechanism|changed_or_different|insufficient_evidence","summary":"how retained observations compare, <=65 words","evidence_ids":["Q... from historical_episode"]}}}.
 Supply 1-3 hypotheses. If several alerts exist, assess at least one relationship, including no_link_established if appropriate.
 Use connections only for actual different member alerts. 'Supported' is not confirmed causality.
 Use only available_evidence_ids for citations, not original provenance IDs nested within records.
@@ -157,6 +182,7 @@ Remove unsupported causal links between distinct failure phases. Keep mechanisms
 Resolution means alerts stopped firing, NOT that a job was cleared or a particular fix was applied.
 Never assert removal, remediation or recovery mechanism without an actual observation of it.
 Keep historical versus current state distinct. Do not invent metrics or actions.
+When historical_comparison exists, retain it only when its episode ID and cited observation are available. A prior assessment is not independent evidence.
 Retain genuine OOM evidence despite low sampled working set. Next actions must preserve data and security controls.
 Return only the corrected assessment, not private deliberation."""
 
@@ -165,7 +191,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                       publish: Callable[[dict[str, Any]], None], max_checks: int = 4,
                       client: Any = None) -> dict[str, Any]:
     state = {"version": "1", "episode_id": context["episode_id"], "status": "running", "started_at": now(),
-             "policy_version": "episode-investigation-1.7", "max_completion_tokens_per_call": max_tokens,
+              "policy_version": "episode-investigation-1.8", "max_completion_tokens_per_call": max_tokens,
              "model": model, "context": context, "checks": [], "calls": [], "assessment": None,
              "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
              "source_retention": "unknown", "preservation": "Mutable workload state is checked early; no source expiry is assumed."}
@@ -240,9 +266,12 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                         raise ValueError("Run one discriminating check beyond automatic preservation before concluding")
                     if context.get("live_capture") and any(item.get("domain") == "log_template" for item in context["evidence"]) and not any(item["tool"] == "search_logs" for item in state["checks"]):
                         raise ValueError("Search source logs for a discriminating observation before concluding this live episode")
+                    if context.get("historical_candidates") and not any(item["tool"] == "historical_episode" for item in state["checks"]):
+                        raise ValueError("Inspect one retained historical candidate before concluding this recurring episode")
                     candidate = assessment_payload(decision, call)
                     state["assessment"] = validate_assessment(candidate, evidence_ids,
-                                                              {item["incident_id"] for item in context["alerts"]})
+                                                               {item["incident_id"] for item in context["alerts"]},
+                                                               {item["episode_id"] for item in context.get("historical_candidates", [])})
             except ValueError as error:
                 call["validation_error"] = str(error)[:240]
                 refs = candidate.get("evidence_ids") if isinstance(candidate, dict) else None
@@ -285,7 +314,11 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             call["decision"] = scrub(decision)
             if decision.get("action") != "finish":
                 raise ValueError("Evidence review did not return an assessment")
-            reviewed = validate_assessment(assessment_payload(decision, call), evidence_ids, {item["incident_id"] for item in context["alerts"]})
+            reviewed = validate_assessment(
+                assessment_payload(decision, call), evidence_ids,
+                {item["incident_id"] for item in context["alerts"]},
+                {item["episode_id"] for item in context.get("historical_candidates", [])},
+            )
             state.update(assessment=reviewed, status="ready", review={"status": "completed", "changed": reviewed != draft,
                          "schema_repair": review_candidate is not None,
                          "limitation": "Model-assisted consistency review, not independent proof."})

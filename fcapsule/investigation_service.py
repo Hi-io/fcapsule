@@ -44,6 +44,49 @@ class InvestigationService:
                 "report": json.loads((root / "incident_report.json").read_text(encoding="utf-8"))})
         return entries
 
+    def historical_candidates(self, episode: dict[str, Any]) -> list[dict[str, Any]]:
+        """Bound prior recurrence evidence before exposing it to the investigator."""
+
+        candidates = []
+        for summary in (episode.get("recurrence") or {}).get("candidates", [])[:3]:
+            prior = self.plane.store.get_episode(str(summary["episode_id"]))
+            if not prior:
+                continue
+            prior_entries = self.entries(prior)
+            evidence = []
+            for entry in prior_entries[-4:]:
+                report = entry["report"]
+                evidence.append(
+                    {
+                        "incident_id": entry["incident"]["incident_id"],
+                        "reference": entry["incident"].get("reference"),
+                        "alerts": report.get("fault_alerts", [])[:3],
+                        "impact": report.get("impact", [])[:3],
+                        "log_patterns": report.get("log_patterns", [])[:3],
+                        "configuration": report.get("configuration_evidence", [])[:3],
+                    }
+                )
+            prior_run = self.read(str(prior["episode_id"]))
+            assessment = prior_run.get("assessment") or {}
+            candidates.append(
+                {
+                    "episode_id": prior["episode_id"],
+                    "reference": prior.get("reference"),
+                    "title": prior["title"],
+                    "started_at": prior["started_at"],
+                    "ended_at": prior.get("ended_at"),
+                    "status": prior["status"],
+                    "resource": prior.get("resource"),
+                    "assessment": {
+                        key: assessment.get(key)
+                        for key in ("summary", "likely_mechanism", "uncertainty")
+                        if assessment.get(key)
+                    },
+                    "captured_evidence": evidence,
+                }
+            )
+        return candidates
+
     @staticmethod
     def fingerprint(entries) -> str:
         return hashlib.sha256(json.dumps([[item["incident"]["incident_id"], item["report"]] for item in entries],
@@ -121,9 +164,14 @@ class InvestigationService:
             original_ids = {item["incident"]["incident_id"] for item in entries}
             input_fingerprint = self.fingerprint(entries)
             context = episode_context(episode, entries)
+            historical = self.historical_candidates(episode)
+            context["historical_candidates"] = [
+                {key: item.get(key) for key in ("episode_id", "reference", "title", "started_at", "ended_at", "status", "resource")}
+                for item in historical
+            ]
             context["capture_limit"] = "At most 12 latest member reports and 80 initial evidence items; additional members remain individually accessible."
             application = self.plane.store.get_application(episode["app_id"])
-            kit = InvestigationTools(entries, application or {}, self.plane.live_sources)
+            kit = InvestigationTools(entries, application or {}, self.plane.live_sources, historical)
             config = self.plane.ai_configuration()
 
             def publish(state):

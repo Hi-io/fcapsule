@@ -107,10 +107,18 @@ class InvestigationTools:
         "database_pressure": "Query namespace-scoped MySQL connection/limit series and exporter database reachability, with latest-alert phase summaries. Not automatically attributed to this workload. args: {}",
         "dependency_evidence": "Follow one declared same-namespace Service from workload_state.declared_dependencies; inspect one selected pod's incident logs, metrics and current config. Corroborate the dependency with application evidence. args: {service: declared name, terms?: up to 3 literal log terms}",
         "review_omitted": "Inspect candidate evidence excluded from the initial selection, including possible counterevidence. args: {terms?: [text]}",
+        "historical_episode": "Read one retained, deterministic recurrence candidate. Earlier assessments are hypotheses; compare their captured evidence with this episode. args: {episode_id: supplied candidate}",
     }
 
-    def __init__(self, entries: list[dict[str, Any]], application: dict[str, Any], sources: Any):
+    def __init__(
+        self,
+        entries: list[dict[str, Any]],
+        application: dict[str, Any],
+        sources: Any,
+        historical_episodes: list[dict[str, Any]] | None = None,
+    ):
         self.entries, self.application, self.sources = entries, application, sources
+        self.historical_episodes = {str(item["episode_id"]): item for item in historical_episodes or []}
         self.namespace = str(application.get("namespace", ""))
         self.workload = str(application.get("name", ""))
         self.pods = sorted({str(entry["capsule"]["case"]["pod"]) for entry in entries if entry["capsule"]["case"].get("pod")})
@@ -133,7 +141,7 @@ class InvestigationTools:
         if name not in self.CATALOG or not isinstance(arguments, dict):
             raise ValueError("Unknown investigation tool")
         allowed = {"resource_history": {"pod"}, "search_logs": {"pod", "terms"}, "review_omitted": {"terms"},
-                   "dependency_evidence": {"service", "terms"}}.get(name, set())
+                   "dependency_evidence": {"service", "terms"}, "historical_episode": {"episode_id"}}.get(name, set())
         if set(arguments) - allowed:
             raise ValueError("Unsupported tool arguments")
         pod = arguments.get("pod") or (self.pods[0] if self.pods else None)
@@ -156,6 +164,16 @@ class InvestigationTools:
                         "time_range": {"start": item["first_seen"], "end": item["last_seen"]}})
             return scrub({"source": "retained unselected log templates", "observations": candidates[:12],
                           "matching_candidates": len(candidates), "limitation": "Only retained candidates; absence is not disproof."})
+        if name == "historical_episode":
+            episode_id = str(arguments.get("episode_id") or "")
+            candidate = self.historical_episodes.get(episode_id)
+            if not candidate:
+                raise ValueError("Episode is outside the deterministic recurrence candidates")
+            return scrub({
+                "source": "Retained FCAPSule historical episode",
+                "episode": candidate,
+                "limitation": "This is a prior captured episode, not proof of the same cause. Its assessment is a historical hypothesis and must be checked against its cited evidence.",
+            })
         prometheus, opensearch, kubernetes = self._adapters()
         if name == "workload_state":
             pods = [item for item in kubernetes.list_pods({self.namespace})

@@ -65,7 +65,26 @@ of inside it, only that known layout mismatch is normalized and recorded in the
 call audit. Conflicting values are rejected. The original response is retained,
 and all content, bounds and reference validations still apply.
 
-### 3. Reference Comparisons
+### 3. Bounded Historical Recurrence Comparison
+
+When retained episode metadata has the same application, affected resource and
+normalized alert identity, FCAPSule exposes at most three earlier episodes to the
+investigator. The candidate list is deterministic and kept separate from normal
+time correlation: episodes remain independently auditable and are never merged.
+
+The model must inspect exactly one supplied candidate before it can publish an
+assessment for a recurring episode. The `historical_episode` tool returns a
+bounded prior report excerpt, selected configuration/log/alert observations, and
+the prior assessment only as a historical hypothesis. It cannot fetch arbitrary
+old incidents or query new sources. The final comparison must cite the returned
+observation and classify the result as `similar_mechanism`,
+`changed_or_different`, or `insufficient_evidence`.
+
+This is support for responder memory, not similarity-based root-cause proof. A
+matching alert or interval can be coincidental; missing old report material must
+lead to an explicit insufficiency rather than an invented comparison.
+
+### 4. Reference Comparisons
 
 `compare_baseline` compares the affected pod's incident window with a currently
 ready replica of the same workload. If none exists, it uses the preceding equal
@@ -77,7 +96,7 @@ deployment version and limits may differ. The tool labels comparability unverifi
 and the prompt prohibits treating a difference as proof of causality. No healthy
 reference is fabricated when Prometheus returns no samples.
 
-### 4. Diagnostic-Preserving Reduction and Exclusion Review
+### 5. Diagnostic-Preserving Reduction and Exclusion Review
 
 The capture pipeline still uses deterministic masking and exact template grouping,
 not an LLM per log line. In addition to variable masking, it retains a small
@@ -96,7 +115,7 @@ the source for incident-window examples. This makes selection revisitable withou
 resending every raw log. It is not a comprehensive search of all discarded source
 data, and old capsules are not silently reprocessed with the new grouping rule.
 
-### 5. Early Preservation Without Invented Retention
+### 6. Early Preservation Without Invented Retention
 
 Every investigation first attempts a current Kubernetes workload snapshot, before
 the first model call. Limits, requests, current state, previous termination reason,
@@ -121,6 +140,7 @@ retained termination and may have been replaced by a later restart.
 | `database_pressure` | Three MySQL-exporter connection/limit expressions plus `mysql_up` reachability in the episode namespace | Four series per expression; labels retained; no inferred dependency from namespace proximity |
 | `dependency_evidence` | One selector-backed Service explicitly declared by the affected workload's endpoint environment configuration | Same namespace; one current pod; 200 log lines, fixed resource metrics and eight configuration records; no arbitrary endpoints |
 | `review_omitted` | Stored, unselected log templates | Twelve returned candidates; no network access |
+| `historical_episode` | One of up to three deterministic retained recurrence candidates | No source query; bounded saved alert/configuration/log observations; prior assessment is labeled a historical hypothesis |
 
 Namespace-level MySQL metrics are context, not automatic attribution to a database
 dependency. The tool does not connect directly to MySQL or issue SQL. Configuration
@@ -256,14 +276,15 @@ solely because sampled memory is low. These interpretations follow the
 and [Kubernetes resource behavior](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/).
 They constrain interpretation, not the observed outcome of any particular case.
 
-Policy `episode-investigation-1.7` uses low reasoning effort for the already reserved
+Policy `episode-investigation-1.8` uses low reasoning effort for the already reserved
 final review, with explicit byte conversion, component-versus-total memory and
-termination-versus-alert time checks. This replaced a non-reasoning review after a
-real investigation repeated a false below-limit memory comparison. The review has
-the same call and completion budget; latency and reasoning-token consumption can
-increase. It is still model-assisted consistency review, not a deterministic
-numerical validator. Original and revised assessments must both remain in evaluation
-records, including unsuccessful corrections.
+termination-versus-alert time checks. It additionally requires a bounded, cited
+historical comparison when a deterministic recurrence candidate exists. This
+replaced a non-reasoning review after a real investigation repeated a false
+below-limit memory comparison. The review has the same call and completion budget;
+latency and reasoning-token consumption can increase. It is still model-assisted
+consistency review, not a deterministic numerical validator. Original and revised
+assessments must both remain in evaluation records, including unsuccessful corrections.
 
 Telemetry is treated as untrusted input, and the prompt explicitly rejects
 instructions embedded in it. Server-side tool dispatch restricts actions even if a
@@ -278,8 +299,9 @@ Organizational approval, scoped permissions, protected state and a trusted netwo
 remain required. See [data privacy](data_privacy.md).
 
 Tests cover scope/argument rejection, missing sources, peer fallback, diagnostic
-code preservation, usage accounting, invalid citations, provider failure, bounded
-calls, background progress, restart recovery and deletion races. These tests do
+code preservation, recurrence-candidate bounds, usage accounting, invalid citations,
+provider failure, bounded calls, background progress, restart recovery and deletion
+races. These tests do
 not establish general root-cause accuracy. Evaluation should compare the former
 single-call briefing and the new investigator on the same incidents, recording
 discriminating observations found, unsupported claims, operator usefulness,

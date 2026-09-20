@@ -25,6 +25,33 @@ from fcapsule.store import FCAPSuleStore, utc_now
 from fcapsule.ui.dashboard import render_dashboard
 
 
+def _resource_identity(alert: dict[str, Any], fallback: str) -> dict[str, str]:
+    """Identify the monitored target while keeping collector identity as evidence."""
+
+    labels = alert.get("labels", {}) if isinstance(alert.get("labels"), dict) else {}
+    annotations = alert.get("annotations", {}) if isinstance(alert.get("annotations"), dict) else {}
+    alert_name = str(alert.get("alertname") or labels.get("alertname") or annotations.get("summary") or fallback)
+    normalized_name = alert_name.lower()
+
+    def label(*names: str) -> str:
+        return next((str(labels[name]) for name in names if labels.get(name)), "")
+
+    node = label("node", "kubernetes_node", "hostname", "host", "nodename")
+    if not node and "node" in normalized_name:
+        node = label("instance")
+        if node.count(":") == 1:
+            node = node.rsplit(":", 1)[0]
+    if node:
+        return {"kind": "node", "name": node, "alert_identity": alert_name}
+    pod = label("pod", "pod_name", "kubernetes_pod_name")
+    if pod:
+        return {"kind": "pod", "name": pod, "alert_identity": alert_name}
+    workload = label("deployment", "statefulset", "daemonset", "workload", "service")
+    if workload:
+        return {"kind": "workload", "name": workload, "alert_identity": alert_name}
+    return {"kind": "application", "name": fallback, "alert_identity": alert_name}
+
+
 class ControlPlane:
     """Thread-safe coordinator shared by the API and operator console."""
 
@@ -64,6 +91,7 @@ class ControlPlane:
         self._persist_ai_settings()
         self._last_retention_check = 0.0
         self.purge_expired_incidents()
+        self._refresh_existing_identities()
         existing = self.store.overview()
         if existing["incidents"]:
             incident = existing["incidents"][0]
@@ -82,6 +110,20 @@ class ControlPlane:
             if evaluation_path.is_file():
                 self.live["evaluation"] = json.loads(evaluation_path.read_text(encoding="utf-8"))
                 self.live["selected_evidence"] = capsule_record["selected_evidence"]
+
+    def _refresh_existing_identities(self) -> None:
+        """Backfill retained cases when new target identity fields are introduced."""
+
+        for incident in self.store.list_incidents(limit=10000) + self.store.list_incidents(limit=10000, archived=True):
+            try:
+                bundle = load_case(incident["case_dir"])
+                if bundle.alerts:
+                    identity = _resource_identity(bundle.alerts[0], str(incident["app_id"]))
+                    self.store.update_incident_identity(
+                        str(incident["incident_id"]), identity["kind"], identity["name"], identity["alert_identity"]
+                    )
+            except (FileNotFoundError, KeyError, ValueError, OSError):
+                continue
 
     @staticmethod
     def _empty_phases() -> dict[str, dict[str, Any]]:
@@ -331,6 +373,7 @@ class ControlPlane:
             )
         first_alert = bundle.alerts[0]
         annotation = first_alert.get("annotations", {}) if isinstance(first_alert.get("annotations"), dict) else {}
+        identity = _resource_identity(first_alert, app_name or str(metadata.get("service", app_id)))
         raw_bytes = sum(
             path.stat().st_size
             for path in bundle.case_dir.iterdir()
@@ -353,6 +396,9 @@ class ControlPlane:
                 "trace_access": metadata.get("trace_access", {"available": False, "raw_spans_retained": False}),
                 "summary": str(annotation.get("summary") or metadata["case_title"]),
                 "source_kind": source_kind,
+                "resource_kind": identity["kind"],
+                "resource_name": identity["name"],
+                "alert_identity": identity["alert_identity"],
             }
         )
         with self.lock:
@@ -490,8 +536,47 @@ class ControlPlane:
             for episode in state["overview"].get(key, []):
                 investigation = self.investigator.read(episode["episode_id"])
                 episode["investigation"] = {"status": investigation["status"],
-                    "completed_checks": sum(check["status"] == "completed" for check in investigation.get("checks", []))}
+                    "completed_checks": sum(check["status"] == "completed" for check in investigation.get("checks", [])),
+                    "finished_at": investigation.get("finished_at"),
+                    "historical_comparison": (investigation.get("assessment") or {}).get("historical_comparison")}
+        state["overview"]["triage"] = self._operations_triage(state["overview"])
         return state
+
+    @staticmethod
+    def _operations_triage(overview: dict[str, Any]) -> list[dict[str, Any]]:
+        """Keep the top of Operations short and tied to an episode action."""
+
+        severity_rank = {"critical": 2, "warning": 1, "info": 0}
+        rows: list[tuple[tuple[int, int, str], dict[str, Any]]] = []
+        seen_patterns: set[str] = set()
+        for episode in overview.get("episodes", []):
+            recurrence = episode.get("recurrence", {})
+            comparison = (episode.get("investigation", {}) or {}).get("historical_comparison") or {}
+            base = {"episode_id": episode["episode_id"], "reference": episode.get("reference"),
+                    "title": episode["title"], "resource": episode.get("resource", {}),
+                    "started_at": episode["started_at"]}
+            rank = severity_rank.get(str(episode.get("severity", "info")).lower(), 0)
+            if episode.get("status") == "active":
+                rows.append(((3, rank, str(episode["last_activity_at"])), {
+                    **base, "kind": "active", "label": "Active incident",
+                    "detail": "An alert is still firing and needs a current investigation.",
+                }))
+                continue
+            if comparison.get("status") == "changed_or_different":
+                rows.append(((2, rank, str(episode["last_activity_at"])), {
+                    **base, "kind": "changed", "label": "Changed from prior occurrence",
+                    "detail": str(comparison.get("summary", "Retained evidence differs from a prior episode.")),
+                }))
+                continue
+            pattern_id = recurrence.get("pattern_id")
+            if recurrence.get("previous_count", 0) and pattern_id not in seen_patterns:
+                rows.append(((1, rank, str(episode["last_activity_at"])), {
+                    **base, "kind": "recurring", "label": "Recurring issue",
+                    "detail": f"Observed {recurrence['previous_count']} earlier time{'s' if recurrence['previous_count'] != 1 else ''} in retained history.",
+                }))
+                seen_patterns.add(str(pattern_id))
+        rows.sort(key=lambda item: item[0], reverse=True)
+        return [item for _, item in rows[:3]]
 
     def capsule_payload(self, capsule_id: str) -> dict[str, Any] | None:
         record = self.store.get_capsule(capsule_id)
