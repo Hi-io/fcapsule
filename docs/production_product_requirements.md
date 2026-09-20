@@ -43,8 +43,8 @@ The main console must show:
 
 - open and recently captured incidents ordered by severity and time;
 - service, environment, start time, affected scope, and report readiness;
-- a direct **Open investigation** action for every correlated incident episode;
-- application coverage: which operational domains are connected for each application.
+- a directly expandable row for every correlated incident episode;
+- application coverage under Targets, grouped by cluster and namespace.
 
 The workspace must not make log reduction, retained bytes, model scores, token use, or a model comparison its primary content.
 

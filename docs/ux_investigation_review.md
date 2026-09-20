@@ -28,3 +28,25 @@ The screen also exposed a quality issue: the deterministic configuration hypothe
 ## Verification
 
 Validate asynchronous generation, deduplication, failure handling and citation contracts with focused tests. Exercise disclosure, report selection, evidence details, archive/restore, exports, Targets and Settings in the deployed browser. Check narrow and desktop layouts and reduced motion. Screenshots establish visual findings; keyboard checks and runtime tests are required separately and do not imply a full accessibility certification.
+
+### Results
+
+- All 53 Python tests pass (`python3 -m unittest discover -s tests -q`). Two dependency-free browser-helper regression tests pass (`node --test tests/ui_helpers.test.cjs`). JavaScript syntax and Git whitespace checks pass.
+- Deployed to the existing Kubernetes instance and exercised against the retained cluster incidents, not fabricated UI responses. Four briefings completed with the configured DeepSeek provider; queued/running states appeared before completion without requiring a page reload.
+- Switched between the two reports in the worker episode, opened log examples and metric charts, followed an AI citation to its alert evidence, and exercised the timeline. Report selection and expanded evidence survive background updates.
+- Archived the resolved worker episode and restored it. The queue returned to its original state; no retained incident was deleted. JSON export parsed successfully, and the capsule ZIP passed an integrity check and contained its AI briefing.
+- Tested source connections successfully. All three sources reported healthy. An unsaved cluster-name edit survived background polling and was reverted without saving. Coverage displays 14 applications grouped into three namespaces, including Grafana.
+- Keyboard testing exposed duplicate report controls inside collapsed episodes. Those hidden copies were removed; ArrowRight and Home now select the appropriate report tab. Enter collapses the selected episode, which remains closed after polling. Opening and closing animations target the open episode rather than the first row.
+- Saved and reviewed desktop screenshots for Targets, the investigation overview, and expanded log/metric evidence in `local_reports/ux-review/`. Settings retains its existing controls with automatic-analysis wording. No JavaScript errors were observed during the final interaction checks.
+
+### Analysis Quality Findings
+
+The first real-model run treated low sampled memory as evidence against a short-lived OOM and suggested CPU saturation from log wording. The prompt now distinguishes missing samples from contrary evidence, requires CPU measurements for saturation claims, and prioritises termination state when investigating an OOM alert. Another response guessed a namespace because the prompt omitted the available workload identity. Cluster, namespace, event time and configuration inventory are now supplied explicitly as authoritative context. These findings were recorded rather than hiding unsuccessful iterations.
+
+Briefings are investigative guidance, not verified root causes. Citation validation proves that referenced evidence exists; it does not prove every assertion or suggested action. Retained historical windows may omit the peak, terminal state, queue acknowledgement, or other decisive evidence. Conditional mitigation and a concrete confirming check are preferable to a confident but unsupported fix. No model-generated remediation is executed.
+
+The final OOM rerun completed successfully without the invented namespace. It recommended checking the affected worker's recorded termination reason, exit code, finish time and configured memory limit; it explicitly noted that sampled metrics may miss a brief peak. This is a useful next step, not proof that the reported OOM mechanism is correct.
+
+### Remaining Validation Limits
+
+The browser's viewport override did not change the observed 1280px viewport, so narrow-screen visual validation is not claimed. The temporary override was reset. Responsive CSS and reduced-motion handling are present, but this pass is not a full device or accessibility audit. No live incident was permanently deleted, no credentials were replaced, and no new workload fault was induced in this UX pass; lifecycle deletion and asynchronous capture behaviour are covered by isolated automated tests.

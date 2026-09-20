@@ -64,20 +64,20 @@ that can be handed to another team without storing all raw traces indefinitely.
 
 ## Implemented Product Shape
 
-The operations console now starts with an incident queue. Selecting **Open report**
-opens a retained incident workspace with these sections:
+The operations console starts with an incident queue. Clicking an episode row expands
+its investigation inline. A report selector separates its individual alert captures.
 
-- **Impact**: error rate, affected requests, latency, retries, and saturation signals
-  where observed.
-- **Likely failure path**: an evidence-backed hypothesis, confidence, evidence, and
-  explicit uncertainty.
-- **What changed**: a chronological event timeline and affected service relationships.
-- **Supporting evidence**: concise fault-management, log, performance, and topology
-  records with their timestamps and sources.
-- **Next actions**: practical investigation and preservation actions, with trace
-  retrieval called out as urgent when applicable.
-- **Coverage**: captured domains, retained evidence items, trace-source availability,
-  and archive location.
+- **Overview**: automatically generated AI assessment, likely mechanism, first
+  diagnostic check, expected finding, conditional mitigation, uncertainty, and
+  material observed impact. Missing credentials and analysis failures remain explicit.
+- **Evidence**: expandable alerts, log examples, performance charts with captured
+  time ranges, configuration snapshots, coverage and trace-source availability.
+- **Timeline**: episode alerts and an expandable captured-evidence sequence.
+- **Export**: retained report JSON and capsule archive.
+
+The AI assessment links to retained evidence. It is guidance, not a verified root
+cause or an automatically executed remediation. See `ux_investigation_review.md`
+for the browser audit, iterations and validation limits.
 
 Engineering diagnostics are collapsible. They contain capsule-efficiency and validation
 figures for maintainers without making them the incident response workflow.
