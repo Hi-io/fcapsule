@@ -37,7 +37,9 @@ def validate_assessment(value: Any, evidence_ids: set[str], incident_ids: set[st
 
     def citations(item):
         refs = item.get("evidence_ids")
-        if not isinstance(refs, list) or not 1 <= len(refs) <= 8 or any(not isinstance(ref, str) or ref not in evidence_ids for ref in refs):
+        if not isinstance(refs, list) or not 1 <= len(refs) <= 8:
+            raise ValueError("Each evidence_ids array must contain one to eight references; keep only the most diagnostic")
+        if any(not isinstance(ref, str) or ref not in evidence_ids for ref in refs):
             raise ValueError("Assessment cites unavailable evidence")
         return list(dict.fromkeys(refs))
 
@@ -69,6 +71,23 @@ def validate_assessment(value: Any, evidence_ids: set[str], incident_ids: set[st
         result["connections"].append({key: item[key] for key in ("from", "to", "relationship", "reason")}
                                      | {"evidence_ids": citations(item)})
     return scrub(result)
+
+
+def assessment_payload(decision: dict[str, Any], call: dict[str, Any]) -> Any:
+    """Accept misplaced arrays without inventing content or overriding conflicts."""
+    value = decision.get("assessment")
+    if not isinstance(value, dict):
+        return value
+    value = dict(value)
+    for field in ("hypotheses", "connections"):
+        if field not in decision:
+            continue
+        if field in value and value[field] != decision[field]:
+            raise ValueError("Conflicting assessment fields")
+        if field not in value:
+            value[field] = decision[field]
+            call.setdefault("schema_adjustments", []).append(f"Moved {field} into assessment")
+    return value
 
 
 SYSTEM = """You investigate an operational episode, not independent alert summaries.
@@ -105,6 +124,7 @@ Supply 1-3 hypotheses. If several alerts exist, assess at least one relationship
 Use connections only for actual different member alerts. 'Supported' is not confirmed causality.
 Use only available_evidence_ids for citations, not original provenance IDs nested within records.
 Each text field is at most 900 characters; hypothesis explanations/reasons and connection reasons at most 500 characters.
+Every evidence_ids array must contain 1-8 references. Cite only the most diagnostic records, not every matching log.
 Each reference must exist; unavailable/failed queries are limitations, not positive evidence.
 Do not emit private deliberation. The question, tool result and brief conclusion form the operator audit trail."""
 
@@ -113,7 +133,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                       publish: Callable[[dict[str, Any]], None], max_checks: int = 4,
                       client: Any = None) -> dict[str, Any]:
     state = {"version": "1", "episode_id": context["episode_id"], "status": "running", "started_at": now(),
-             "policy_version": "episode-investigation-1.3", "max_completion_tokens_per_call": max_tokens,
+             "policy_version": "episode-investigation-1.4", "max_completion_tokens_per_call": max_tokens,
              "model": model, "context": context, "checks": [], "calls": [], "assessment": None,
              "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
              "source_retention": "unknown", "preservation": "Mutable workload state is checked early; no source expiry is assumed."}
@@ -186,7 +206,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                         raise ValueError("Run one discriminating check beyond automatic preservation before concluding")
                     if context.get("live_capture") and any(item.get("domain") == "log_template" for item in context["evidence"]) and not any(item["tool"] == "search_logs" for item in state["checks"]):
                         raise ValueError("Search source logs for a discriminating observation before concluding this live episode")
-                    state["assessment"] = validate_assessment(decision.get("assessment"), evidence_ids,
+                    state["assessment"] = validate_assessment(assessment_payload(decision, call), evidence_ids,
                                                               {item["incident_id"] for item in context["alerts"]})
             except ValueError as error:
                 call["validation_error"] = str(error)[:240]
@@ -220,7 +240,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             call["decision"] = scrub(decision)
             if decision.get("action") != "finish":
                 raise ValueError("Evidence review did not return an assessment")
-            reviewed = validate_assessment(decision.get("assessment"), evidence_ids, {item["incident_id"] for item in context["alerts"]})
+            reviewed = validate_assessment(assessment_payload(decision, call), evidence_ids, {item["incident_id"] for item in context["alerts"]})
             state.update(assessment=reviewed, status="ready", review={"status": "completed", "changed": reviewed != draft,
                          "limitation": "Model-assisted consistency review, not independent proof."})
     except Exception as error:

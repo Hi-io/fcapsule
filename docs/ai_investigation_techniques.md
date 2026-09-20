@@ -60,6 +60,10 @@ publication. It specifically removes unsupported recovery/remediation claims,
 distinguishes historical from current state and checks metric interpretation.
 The draft and revised result are retained. This is model-assisted consistency
 review, not an independent verifier or a guarantee of factual correctness.
+If the provider places `hypotheses` or `connections` alongside `assessment` instead
+of inside it, only that known layout mismatch is normalized and recorded in the
+call audit. Conflicting values are rejected. The original response is retained,
+and all content, bounds and reference validations still apply.
 
 ### 3. Reference Comparisons
 

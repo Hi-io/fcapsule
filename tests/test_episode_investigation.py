@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import Mock
 
-from fcapsule.episode_investigation import run_investigation, validate_assessment
+from fcapsule.episode_investigation import assessment_payload, run_investigation, validate_assessment
 from fcapsule.investigation_tools import InvestigationTools, episode_context, log_patterns, metric_summary, scrub
 from fcapsule.processing.anonymizer import anonymize_text, template_for_message
 
@@ -101,6 +101,31 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(state["calls"][-1]["phase"], "evidence_review")
         self.assertEqual(len(client.requests), 2)
         self.assertFalse(any(item["status"] == "ready" and item["assessment"] == assessment() for item in self.progress))
+
+    def test_review_accepts_misplaced_arrays_and_records_original_layout(self):
+        misplaced = {"action": "finish", "assessment": assessment()}
+        misplaced["hypotheses"] = misplaced["assessment"].pop("hypotheses")
+        misplaced["connections"] = misplaced["assessment"].pop("connections")
+        state, _ = self.run_case([
+            {"action": "finish", "assessment": assessment()}, misplaced,
+        ], max_checks=0)
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["assessment"], assessment())
+        self.assertNotIn("hypotheses", state["calls"][-1]["decision"]["assessment"])
+        self.assertEqual(len(state["calls"][-1]["schema_adjustments"]), 2)
+
+    def test_layout_normalization_does_not_overwrite_or_validate_content(self):
+        with self.assertRaises(ValueError):
+            assessment_payload({"assessment": assessment(), "hypotheses": []}, {})
+        malformed = assessment_payload({"assessment": {"summary": "Missing fields"}, "hypotheses": "not a list"}, {})
+        with self.assertRaises(ValueError):
+            validate_assessment(malformed, {"Q001"}, {"one"})
+
+    def test_excess_citations_explain_the_actual_limit(self):
+        value = assessment()
+        value["evidence_ids"] = [f"E{index}" for index in range(9)]
+        with self.assertRaisesRegex(ValueError, "one to eight"):
+            validate_assessment(value, set(value["evidence_ids"]), {"one"})
 
     def test_hard_call_budget_and_disallowed_tools(self):
         decision = {"action": "check", "tool": "resource_history", "arguments": {}, "question": "Resource pressure?", "distinguishes": "CPU or memory"}

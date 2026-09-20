@@ -457,11 +457,12 @@ function briefingPanel(payload) {
 
 function investigationRefs(run, ids = []) {
   const labels = new Map();
+  const checks = {workload_state:'Runtime snapshot',resource_history:'Resource history',search_logs:'Source logs',compare_baseline:'Baseline comparison',database_pressure:'Database metrics',review_omitted:'Omitted log patterns'};
   return ids.map(id => {
     const item = [...(run.checks || []), ...(run.context?.evidence || [])].find(item=>item.id === id);
-    const label = item?.question || (item?.domain === 'log_template' ? logLabel(item.title) : item?.title) || id;
+    const label = checks[item?.tool] || (item?.domain === 'log_template' ? logLabel(item.title) : item?.title) || item?.question || id;
     const occurrence = (labels.get(label) || 0) + 1; labels.set(label,occurrence);
-    return '<button class="evidence-link" data-investigation-ref="' + safe(id) + '" title="' + safe(label) + '">' + safe(label) + (occurrence > 1 ? ' · additional capture' : '') + '</button>';
+    return '<button class="evidence-link" data-investigation-ref="' + safe(id) + '" title="' + safe(item?.question || label) + '">' + safe(label) + (occurrence > 1 ? ' · additional capture' : '') + '</button>';
   }).join('');
 }
 

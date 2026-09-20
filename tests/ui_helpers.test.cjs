@@ -102,6 +102,9 @@ test('investigation citations are escaped and point to unique observations', () 
   const html = refs({checks:[{id:'Q001',question:'<script>source text</script>'}]},['Q001']);
   assert.match(html,/data-investigation-ref="Q001"/);
   assert.doesNotMatch(html,/<script>/);
+  const compact = refs({checks:[{id:'Q002',tool:'search_logs',question:'Which logs distinguish competing mechanisms?'}]},['Q002']);
+  assert.match(compact,/>Source logs<\/button>/);
+  assert.match(compact,/title="Which logs distinguish competing mechanisms\?"/);
 });
 
 test('partial token usage is not displayed as complete accounting', () => {
