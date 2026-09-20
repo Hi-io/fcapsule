@@ -20,3 +20,6 @@ Issues = "https://github.com/Hi-io/fcapsule/issues"
 
 [tool.setuptools.packages.find]
 include = ["fcapsule*"]
+
+[tool.setuptools.package-data]
+"fcapsule.ui" = ["assets/*.js", "assets/*.css"]
