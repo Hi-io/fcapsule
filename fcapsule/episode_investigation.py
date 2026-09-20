@@ -106,6 +106,8 @@ Compare quantities in consistent units. A logged buffer is only part of process/
 that a measured component exceeded a limit when its value is lower; OOM can be confirmed without a sampled peak.
 When application logs identify a failing dependency, use dependency_evidence for a matching declared Service
 before delegating its log inspection to the operator, if the check budget allows. Shared config alone does not prove traffic.
+search_logs and resource_history accept only allowed_pods. Discovering a dependency pod does not expand that list;
+repeat dependency_evidence with its declared Service name and literal terms for a dependency log follow-up.
 Relative baseline changes (e.g. +600%) are not utilization percentages; compare absolute use with configured limits.
 Use latest_alert_at and at_or_after_latest_alert to distinguish current-phase measurements from earlier baseline.
 Healthy samples before an alert do not prove recovery after it or exclude resource retention during the failure.

@@ -101,8 +101,8 @@ def episode_context(episode: dict[str, Any], entries: list[dict[str, Any]]) -> d
 class InvestigationTools:
     CATALOG = {
         "workload_state": "Preserve current limits, last termination and configuration. Mutable state; collect early. args: {}",
-        "resource_history": "Read captured-window CPU/memory/limits/throttling/restarts/OOM metrics. args: {pod?: known pod}",
-        "search_logs": "Search incident-window logs on a known pod for up to 3 literal terms, preserving diagnostic variants. args: {pod?: known pod, terms: [text]}",
+        "resource_history": "Read captured-window CPU/memory/limits/throttling/restarts/OOM metrics. Pod must be in allowed_pods; dependency pods use dependency_evidence. args: {pod?: allowed_pods entry}",
+        "search_logs": "Search incident-window logs for up to 3 literal terms, preserving diagnostic variants. Pod must be in allowed_pods, not a pod discovered through a dependency. For dependency log follow-up use dependency_evidence with service and terms. args: {pod?: allowed_pods entry, terms: [text]}",
         "compare_baseline": "Compare a ready peer with the same workload, or the preceding equal time window. args: {}",
         "database_pressure": "Query namespace-scoped MySQL connection/limit series and exporter database reachability, with latest-alert phase summaries. Not automatically attributed to this workload. args: {}",
         "dependency_evidence": "Follow one declared same-namespace Service from workload_state.declared_dependencies; inspect one selected pod's incident logs, metrics and current config. Corroborate the dependency with application evidence. args: {service: declared name, terms?: up to 3 literal log terms}",
