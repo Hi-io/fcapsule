@@ -141,6 +141,28 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertNotIn("hypotheses", state["calls"][-1]["decision"]["assessment"])
         self.assertEqual(len(state["calls"][-1]["schema_adjustments"]), 2)
 
+    def test_review_accepts_unambiguous_assessment_only_envelope(self):
+        corrected = assessment()
+        corrected["summary"] = "Corrected after evidence review."
+        state, _ = self.run_case([
+            {"action": "finish", "assessment": assessment()},
+            {"type": "json_object", "assessment": corrected},
+        ], max_checks=0)
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["assessment"]["summary"], corrected["summary"])
+        self.assertIn("Accepted assessment-only review envelope", state["calls"][-1]["schema_adjustments"])
+
+    def test_review_accepts_direct_assessment_without_inventing_fields(self):
+        corrected = assessment()
+        corrected["summary"] = "Direct corrected assessment."
+        state, _ = self.run_case([
+            {"action": "finish", "assessment": assessment()},
+            corrected,
+        ], max_checks=0)
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["assessment"]["summary"], corrected["summary"])
+        self.assertIn("Accepted direct assessment review", state["calls"][-1]["schema_adjustments"])
+
     def test_layout_normalization_does_not_overwrite_or_validate_content(self):
         with self.assertRaises(ValueError):
             assessment_payload({"assessment": assessment(), "hypotheses": []}, {})
