@@ -18,9 +18,11 @@ def create_archive(output_dir: Path, case_id: str) -> Path:
         "ai_briefing.json",
         "dashboard.html",
     )
-    with ZipFile(archive_path, "w", compression=ZIP_DEFLATED) as archive:
+    temporary_path = archive_path.with_suffix(".zip.tmp")
+    with ZipFile(temporary_path, "w", compression=ZIP_DEFLATED) as archive:
         for name in names:
             path = output_dir / name
             if path.exists():
                 archive.write(path, arcname=name)
+    temporary_path.replace(archive_path)
     return archive_path

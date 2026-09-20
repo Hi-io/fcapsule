@@ -97,6 +97,16 @@ class AttentionReasoningTests(unittest.TestCase):
         self.assertEqual(result["verdict"], "unsupported")
         self.assertLess(result["adjusted_confidence"], 0.3)
 
+    def test_configuration_presence_does_not_imply_configuration_failure(self):
+        selected = [
+            {"evidence_id": "a", "type": "alert", "title": "CPU throttling", "summary": "Throttled", "score": .8},
+            {"evidence_id": "l", "type": "log_template", "title": "Exporter started", "summary": "INFO", "score": .7},
+            {"evidence_id": "c", "type": "configuration", "title": "ConfigMap", "summary": "Configured", "score": .7},
+        ]
+        hypotheses = generate_hypotheses(selected)
+        self.assertFalse(any("configuration mismatch" in item["hypothesis"] for item in hypotheses))
+        self.assertFalse(any("latency" in item["hypothesis"] for item in hypotheses))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -37,8 +37,11 @@ class IncidentBriefingTests(unittest.TestCase):
             "content": json.dumps(
                 {
                     "operator_brief": "Retries and pool saturation align with failed checkout requests.",
+                    "likely_mechanism": "Retrying blocked requests may retain connections and prevent new checkouts.",
                     "first_action": "Retrieve failed-request traces before source retention expires.",
                     "why_this_first": "Traces can confirm the lock and dependency path while they remain available.",
+                    "expected_finding": "Blocked reservation spans support lock contention; healthy spans weaken it.",
+                    "mitigation": "After confirming retry amplification, temporarily limit retries; this may reduce successful retries.",
                     "evidence_ids": ["ev_alert_001", "ev_metric_001", "ev_log_template_001"],
                     "uncertainty": "The database lock owner is not retained in the capsule.",
                 }
@@ -49,6 +52,7 @@ class IncidentBriefingTests(unittest.TestCase):
         result = generate_incident_briefing(self.report)
 
         self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["briefing_version"], "2")
         self.assertEqual(result["briefing"]["evidence_ids"], ["ev_alert_001", "ev_metric_001", "ev_log_template_001"])
 
     @patch("fcapsule.reasoning.incident_briefing.DeepSeekChatClient")
@@ -57,8 +61,11 @@ class IncidentBriefingTests(unittest.TestCase):
             "content": json.dumps(
                 {
                     "operator_brief": "The root cause is known.",
+                    "likely_mechanism": "Unverified mechanism",
                     "first_action": "Restart the service.",
                     "why_this_first": "It will fix it.",
+                    "expected_finding": "Unverified outcome",
+                    "mitigation": "Restart the service",
                     "evidence_ids": ["invented_001", "invented_002"],
                     "uncertainty": "None.",
                 }

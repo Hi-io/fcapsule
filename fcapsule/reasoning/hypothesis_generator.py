@@ -11,6 +11,7 @@ def _first(items: list[dict[str, Any]], evidence_type: str, terms: tuple[str, ..
         semantic = [item for item in matches if any(term in (item["title"] + " " + item["summary"]).lower() for term in terms)]
         if semantic:
             return semantic[0]
+        return None
     return matches[0] if matches else None
 
 
@@ -28,7 +29,7 @@ def generate_hypotheses(selected: list[dict[str, Any]]) -> list[dict[str, Any]]:
     config_mismatch_log = _first(
         selected,
         "log_template",
-        ("mismatch", "schema", "configuration", "config", "unsafe-write"),
+        ("mismatch", "invalid configuration", "configuration error", "unsafe-write"),
     )
     config_context = _first(selected, "configuration", ("configmap", "config", "environment"))
     connection_log = _first(

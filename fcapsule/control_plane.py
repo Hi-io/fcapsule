@@ -7,6 +7,7 @@ import os
 import shutil
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,7 @@ from fcapsule.io.output_writer import write_json
 from fcapsule.live_sources import LiveSourceCoordinator
 from fcapsule.pipeline import investigate_case
 from fcapsule.reasoning.incident_briefing import generate_incident_briefing
-from fcapsule.store import FCAPSuleStore
+from fcapsule.store import FCAPSuleStore, utc_now
 from fcapsule.ui.dashboard import render_dashboard
 
 
@@ -34,6 +35,9 @@ class ControlPlane:
         self.store = FCAPSuleStore(self.state_dir / "fcapsule.db")
         self.live_sources = LiveSourceCoordinator(self.store, self.state_dir)
         self.lock = threading.Lock()
+        self.briefing_lock = threading.RLock()
+        self.briefing_jobs: set[str] = set()
+        self.briefing_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="fcapsule-briefing")
         self.running = False
         self.active_job: str | None = None
         self.current_incident_id: str | None = None
@@ -128,6 +132,7 @@ class ControlPlane:
         if api_key:
             write_env_value(self.state_dir / ".env", "DEEPSEEK_API_KEY", api_key)
         self._persist_ai_settings()
+        self.resume_ai_briefings()
         return self.ai_configuration()
 
     def general_configuration(self) -> dict[str, Any]:
@@ -171,10 +176,11 @@ class ControlPlane:
         if not incident:
             raise KeyError(f"Unknown incident: {incident_id}")
         capsule = self.store.get_capsule_for_incident(incident_id)
-        self.store.delete_incident(incident_id)
-        self._remove_managed_tree(incident.get("case_dir"))
-        if capsule:
-            self._remove_managed_tree(capsule.get("output_dir"))
+        with self.briefing_lock:
+            self.store.delete_incident(incident_id)
+            self._remove_managed_tree(incident.get("case_dir"))
+            if capsule:
+                self._remove_managed_tree(capsule.get("output_dir"))
         if self.current_incident_id == incident_id:
             active = self.store.list_incidents(limit=1)
             self.current_incident_id = active[0]["incident_id"] if active else None
@@ -455,6 +461,7 @@ class ControlPlane:
                 "signal_preservation": evaluation["important_signal_preservation"],
             },
         )
+        self.start_ai_briefing(incident_id)
         return capsule
 
     def snapshot(self) -> dict[str, Any]:
@@ -519,18 +526,74 @@ class ControlPlane:
             "ai_briefing": json.loads(briefing_path.read_text(encoding="utf-8")) if briefing_path.is_file() else None,
         }
 
-    def generate_ai_briefing(self, incident_id: str) -> dict[str, Any]:
-        """Generate an optional LLM briefing without delaying evidence capture."""
+    def start_ai_briefing(self, incident_id: str, retry: bool = False) -> dict[str, Any]:
+        """Persist loading state before dispatch; deduplicate concurrent requests."""
+        with self.briefing_lock:
+            record = self.store.get_capsule_for_incident(incident_id)
+            if not record:
+                raise ValueError("Build a report before requesting a briefing")
+            path = Path(record["output_dir"]) / "ai_briefing.json"
+            previous = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+            if incident_id in self.briefing_jobs:
+                return previous
+            if not retry and (previous.get("status") in {"rejected", "unavailable"}
+                              or (previous.get("status") == "ready" and previous.get("briefing_version") == "2")):
+                return previous
+            if not self.ai_configuration()["api_key_configured"]:
+                result = {"status": "not_configured", "message": "Add a provider key in Settings to enable automatic analysis."}
+                self._write_briefing_state(path, result)
+                return result
+            result = {"status": "queued", "message": "Waiting for analysis", "queued_at": utc_now()}
+            self._write_briefing_state(path, result)
+            self.briefing_jobs.add(incident_id)
+            self.briefing_executor.submit(self._run_ai_briefing, incident_id)
+            return result
 
+    @staticmethod
+    def _write_briefing_state(path: Path, result: dict[str, Any]) -> None:
+        temporary = path.with_suffix(".tmp")
+        write_json(temporary, result)
+        temporary.replace(path)
+
+    def resume_ai_briefings(self) -> None:
+        """Resume interrupted work and brief retained, unarchived episode signals."""
+        for episode in self.store.list_episodes(limit=10000):
+            for signal in episode["signals"]:
+                if signal.get("report_ready"):
+                    self.start_ai_briefing(str(signal["incident_id"]))
+
+    def _run_ai_briefing(self, incident_id: str) -> None:
+        try:
+            with self.briefing_lock:
+                record = self.store.get_capsule_for_incident(incident_id)
+                if not record:
+                    return
+                path = Path(record["output_dir"]) / "ai_briefing.json"
+                self._write_briefing_state(path, {"status": "running", "message": "Analysing retained evidence", "started_at": utc_now()})
+            self.generate_ai_briefing(incident_id)
+        except Exception:
+            with self.briefing_lock:
+                record = self.store.get_capsule_for_incident(incident_id)
+                if record:
+                    self._write_briefing_state(Path(record["output_dir"]) / "ai_briefing.json", {
+                        "status": "unavailable", "message": "Analysis could not complete. Retained evidence is still available. Retry when the provider is reachable."
+                    })
+        finally:
+            with self.briefing_lock:
+                self.briefing_jobs.discard(incident_id)
+
+    def generate_ai_briefing(self, incident_id: str) -> dict[str, Any]:
         payload = self.incident_report_payload(incident_id)
         if not payload or not payload.get("report") or not payload.get("record"):
             raise ValueError("Build an incident report before requesting an AI briefing")
         config = self.ai_configuration()
         result = generate_incident_briefing(payload["report"], model=config["model"], max_tokens=config["max_tokens"])
-        if result.get("status") == "ready":
-            output_dir = Path(payload["record"]["output_dir"])
-            write_json(output_dir / "ai_briefing.json", result)
-            create_archive(output_dir, incident_id)
+        with self.briefing_lock:
+            if self.store.get_incident(incident_id):
+                output_dir = Path(payload["record"]["output_dir"])
+                self._write_briefing_state(output_dir / "ai_briefing.json", result)
+                if result.get("status") == "ready":
+                    create_archive(output_dir, incident_id)
         return result
 
     @staticmethod
