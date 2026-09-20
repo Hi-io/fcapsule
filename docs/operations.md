@@ -22,12 +22,12 @@ The view shows:
 
 - an episode queue ordered by latest activity;
 - severity and lifecycle state, affected application, latest signal time, related-signal count, and report readiness;
-- an **Open investigation** action that expands the related signal timeline and selected report directly below the episode;
+- a clickable episode row that expands its investigation, with an alert selector when several reports are available;
 - archive and restore controls that keep an episode out of the active queue without deleting its signals or evidence;
 - incident impact, a verified investigation path, uncertainty, and concrete next checks;
 - FM sequence, PM changes, representative evidence, topology, and trace-source retention context;
 
-The report distinguishes its evidence by domain: FM alert records, PM trend lines with normal/peak values, and expandable anonymized log patterns. Compression, signal preservation, grounding, runtime, and model-evaluation details are available only inside the collapsed engineering diagnostics section. They support maintainers and evaluation work; they are not the first information presented to an on-call responder.
+Overview presents the automatic AI assessment and material observed impact. Evidence groups alerts, anonymized log examples, performance charts and configuration into disclosures. Timeline shows all alerts in the episode. AI evidence references open the relevant evidence directly. Charts include the captured time range; their values describe the incident window, not current workload health. Export provides the retained JSON report and capsule archive. Compression, preservation, grounding and runtime remain in collapsed engineering diagnostics.
 
 ## Targets View
 
@@ -35,7 +35,7 @@ Targets is the live-source control surface. It shows connection health for Prome
 
 For high-volume workloads, the OpenSearch capture budget is alert-focused. One quarter is reserved for the newest records immediately before the alert and three quarters for records from the alert onward. This preserves a small behavioral baseline without allowing routine traffic at the beginning of the incident window to displace the failure evidence.
 
-Application coverage is shown on Targets because it describes current source discovery rather than incident state. A discovered workload is mapped by cluster, namespace, workload, and pod. Workloads that disappear are omitted from current coverage while their historical incidents remain available.
+Application coverage is shown on Targets, grouped by cluster and namespace. Expand an application's pod count for pod-level details. Discovery updates without replacing unsaved connection settings. Workloads that disappear are omitted from current coverage while their historical incidents remain available.
 
 ## Settings View
 
@@ -45,9 +45,11 @@ Archiving is separate from retention: it hides an episode from the active queue 
 
 For Kubernetes installation and source prerequisites, use `docs/kubernetes_deployment.md`.
 
-### Optional AI Briefing
+### Automatic AI Assessment
 
-After a report is ready, **Generate AI briefing** requests a compact DeepSeek Pro second reading. The request contains only curated incident evidence. A response is displayed and retained only when it cites two to five evidence IDs already present in the report and acknowledges an uncertainty. This action does not block capture, capsule creation, or the report. The resulting `ai_briefing.json` is added to the archive without storing provider prompts or transcripts.
+When a provider key is configured, retaining a report automatically queues analysis with the selected model. Two background workers process these requests without blocking incident capture. Overview displays queued/running status and refreshes when analysis finishes. A missing key points to Settings; provider failures offer Retry analysis and leave the evidence available. Loading and failure states survive restarts. Interrupted jobs and missing assessments for unarchived episode reports are resumed at service startup; failed attempts are not automatically retried in a loop.
+
+The request includes retained alerts, performance changes, log patterns and available configuration. The model must explain the symptom, likely mechanism, first diagnostic check, expected finding, a conditional mitigation and remaining uncertainty. Two to five valid evidence references are required. Citation validation confirms references exist; it does not independently prove the explanation. No remediation is executed. Successful `ai_briefing.json` results are included in the capsule archive. Existing first-version briefs are regenerated once to adopt the more actionable contract.
 
 ## Ingest an External Incident
 
@@ -63,7 +65,7 @@ python3 -m fcapsule.cli ingest-case \
 
 The command validates the case and records metadata without copying raw telemetry into
 `.fcapsule`. In Operations, select **Build report** for that incident, wait for the
-background evidence job to finish, and then select **Open report**.
+background evidence job to finish, and then expand the episode.
 
 FCAPSule Lab is a separate Docker Compose project for local source-adapter validation
 and demonstrations. It is not served by FCAPSule or required in deployment.
