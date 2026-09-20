@@ -473,7 +473,7 @@ function evidencePanel(report) {
 }
 function timelinePanel(report) {
   const episode = allEpisodes().find(item=>item.episode_id === selectedEpisodeId);
-  const signals = (episode?.signals || []).map(signal=>'<li><time>' + formatDate(signal.started_at) + '</time><div><strong>' + safe(signal.summary || signal.scenario) + '</strong><small>' + safe(signal.severity) + ' · ' + safe(signal.status) + (signal.ended_at && signal.status === 'resolved' ? ' · resolved ' + formatDate(signal.ended_at) : '') + '</small></div></li>').join('');
+  const signals = (episode?.signals || []).map(signal=>'<li><time>' + formatDate(signal.started_at) + '</time><div><strong>' + safe(signal.summary || signal.scenario) + '</strong><small>' + safe(signal.severity) + ' · ' + safe(signal.status) + (signal.ended_at && signal.status === 'resolved' ? ' ' + formatDate(signal.ended_at) : '') + '</small></div></li>').join('');
   return '<section class="timeline-view"><h3>Episode alerts</h3><ol class="event-timeline">' + signals + '</ol>' +
     disclosure('retained-sequence', 'Captured evidence sequence', '<ol class="event-timeline">' + (report.timeline || []).map(item=>'<li><time>' + formatDate(item.timestamp) + '</time><div><strong>' + safe(item.title) + '</strong><small>' + safe(item.description) + '</small></div></li>').join('') + '</ol>') +
     (report.topology?.length ? '<p class="queue-note">Dependencies: ' + report.topology.map(item=>safe(item.from) + ' → ' + safe(item.to)).join(' · ') + '</p>' : '') + '</section>';
@@ -495,7 +495,6 @@ function reportPanel(payload) {
   if (!payload.report) return '<section class="report-empty"><h3>Evidence captured</h3><p>The report is ' + (lastState?.running ? 'being prepared.' : 'not built yet.') + '</p><button data-build-capsule="' + safe(payload.incident.incident_id) + '" ' + (lastState?.running ? 'disabled' : '') + '>Build report</button></section>';
   const report = payload.report;
   const incident = report.incident;
-  const capsule = payload.record;
   const relevant = (report.impact || []).filter(metricMatters);
   const others = (report.impact || []).filter(item=>!relevant.includes(item));
   const impact = relevant.length ? impactRows(relevant.slice(0,3)) : '<p class="queue-note">No material change was established in the captured impact metrics.</p>';

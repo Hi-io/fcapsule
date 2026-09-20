@@ -95,6 +95,8 @@ summary:focus-visible, button:focus-visible, a:focus-visible { outline:2px solid
 .export-menu > summary { display:flex; align-items:center; gap:8px; }
 .export-menu > summary::before { content:''; width:15px; height:15px; background:currentColor; mask:url('/assets/icons/download.svg') center / contain no-repeat; }
 .export-menu { position:relative; }
+.episode:has(.export-menu[open]) { position:relative; z-index:2; }
+.episode-body:has(.export-menu[open]) { overflow:visible; }
 .export-menu > .export-panel { position:absolute; top:calc(100% + 8px); right:0; z-index:10; display:block; width:310px; max-width:calc(100vw - 72px); padding:16px; background:var(--surface); border:1px solid var(--line); border-radius:6px; box-shadow:0 8px 24px #20252d1a; }
 .export-panel > a { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:8px; }
 .export-panel > a small { color:var(--muted); white-space:nowrap; }
@@ -103,6 +105,11 @@ summary:focus-visible, button:focus-visible, a:focus-visible { outline:2px solid
 .export-panel > details { border-top:1px solid var(--line); padding-top:8px; }
 .export-panel > details > summary { font-size:12px; }
 .export-panel code { display:block; overflow-wrap:anywhere; margin-top:8px; font-size:11px; }
+@media (max-width:700px) {
+  .report-navigation { position:relative; }
+  .export-menu { position:static; }
+  .export-menu > .export-panel { top:100%; left:16px; right:16px; width:auto; max-width:none; }
+}
 .overview-layout { padding:30px 26px; gap:30px; grid-template-columns:minmax(0,1.65fr) minmax(215px,.85fr); }
 .overview-layout aside { padding-left:24px; }
 .briefing .brief-lead { font-size:15px; line-height:1.75; }
