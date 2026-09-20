@@ -116,7 +116,7 @@ python3 -m fcapsule.cli compare-llms \
   --models deepseek-v4-flash deepseek-v4-pro
 ```
 
-Model comparison is an offline evaluation workflow, not an operator dashboard. The evidence report is built deterministically. With a key configured, a background investigator preserves mutable workload state and lets the model select up to four bounded checks before concluding. Tools can query resource history, literal log matches, peer/preceding-window comparisons, namespace-scoped database metrics and unselected retained log candidates. Valid evidence references and uncertainty are required, but citation checks do not prove the explanation. No remediation or application replication is executed. See [AI investigation techniques](docs/ai_investigation_techniques.md) for scope, budgets and limitations.
+Model comparison is an offline evaluation workflow, not an operator dashboard. The evidence report is built deterministically. With a key configured, a background investigator preserves mutable workload state and lets the model select up to four bounded checks before concluding. Tools can query resource history, literal log matches, peer/preceding-window comparisons, namespace-scoped database metrics, explicitly declared same-namespace dependencies and unselected retained log candidates. Valid evidence references and uncertainty are required, but citation checks do not prove the explanation. No remediation or application replication is executed. See [AI investigation techniques](docs/ai_investigation_techniques.md) for scope, budgets and limitations.
 
 Re-score stored responses after a rubric change without making provider calls:
 

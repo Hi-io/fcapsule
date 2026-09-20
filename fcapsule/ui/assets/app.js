@@ -457,7 +457,7 @@ function briefingPanel(payload) {
 
 function investigationRefs(run, ids = []) {
   const labels = new Map();
-  const checks = {workload_state:'Runtime snapshot',resource_history:'Resource history',search_logs:'Source logs',compare_baseline:'Baseline comparison',database_pressure:'Database metrics',review_omitted:'Omitted log patterns'};
+  const checks = {workload_state:'Runtime snapshot',resource_history:'Resource history',search_logs:'Source logs',compare_baseline:'Baseline comparison',database_pressure:'Database metrics',dependency_evidence:'Dependency evidence',review_omitted:'Omitted log patterns'};
   return ids.map(id => {
     const item = [...(run.checks || []), ...(run.context?.evidence || [])].find(item=>item.id === id);
     const label = checks[item?.tool] || (item?.domain === 'log_template' ? logLabel(item.title) : item?.title) || item?.question || id;

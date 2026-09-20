@@ -119,12 +119,35 @@ retained termination and may have been replaced by a later restart.
 | `search_logs` | OpenSearch log queries for a captured pod and incident window | Three literal terms of at most eighty characters; 300 lines; twelve returned patterns |
 | `compare_baseline` | Same workload's ready peer, otherwise preceding affected-pod window | Fixed resource expressions; explicit comparability caveat |
 | `database_pressure` | Three MySQL-exporter connection/limit series in the episode namespace | Four series per expression; labels retained; no inferred dependency from namespace proximity |
+| `dependency_evidence` | One selector-backed Service explicitly declared by the affected workload's endpoint environment configuration | Same namespace; one current pod; 200 log lines, fixed resource metrics and eight configuration records; no arbitrary endpoints |
 | `review_omitted` | Stored, unselected log templates | Twelve returned candidates; no network access |
 
 Namespace-level MySQL metrics are context, not automatic attribution to a database
 dependency. The tool does not connect directly to MySQL or issue SQL. Configuration
-is read only for pods within the captured workload scope; arbitrary cross-workload
-ConfigMap discovery is not implemented.
+is read for the captured workload and, when explicitly requested, one verified
+dependency pod. Arbitrary cross-workload ConfigMap discovery is not implemented.
+
+Policy 1.5 adds dependency investigation after a live schema-mismatch case exposed
+an upstream blind spot: the orders episode saw inventory failures but could only
+ask the operator to inspect inventory logs. `workload_state` now supplies endpoint
+candidates from explicit environment variables and referenced environment
+ConfigMaps. Only URL/HOST/ENDPOINT-shaped, non-sensitive keys are considered;
+Secret references are not read. Explicit environment overrides are respected.
+The model chooses a declared Service name, not a URL. Kubernetes Service selectors
+resolve it to a current pod in the same namespace; ExternalName and selectorless
+Services are refused. Arbitrary hostnames, IPs and cross-namespace DNS are excluded.
+
+A shared ConfigMap may declare endpoints that the application never uses. The
+model must corroborate the dependency with application evidence; discovery alone
+does not establish traffic or causality. A single current pod cannot represent all
+replicas or establish historical Service membership. Results carry that limitation,
+source failures, query window and source identity. Partial source failures retain
+the available evidence. No recursive dependency crawl or database SQL is executed.
+RBAC adds read-only Service access; the namespace and cluster checks still apply.
+
+Reduction also preserves `mysql_error_code` as a categorical diagnostic field, so
+SQL 1054 and 1205 do not collapse into one template. Relative changes from a quiet
+baseline must not be interpreted as absolute resource-utilization percentages.
 
 Live queries require an incident captured through the live integration, matching
 configured cluster identity and allowed namespace. Imported cases use retained

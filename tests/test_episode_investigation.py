@@ -208,6 +208,35 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertEqual(self.logs.collect_logs.call_args.kwargs, {"limit": 300, "terms": ["decoder"]})
         self.assertEqual(self.logs.collect_logs.call_args.args[:2], ("ns", "worker-1"))
 
+    def test_dependency_checks_require_a_declared_service(self):
+        self.kube.list_pods.return_value = [{"name": "worker-1", "workload": "worker"}]
+        self.kube.declared_services.return_value = [{"service": "inventory", "namespace": "ns"}]
+        with self.assertRaisesRegex(ValueError, "not declared"):
+            self.kit.execute("dependency_evidence", {"service": "unrelated"})
+        self.kube.service_pods.assert_not_called()
+        self.logs.collect_logs.assert_not_called()
+
+    def test_dependency_query_is_bounded_and_keeps_partial_evidence(self):
+        self.kube.list_pods.return_value = [{"name": "worker-1", "workload": "worker"}]
+        self.kube.declared_services.return_value = [{"service": "inventory", "namespace": "ns"}]
+        self.kube.service_pods.return_value = [{"name": "inventory-1"}, {"name": "inventory-2"}]
+        self.logs.collect_logs.return_value = [{"message": '{"mysql_error_code":1054}', "@timestamp": "now"}]
+        self.prom.collect_pod_metrics.side_effect = RuntimeError("password=private")
+        self.kube.configuration_snapshot.return_value = [{"kind": "PodSpec", "name": "inventory-1"}]
+        result = self.kit.execute("dependency_evidence", {"service": "inventory", "terms": ["1054"]})
+        self.assertEqual(result["matching_pods"], 2)
+        self.assertEqual(result["unavailable_sources"], ["Prometheus"])
+        self.assertEqual(result["patterns"][0]["fields"]["mysql_error_code"], "1054")
+        self.assertEqual(self.logs.collect_logs.call_args.args[:2], ("ns", "inventory-1"))
+        self.assertEqual(self.logs.collect_logs.call_args.kwargs, {"limit": 200, "terms": ["1054"]})
+        self.assertIn("not historical", result["limitation"])
+        self.assertNotIn("private", json.dumps(result))
+        self.assertEqual(self.kit.pods, ["worker-1"])
+
+    def test_sql_error_codes_do_not_collapse_into_one_pattern(self):
+        groups = log_patterns([{"message": '{"mysql_error_code":1054}'}, {"message": '{"mysql_error_code":1205}'}])
+        self.assertEqual(groups["matching_patterns"], 2)
+
     def test_dedup_keeps_member_provenance(self):
         other = copy.deepcopy(self.entries[0])
         other["incident"]["incident_id"] = "two"

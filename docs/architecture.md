@@ -80,4 +80,4 @@ FCAPSule pod
        `-- future trace backend (query on demand)
 ```
 
-The ClusterRole can get/list/watch pods, ConfigMaps, and namespaces. It cannot read Secrets. The default Service is a NodePort for local-cluster development. Distributed workers, PostgreSQL, object storage, ingress authentication, multi-cluster registration, and queue-backed scheduling are future scaling work; they do not change the normalized case or capsule contracts.
+The ClusterRole can get/list/watch pods, ConfigMaps, namespaces, and Services. It cannot read Secrets. The default Service is a NodePort for local-cluster development. Distributed workers, PostgreSQL, object storage, ingress authentication, multi-cluster registration, and queue-backed scheduling are future scaling work; they do not change the normalized case or capsule contracts.

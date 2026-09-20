@@ -106,7 +106,7 @@ The console reports only whether a key is configured. A replacement entered in S
 
 ## RBAC and Configuration Evidence
 
-The `fcapsule-observer` ClusterRole has read-only access to pods, ConfigMaps, and namespaces. It does not grant access to Secrets. For an affected pod, FCAPSule retains:
+The `fcapsule-observer` ClusterRole has read-only access to pods, ConfigMaps, namespaces, and Services. Services resolve explicitly declared, same-namespace dependencies for bounded agent checks; arbitrary endpoints are not followed. It does not grant access to Secrets. For an affected pod, FCAPSule retains:
 
 - pod and workload identity;
 - node, phase, readiness, containers, and image references;

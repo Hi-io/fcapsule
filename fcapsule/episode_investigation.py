@@ -98,6 +98,9 @@ Compare a peer or preceding window when it helps; different load/configuration i
 Inspect measurements instead of trusting an alert title. Time correlation does not prove causation.
 Current workload state may differ from incident-time state. Missing samples do not mean normal/zero usage;
 low sampled memory cannot exclude a brief OOM. Namespace proximity does not establish a dependency.
+When application logs identify a failing dependency, use dependency_evidence for a matching declared Service
+before delegating its log inspection to the operator, if the check budget allows. Shared config alone does not prove traffic.
+Relative baseline changes (e.g. +600%) are not utilization percentages; compare absolute use with configured limits.
 Respect tool metric_semantics. An OOMKilled flag with a contemporaneous restart is positive termination evidence;
 low sampled working set or missing cache logs alone do not weaken OOM. Separate observed termination from its unconfirmed mechanism.
 Describe a next manual observation without inventing metric names, paths or APIs. memory.max is a configured cgroup limit, not measured peak usage.
@@ -133,7 +136,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                       publish: Callable[[dict[str, Any]], None], max_checks: int = 4,
                       client: Any = None) -> dict[str, Any]:
     state = {"version": "1", "episode_id": context["episode_id"], "status": "running", "started_at": now(),
-             "policy_version": "episode-investigation-1.4", "max_completion_tokens_per_call": max_tokens,
+             "policy_version": "episode-investigation-1.5", "max_completion_tokens_per_call": max_tokens,
              "model": model, "context": context, "checks": [], "calls": [], "assessment": None,
              "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
              "source_retention": "unknown", "preservation": "Mutable workload state is checked early; no source expiry is assumed."}

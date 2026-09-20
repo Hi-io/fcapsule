@@ -96,6 +96,7 @@ class InvestigationTools:
         "search_logs": "Search incident-window logs on a known pod for up to 3 literal terms, preserving diagnostic variants. args: {pod?: known pod, terms: [text]}",
         "compare_baseline": "Compare a ready peer with the same workload, or the preceding equal time window. args: {}",
         "database_pressure": "Query namespace-scoped MySQL connection/max-connection series if exported. Not automatically attributed to this workload. args: {}",
+        "dependency_evidence": "Follow one declared same-namespace Service from workload_state.declared_dependencies; inspect one selected pod's incident logs, metrics and current config. Corroborate the dependency with application evidence. args: {service: declared name, terms?: up to 3 literal log terms}",
         "review_omitted": "Inspect candidate evidence excluded from the initial selection, including possible counterevidence. args: {terms?: [text]}",
     }
 
@@ -121,7 +122,8 @@ class InvestigationTools:
     def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if name not in self.CATALOG or not isinstance(arguments, dict):
             raise ValueError("Unknown investigation tool")
-        allowed = {"resource_history": {"pod"}, "search_logs": {"pod", "terms"}, "review_omitted": {"terms"}}.get(name, set())
+        allowed = {"resource_history": {"pod"}, "search_logs": {"pod", "terms"}, "review_omitted": {"terms"},
+                   "dependency_evidence": {"service", "terms"}}.get(name, set())
         if set(arguments) - allowed:
             raise ValueError("Unsupported tool arguments")
         pod = arguments.get("pod") or (self.pods[0] if self.pods else None)
@@ -148,9 +150,48 @@ class InvestigationTools:
         if name == "workload_state":
             pods = [item for item in kubernetes.list_pods({self.namespace})
                     if item["name"] in self.pods or item.get("workload") == self.workload][:4]
+            dependencies = []
+            for item in pods:
+                try:
+                    dependencies.extend(kubernetes.declared_services(item))
+                except (RuntimeError, OSError):
+                    pass  # Keep termination evidence if endpoint discovery is unavailable.
             return scrub({"source": "Kubernetes API", "scope": self.namespace, "observed_at": datetime.now(timezone.utc).isoformat(),
+                "declared_dependencies": dependencies[:12],
                 "observations": [record for item in pods for record in kubernetes.configuration_snapshot(item)][:16],
                 "limitation": "Current snapshot, not the incident-time state. Last termination can be overwritten by later restarts."})
+        if name == "dependency_evidence":
+            available = kubernetes.list_pods({self.namespace})
+            roots = [item for item in available if item["name"] in self.pods or item.get("workload") == self.workload][:4]
+            declarations = [reference for root in roots for reference in kubernetes.declared_services(root)]
+            matching = [item for item in declarations if item["service"] == arguments.get("service")]
+            if not matching:
+                raise ValueError("Service is not declared by this workload")
+            targets = kubernetes.service_pods(self.namespace, arguments["service"], available)
+            if not targets:
+                raise ValueError("No current pod matches the declared Service selector")
+            target = targets[0]
+            result = {"source": "Declared dependency: Kubernetes + OpenSearch + Prometheus", "pod": target["name"],
+                      "service": arguments["service"], "configured_via": matching, "matching_pods": len(targets),
+                      "window": [self.window_start.isoformat(), self.window_end.isoformat()], "observations": [],
+                      "unavailable_sources": [], "observed_at": datetime.now(timezone.utc).isoformat(),
+                      "limitation": "One pod sampled. Declaration is not proof of traffic or causation. Service membership and config are current, not historical. Missing samples do not prove health."}
+            for source, collect in (
+                ("OpenSearch", lambda: log_patterns(opensearch.collect_logs(self.namespace, target["name"], self.window_start, self.window_end, limit=200, terms=terms))),
+                ("Prometheus", lambda: {"observations": metric_summary(prometheus.collect_pod_metrics(self.namespace, target["name"], self.window_start, self.window_end))}),
+                ("Kubernetes", lambda: {"observations": kubernetes.configuration_snapshot(target)[:8]}),
+            ):
+                try:
+                    observation = collect()
+                    result["observations"].extend(observation.pop("observations", []))
+                    if observation.get("limitation"):
+                        result["limitation"] += " " + observation.pop("limitation")
+                    result.update(observation)
+                except (RuntimeError, OSError, ValueError):
+                    result["unavailable_sources"].append(source)
+            if len(result["unavailable_sources"]) == 3:
+                raise ValueError("Dependency sources unavailable")
+            return scrub(result)
         if not pod and name != "database_pressure":
             raise ValueError("No captured pod identity is available")
         if name == "resource_history":

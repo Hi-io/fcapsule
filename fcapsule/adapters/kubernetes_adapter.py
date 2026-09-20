@@ -10,6 +10,7 @@ import ssl
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from fcapsule.adapters.transport import JsonTransport
 
@@ -75,6 +76,60 @@ class KubernetesAdapter:
                 }
             )
         return pods
+
+    def declared_services(self, pod: dict[str, Any]) -> list[dict[str, str]]:
+        """Resolve explicit endpoint environment values, never Secrets or arbitrary URLs."""
+        namespace = pod["namespace"]
+        declarations = []
+        maps = {}
+
+        def config(name):
+            if name not in maps:
+                maps[name] = self.transport.request(f"/api/v1/namespaces/{namespace}/configmaps/{name}").get("data", {})
+            return maps[name]
+
+        for container in pod.get("raw_spec", {}).get("containers", [])[:8]:
+            values = {}
+            for source in container.get("envFrom", [])[:8]:
+                name = source.get("configMapRef", {}).get("name")
+                if name:
+                    for key, value in config(name).items():
+                        values[source.get("prefix", "") + key] = (value, "ConfigMap/" + name)
+            for variable in container.get("env", [])[:100]:
+                key = variable.get("name", "")
+                values.pop(key, None)  # Explicit Secret/downward references override envFrom too.
+                reference = variable.get("valueFrom", {}).get("configMapKeyRef", {})
+                if "value" in variable:
+                    values[key] = (variable["value"], "PodSpec/" + pod["name"])
+                elif reference.get("name"):
+                    values[key] = (config(reference["name"]).get(reference.get("key"), ""), "ConfigMap/" + reference["name"])
+            for key, (value, source) in values.items():
+                if SENSITIVE_KEY.search(key) or not re.search(r"(?:^|_)(?:URL|HOST|ENDPOINT)$", key, re.I):
+                    continue
+                try:
+                    endpoint = urlsplit(str(value) if "://" in str(value) else "//" + str(value))
+                    host = (endpoint.hostname or "").rstrip(".")
+                except ValueError:
+                    continue
+                parts = host.split(".")
+                if len(parts) > 1 and parts[1:] not in ([namespace], [namespace, "svc"], [namespace, "svc", "cluster", "local"]):
+                    continue
+                if not re.fullmatch(r"[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?", parts[0]):
+                    continue
+                declarations.append({"service": parts[0], "namespace": namespace, "configured_via": source + ":" + key})
+        return [dict(item) for item in sorted({tuple(sorted(row.items())) for row in declarations})][:12]
+
+    def service_pods(self, namespace: str, service: str, pods: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        for value in (namespace, service):
+            if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", value):
+                raise ValueError("Invalid Kubernetes identity")
+        spec = self.transport.request(f"/api/v1/namespaces/{namespace}/services/{service}").get("spec", {})
+        selector = spec.get("selector", {})
+        if spec.get("type") == "ExternalName" or not selector:
+            raise ValueError("Only selector-backed local Services are supported")
+        return sorted((pod for pod in pods if pod.get("namespace") == namespace
+                       and all(pod.get("labels", {}).get(key) == value for key, value in selector.items())),
+                      key=lambda pod: (not pod.get("ready", False), pod["name"]))
 
     def configuration_snapshot(self, pod: dict[str, Any]) -> list[dict[str, Any]]:
         namespace = str(pod["namespace"])

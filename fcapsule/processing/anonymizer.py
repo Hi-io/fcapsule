@@ -34,7 +34,7 @@ def template_for_message(value: str) -> str:
     return template + (" | diagnostic=" + json.dumps(diagnostic, sort_keys=True) if diagnostic else "")
 
 
-DIAGNOSTIC_KEYS = ("exit_code", "exitCode", "errno", "status_code", "sqlstate", "reason",
+DIAGNOSTIC_KEYS = ("exit_code", "exitCode", "errno", "status_code", "sqlstate", "mysql_error_code", "reason",
                    "disposition", "payload_encoding", "max_connections", "memory_limit")
 
 
