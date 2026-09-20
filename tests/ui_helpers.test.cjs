@@ -60,7 +60,7 @@ test('closed episodes do not duplicate the selected report controls', () => {
   const table = helper('episodeTable', 'episodeContext', {
     lastState: { overview: { applications: [] } }, selectedEpisodeId: 'second',
     selectedReport: {}, reportLoading: false, reportError: '',
-    safe: value => String(value ?? ''), status: value => value, formatDate: value => value,
+    safe: value => String(value ?? ''), status: value => value, formatDate: value => value, relativeTime: value => value,
     episodeContext: () => '<select id="signal-report"></select>',
     reportPanel: () => '<div role="tablist"></div>',
   });

@@ -18,6 +18,32 @@ body { font-family:Inter,"Segoe UI",system-ui,sans-serif; -webkit-font-smoothing
 [data-icon="bell-ring"] { --icon:url('/assets/icons/bell-ring.svg'); }
 [data-icon="file-code-2"] { --icon:url('/assets/icons/file-code-2.svg'); }
 [data-icon="scan-line"] { --icon:url('/assets/icons/scan-line.svg'); }
+[data-icon="refresh-cw"] { --icon:url('/assets/icons/refresh-cw.svg'); }
+
+.agent-steps { list-style:none; margin:18px 0; padding:0; }
+.agent-step { display:grid; grid-template-columns:18px minmax(0,1fr); gap:10px; padding:0 0 18px; }
+.agent-step strong { font-size:12px; line-height:1.6; font-weight:500; display:block; }
+.agent-step small, .snapshot-list small { display:block; color:var(--muted); font-size:11px; margin-top:4px; }
+.step-marker { color:#277762; padding-top:3px; }
+.agent-step.unavailable .step-marker { color:#986617; }
+.agent-progress .usage-note { margin:10px 0 18px; font-size:12px; }
+.hypothesis-row { padding:16px 0; border-bottom:1px solid var(--line); }
+.hypothesis-row:last-child { border-bottom:0; }
+.hypothesis-row h4 { margin:0; }
+.hypothesis-state { font-size:11px; color:#596273; white-space:nowrap; }
+.hypothesis-state.supported { color:#277762; }
+.hypothesis-state.unresolved { color:#986617; }
+.citations .evidence-link { max-width:100%; white-space:normal; overflow-wrap:anywhere; text-align:left; }
+.capture-heading { padding:20px 26px 0; }
+#investigation-panel > .disclosure { margin:22px 26px 0; }
+.check-metrics { width:100%; font-size:12px; border-collapse:collapse; }
+.check-metrics th, .check-metrics td { text-align:left; padding:10px; border-bottom:1px solid var(--line); }
+.check-metrics th small { display:block; font-weight:400; color:var(--muted); }
+.table-scroll { max-width:100%; overflow-x:auto; }
+.snapshot-list { padding:0; list-style:none; }
+.snapshot-list li { padding:12px 0; border-bottom:1px solid var(--line); }
+.raw-observation { margin-top:14px; }
+.raw-observation summary { cursor:pointer; font-size:12px; color:var(--muted); }
 .product-bar { position:fixed; inset:0 auto 0 0; width:204px; height:100dvh; padding:30px 16px 22px; display:flex; flex-direction:column; align-items:stretch; gap:42px; background:#f1f3f6; color:var(--ink); border:0; border-right:1px solid var(--line); z-index:20; }
 .wordmark { display:flex; align-items:center; gap:9px; color:var(--ink); font-size:21px; padding:0 4px; font-weight:700; }
 .wordmark .brand-name { color:var(--ink); }

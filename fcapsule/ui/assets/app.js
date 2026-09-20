@@ -120,6 +120,16 @@ function renderConsole(state) {
   }));
   document.querySelectorAll('[data-build-capsule]').forEach(button => button.addEventListener('click', () => buildCapsule(button.dataset.buildCapsule)));
   document.querySelectorAll('[data-ai-briefing]').forEach(button => button.addEventListener('click', () => generateAiBriefing(button.dataset.aiBriefing)));
+  document.querySelectorAll('[data-investigate]').forEach(button => button.addEventListener('click', () => startInvestigation(button.dataset.investigate)));
+  document.querySelectorAll('[data-investigation-ref]').forEach(button => button.addEventListener('click', () => {
+    reportTab = 'evidence';
+    const id = button.dataset.investigationRef;
+    openDisclosures.add('agent-evidence'); openDisclosures.add('agent-' + id);
+    renderConsole(lastState);
+    const target = document.getElementById('disclosure-agent-' + id);
+    target?.scrollIntoView({block:'center', behavior:matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'});
+    target?.focus({preventScroll:true});
+  }));
   document.querySelectorAll('[data-archive]').forEach(button => button.addEventListener('click', () => changeEpisodeState(button.dataset.archive, 'archive')));
   document.querySelectorAll('[data-restore]').forEach(button => button.addEventListener('click', () => changeEpisodeState(button.dataset.restore, 'restore')));
   document.querySelectorAll('[data-delete]').forEach(button => button.addEventListener('click', () => deleteEpisode(button.dataset.delete)));
@@ -183,10 +193,10 @@ function renderSettings(state) {
       <div class="field"><label for="retention-days">Incident retention (days)</label><input id="retention-days" type="number" min="1" max="3650" value="${safe(state.settings.incident_retention_days)}"><small>Active and archived incidents older than this are permanently removed with their managed reports and capsules. Default: 30 days.</small></div>
       ${window.generalSettingsNotice ? `<p class="notice">${safe(window.generalSettingsNotice)}</p>` : ''}
       <div class="actions"><button id="save-general-settings">Save retention</button></div>
-    </div></section><section class="sheet"><div class="sheet-head"><h2>${icon('activity')}AI briefing</h2><span class="queue-note">${safe(keyState)}</span></div><div class="sheet-body">
+    </div></section><section class="sheet"><div class="sheet-head"><h2>${icon('activity')}Episode investigation</h2><span class="queue-note">${safe(keyState)}</span></div><div class="sheet-body">
       <div class="field"><label for="ai-provider">Provider</label><input id="ai-provider" value="DeepSeek-compatible" disabled></div>
       <div class="field"><label for="ai-model">Model ID</label><input id="ai-model" list="ai-model-options" value="${safe(ai.model)}"><datalist id="ai-model-options">${options}</datalist><small>Configured models are available here; a compatible model ID may also be entered.</small></div>
-      <div class="field"><label for="ai-max-tokens">Maximum completion tokens</label><input id="ai-max-tokens" type="number" min="256" max="16000" value="${safe(ai.max_tokens)}"></div>
+      <div class="field"><label for="ai-max-tokens">Maximum completion tokens per call</label><input id="ai-max-tokens" type="number" min="256" max="16000" value="${safe(ai.max_tokens)}"></div>
       <div class="field"><label for="ai-key">API key</label><input id="ai-key" type="password" autocomplete="new-password" placeholder="${ai.api_key_configured ? 'Leave blank to keep the saved key' : 'Paste a key to enable briefings'}"><small>Stored locally. New reports are analysed automatically when a key is configured.</small></div>
       ${window.settingsNotice ? `<p class="notice">${safe(window.settingsNotice)}</p>` : ''}
       <div class="actions"><button id="save-ai-settings">Save AI settings</button></div>
@@ -259,8 +269,8 @@ function episodeTable(items, capsules, archived = false) {
       <span class="episode-summary">
         <span class="episode-state">${status(item.severity)}${status(item.status)}</span>
         <span class="episode-identity"><strong>${safe(item.title)}</strong><small>${safe(application?.name || item.app_id)} · ${safe(application?.namespace || '')}</small></span>
-        <span class="episode-count">${item.signal_count} alert${item.signal_count === 1 ? '' : 's'}<small>${item.report_count} report${item.report_count === 1 ? '' : 's'}</small></span>
-        <time class="episode-time" datetime="${safe(item.started_at)}">${formatDate(item.started_at)}</time>
+        <span class="episode-count">${item.signal_count} alert${item.signal_count === 1 ? '' : 's'}<small>${['queued','running'].includes(item.investigation?.status) ? 'Investigating' : item.investigation?.status === 'ready' ? 'Assessment ready' : item.report_count + ' reports'}</small></span>
+        <time class="episode-time" datetime="${safe(item.started_at)}" title="${safe(formatDate(item.started_at))}">${relativeTime(item.started_at)}</time>
       </span></summary>
       <div class="episode-body" id="body-${safe(item.episode_id)}">
         ${isOpen ? `
@@ -274,12 +284,29 @@ function episodeTable(items, capsules, archived = false) {
 
 function episodeContext(episode) {
   const id = reportId() || episode.primary_incident_id;
+  if (reportTab === 'overview') return '<span class="queue-note">Episode investigation · ' + episode.signal_count + ' captured alert' + (episode.signal_count === 1 ? '' : 's') + '</span>';
   if (episode.signals.length === 1) return '<span class="queue-note">Investigation</span>';
   return `<div class="signal-selector"><label for="signal-report">Alert report</label><select id="signal-report" data-signal-select>${episode.signals.map((signal, index) => `<option value="${safe(signal.incident_id)}" ${id === signal.incident_id ? 'selected' : ''}>${index + 1}. ${safe(signal.summary || signal.scenario)} · ${shortTime(signal.started_at)}</option>`).join('')}</select></div>`;
 }
 
 function formatDate(value) {
   return value ? new Date(value).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : '--';
+}
+
+function relativeTime(value) {
+  const seconds = (new Date(value).getTime() - Date.now()) / 1000;
+  if (!Number.isFinite(seconds)) return '--';
+  const [unit, divisor] = Math.abs(seconds) >= 86400 ? ['day',86400] : Math.abs(seconds) >= 3600 ? ['hour',3600] : ['minute',60];
+  return new Intl.RelativeTimeFormat('en', {numeric:'auto'}).format(Math.round(seconds / divisor), unit);
+}
+
+async function startInvestigation(id) {
+  try {
+    const response = await fetch('/api/episodes/' + encodeURIComponent(id) + '/investigation', {method:'POST'});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Unable to start investigation');
+    if (selectedEpisodeId === id && selectedReport) { selectedReport.investigation = result; renderPreservingFocus(() => renderConsole(lastState)); }
+  } catch (error) { alert(error.message); }
 }
 
 async function openEpisodeReport(episodeId, incidentId, keepOpen = false) {
@@ -411,25 +438,75 @@ function logLabel(pattern) {
   }
 }
 function briefingPanel(payload) {
-  const ai = payload.ai_briefing;
-  const report = payload.report;
-  if (ai?.status === 'ready') {
-    const brief = ai.briefing;
-    return '<section class="briefing"><div class="section-heading"><h3>AI assessment</h3><span class="queue-note">' + safe(ai.model) + '</span></div>' +
-      '<p class="brief-lead">' + safe(brief.operator_brief) + '</p>' +
-      (brief.likely_mechanism ? '<h4>Likely explanation</h4><p>' + safe(brief.likely_mechanism) + '</p>' : '') +
-      '<div class="next-check"><h4>Check first</h4><p><strong>' + safe(brief.first_action) + '</strong></p><p>' + safe(brief.why_this_first) + '</p>' +
-      (brief.expected_finding ? '<p><span class="text-label">What to look for</span>' + safe(brief.expected_finding) + '</p>' : '') + '</div>' +
-      (brief.mitigation ? '<h4>Possible mitigation</h4><p>' + safe(brief.mitigation) + '</p>' : '') +
-      '<p class="uncertainty"><strong>Still unconfirmed:</strong> ' + safe(brief.uncertainty) + '</p>' +
-      '<div class="citations"><span>Evidence</span>' + evidenceReferences(report, brief.evidence_ids || []) + '</div></section>';
-  }
-  const loading = !ai || ['queued','running'].includes(ai.status);
-  return '<section class="briefing"><h3>AI assessment</h3><div class="analysis-state" role="status" aria-live="polite">' +
-    (loading ? '<span class="spinner"></span><div><strong>' + (ai?.status === 'queued' ? 'Analysis queued' : 'Analysing retained evidence') + '</strong><p>The assessment will appear here. Evidence is available now.</p></div>' :
-      '<div><strong>' + (ai.status === 'not_configured' ? 'Automatic analysis is not configured' : 'Analysis unavailable') + '</strong><p>' + safe(ai.message) + '</p>' +
-      (ai.status === 'not_configured' ? '<a href="/settings">Open Settings</a>' : '<button class="secondary" data-ai-briefing="' + safe(report.incident.incident_id) + '">Retry analysis</button>') + '</div>') +
-    '</div></section>';
+  const run = payload.investigation || {status:'not_started', episode_id:selectedEpisodeId};
+  const assessment = run.assessment;
+  const loading = ['queued','running','waiting'].includes(run.status);
+  const header = '<div class="section-heading"><h3>Episode assessment</h3><span class="queue-note">' + safe(run.model || '') + '</span></div>';
+  if (!assessment) return '<section class="briefing">' + header + '<div class="analysis-state" role="status" aria-live="polite">' +
+    (loading ? '<span class="spinner"></span>' : '') + '<div><strong>' + (loading ? 'Investigating' : run.status === 'not_configured' ? 'Provider key required' : 'No validated conclusion yet') + '</strong><p>' + safe(run.message || 'Retained evidence is available below.') + '</p>' +
+    (!loading ? run.status === 'not_configured' ? '<a href="/settings">Open Settings</a>' : '<button class="secondary" data-investigate="' + safe(run.episode_id) + '">Investigate episode</button>' : '') + '</div></div></section>';
+  const hypotheses = (assessment.hypotheses || []).map(item => '<article class="hypothesis-row"><div class="section-heading"><h4>' + safe(item.explanation) + '</h4><span class="hypothesis-state ' + safe(item.status) + '">' + safe(item.status) + '</span></div><p>' + safe(item.reason) + '</p><div class="citations">' + investigationRefs(run, item.evidence_ids) + '</div></article>').join('');
+  const name = id => run.context?.alerts?.find(item=>item.incident_id === id)?.title || id;
+  const connections = (assessment.connections || []).map(item=>'<article class="hypothesis-row"><h4>' + safe(name(item.from)) + ' / ' + safe(name(item.to)) + '</h4><small>' + safe(item.relationship.replaceAll('_',' ')) + '</small><p>' + safe(item.reason) + '</p><div class="citations">' + investigationRefs(run,item.evidence_ids) + '</div></article>').join('');
+  return '<section class="briefing">' + header + '<p class="brief-lead">' + safe(assessment.summary) + '</p><h4>Likely explanation</h4><p>' + safe(assessment.likely_mechanism) + '</p>' +
+    '<div class="next-check"><h4>Next action</h4><p><strong>' + safe(assessment.next_action) + '</strong></p><p><span class="text-label">What would confirm it</span>' + safe(assessment.expected_finding) + '</p></div>' +
+    '<p class="uncertainty"><strong>Still unconfirmed:</strong> ' + safe(assessment.uncertainty) + '</p><div class="citations">' + investigationRefs(run,assessment.evidence_ids) + '</div>' +
+    disclosure('competing-explanations','Explanations considered',hypotheses,assessment.hypotheses?.length) +
+    (connections ? disclosure('alert-connections','How the alerts relate',connections,assessment.connections.length) : '') + '</section>';
+}
+
+function investigationRefs(run, ids = []) {
+  return ids.map(id => {
+    const item = [...(run.checks || []), ...(run.context?.evidence || [])].find(item=>item.id === id);
+    const label = item?.question || (item?.domain === 'log_template' ? logLabel(item.title) : item?.title) || id;
+    return '<button class="evidence-link" data-investigation-ref="' + safe(id) + '" title="' + safe(label) + '">' + safe(label) + '</button>';
+  }).join('');
+}
+
+function investigationProgress(run = {}) {
+  const checks = run.checks || [];
+  const usage = run.usage;
+  const tokenText = usage ? (usage.complete ? '' : 'At least ') + Number(usage.total_tokens || 0).toLocaleString('en') + ' tokens' : 'Usage pending';
+  const rows = checks.map(item => '<li class="agent-step ' + safe(item.status) + '"><span class="step-marker" aria-hidden="true">' + (item.status === 'running' ? '<span class="spinner"></span>' : icon(item.status === 'completed' ? 'activity' : 'bell-ring')) + '</span><div><strong>' + safe(item.question) + '</strong><small>' + safe(item.status) + (item.finished_at ? ' · ' + formatDate(item.finished_at) : '') + '</small></div></li>').join('');
+  const details = '<dl class="coverage-details"><div><dt>Input tokens</dt><dd>' + Number(usage?.prompt_tokens || 0).toLocaleString('en') + '</dd></div><div><dt>Output tokens</dt><dd>' + Number(usage?.completion_tokens || 0).toLocaleString('en') + '</dd></div><div><dt>Model calls</dt><dd>' + (run.calls?.length || 0) + '</dd></div><div><dt>Earlier attempts</dt><dd>' + Number(run.lifetime_usage?.total_tokens || 0).toLocaleString('en') + ' tokens</dd></div></dl><p class="queue-note">' + (usage?.complete ? 'Provider-reported usage for this attempt.' : 'Some usage is unavailable; displayed counts are not a full billing total.') + '</p>';
+  return '<aside class="agent-progress"><h3>Investigation activity</h3>' + (rows ? '<ol class="agent-steps">' + rows + '</ol>' : '<p class="queue-note">No checks recorded yet.</p>') +
+    '<div class="usage-note">' + disclosure('token-usage',tokenText,details) + '</div>' +
+    (['ready','incomplete'].includes(run.status) ? '<button class="secondary" data-investigate="' + safe(run.episode_id) + '">' + icon('refresh-cw') + ' Reassess</button>' : '') + '</aside>';
+}
+
+function investigationResult(result = {}, checkId = '') {
+  const numeric = value => Number(value).toLocaleString('en',{maximumSignificantDigits:5});
+  const series = result.observations?.filter(item=>item.metric) || result.affected || [];
+  let body = '<p class="queue-note">' + safe(result.source || '') + (result.pod ? ' · ' + safe(result.pod) : '') + '</p>';
+  if (series.length) body += '<div class="table-scroll"><table class="check-metrics"><thead><tr><th>Metric</th><th>Min</th><th>Max</th><th>Median</th>' + (result.reference ? '<th>Reference median</th>' : '') + '</tr></thead><tbody>' + series.map(item=>{
+    const reference = result.reference?.find(other=>other.metric === item.metric);
+    return '<tr><th scope="row">' + safe(item.metric) + '<small>' + formatDate(item.start) + ' to ' + formatDate(item.end) + '</small></th><td>' + numeric(item.min) + '</td><td>' + numeric(item.max) + '</td><td>' + numeric(item.median) + '</td>' + (result.reference ? '<td>' + (reference ? numeric(reference.median) : 'No samples') + '</td>' : '') + '</tr>';
+  }).join('') + '</tbody></table></div>';
+  if (result.reference) body += '<p class="queue-note">Reference: ' + safe(result.method?.replaceAll('_',' ')) + ' · ' + safe(result.reference_pod) + '</p>';
+  const patterns = result.patterns || result.observations?.filter(item=>item.pattern) || [];
+  if (patterns.length) body += patterns.map((item,index)=>disclosure('check-pattern-' + checkId + '-' + index, logLabel(item.pattern),'<pre class="log-lines">' + safe((item.examples || []).map(line=>typeof line === 'string' ? line : line.timestamp + ' ' + line.message).join('\n')) + '</pre>',item.count)).join('');
+  const configs = result.observations?.filter(item=>item.kind) || [];
+  if (configs.length) body += '<ul class="snapshot-list">' + configs.map(item=>'<li><strong>' + safe(item.kind) + ' · ' + safe(item.name) + '</strong><small>' + safe(item.phase || (item.keys || []).join(', ')) + '</small>' +
+    (item.resources || []).map(container=>'<p>' + safe(container.name) + ' limits: <code>' + safe(JSON.stringify(container.limits)) + '</code></p>').join('') +
+    (item.container_states || []).map(container=>'<p>' + safe(container.name) + ': ' + safe(container.restart_count) + ' restarts' + (container.last_state?.terminated ? ' · ' + safe(container.last_state.terminated.reason) + ' · exit ' + safe(container.last_state.terminated.exitCode) + ' · ' + formatDate(container.last_state.terminated.finishedAt) : '') + '</p>').join('') + '</li>').join('') + '</ul>';
+  if (!series.length && !patterns.length && !configs.length) body += '<p>No observations returned.</p>';
+  return body + '<p class="uncertainty">' + safe(result.limitation || result.comparability || '') + '</p><details class="raw-observation"><summary>Observation JSON</summary><pre class="log-lines">' + safe(JSON.stringify(result,null,2)) + '</pre></details>';
+}
+
+function investigationEvidence(run = {}) {
+  const cited = new Set([...(run.assessment?.evidence_ids || []), ...(run.assessment?.hypotheses || []).flatMap(item=>item.evidence_ids), ...(run.assessment?.connections || []).flatMap(item=>item.evidence_ids)]);
+  const checks = (run.checks || []).map(item=>disclosure('agent-' + item.id,item.question,'<p>' + safe(item.distinguishes) + '</p><p class="queue-note">' + formatDate(item.started_at) + ' · ' + safe(item.status) + '</p>' + investigationResult(item.result,item.id),item.id)).join('');
+  const evidence = (run.context?.evidence || []).filter(item=>cited.has(item.id)).map(item=>disclosure('agent-' + item.id, item.domain === 'log_template' ? logLabel(item.title) : item.title,
+    '<p>' + safe(item.summary) + '</p><p class="queue-note">' + safe(item.domain) + ' · ' + formatDate(item.time_range?.start) + '</p>' +
+    (item.examples?.length ? '<pre class="log-lines">' + safe(item.examples.join('\n')) + '</pre>' : '') +
+    (item.configuration || item.alert ? '<pre class="log-lines">' + safe(JSON.stringify(item.configuration || item.alert,null,2)) + '</pre>' : '') +
+    '<small>Captured in ' + (item.provenance || []).map(ref=>safe(ref.incident_id)).join(', ') + '</small>')).join('');
+  return disclosure('agent-evidence','Investigation evidence',checks + evidence || '<p>No investigation evidence yet.</p>', (run.checks?.length || 0) + cited.size);
+}
+
+function investigationTimeline(run = {}) {
+  const rows = (run.checks || []).map(item=>'<li><time>' + formatDate(item.started_at) + '</time><div><strong>' + safe(item.question) + '</strong><small>' + safe(item.status) + ' · ' + safe(item.tool) + '</small><div class="citations">' + investigationRefs(run,[item.id]) + '</div></div></li>').join('');
+  return '<section class="timeline-view"><h3>Agent activity</h3><ol class="event-timeline">' + rows + (run.finished_at ? '<li><time>' + formatDate(run.finished_at) + '</time><div><strong>' + (run.status === 'ready' ? 'Assessment saved' : 'Stopped without a validated conclusion') + '</strong></div></li>' : '') + '</ol></section>';
 }
 function metricMatters(item) {
   if (item.label === 'Pod readiness') return item.value !== 'Ready';
@@ -487,6 +564,7 @@ function capsuleExport(payload) {
   return '<details class="export-menu" data-disclosure="exports"><summary id="export-summary">Export</summary><div class="export-panel">' +
     (storage.archive_bytes !== null ? link('fcapsule_' + payload.report.incident.incident_id + '.zip', 'Capsule archive', storage.archive_bytes) : '<p>Archive unavailable</p>') +
     link('incident_report.json', 'Report JSON', storage.report_bytes) +
+    (['ready','incomplete'].includes(payload.investigation?.status) ? link('episode_investigation.json','Investigation JSON',null) : '') +
     '<p>Retained evidence and analysis. Not a full telemetry backup.</p>' +
     (storage.expires_at ? '<p><strong>Eligible for cleanup ' + formatDate(storage.expires_at) + '</strong>' + storage.retention_days + '-day retention, including archived incidents.</p>' : '') +
     (storage.directory ? '<details><summary>Storage location</summary><code>' + safe(storage.directory) + '</code></details>' : '') + '</div></details>';
@@ -495,23 +573,16 @@ function reportPanel(payload) {
   if (!payload.report) return '<section class="report-empty"><h3>Evidence captured</h3><p>The report is ' + (lastState?.running ? 'being prepared.' : 'not built yet.') + '</p><button data-build-capsule="' + safe(payload.incident.incident_id) + '" ' + (lastState?.running ? 'disabled' : '') + '>Build report</button></section>';
   const report = payload.report;
   const incident = report.incident;
-  const relevant = (report.impact || []).filter(metricMatters);
-  const others = (report.impact || []).filter(item=>!relevant.includes(item));
-  const impact = relevant.length ? impactRows(relevant.slice(0,3)) : '<p class="queue-note">No material change was established in the captured impact metrics.</p>';
-  const secondaryImpact = [...relevant.slice(3), ...others];
   const exports = capsuleExport(payload);
-  const ai = payload.ai_briefing;
+  const ai = payload.investigation;
   const fallback = ai?.status !== 'ready' ? '<section class="observed-summary"><h3>Observed</h3><p>' + safe(report.fault_alerts?.[0]?.description || incident.summary) + '</p></section>' : '';
   const d = report.engineering_diagnostics;
   const diagnostics = disclosure('diagnostics', 'Engineering diagnostics', '<dl class="coverage-details"><div><dt>Selected evidence</dt><dd>' + d.selected_evidence + '</dd></div><div><dt>Log reduction</dt><dd>' + pct(d.log_compression_ratio) + '</dd></div><div><dt>Signal preservation</dt><dd>' + pct(d.important_signal_preservation) + '</dd></div><div><dt>Grounding</dt><dd>' + pct(d.hypothesis_grounding_score) + '</dd></div><div><dt>Runtime</dt><dd>' + Number(d.runtime_seconds || 0).toFixed(2) + 's</dd></div></dl><p class="queue-note">Rule-based hypothesis: ' + safe(report.primary_hypothesis.statement) + '</p>');
   const tabs = ['overview','evidence','timeline'];
   let content;
-  if (reportTab === 'evidence') content = evidencePanel(report);
-  else if (reportTab === 'timeline') content = timelinePanel(report);
-  else content = '<div class="overview-layout"><div>' + briefingPanel(payload) + fallback + '</div><aside><h3>Observed impact</h3>' + impact +
-    (secondaryImpact.length ? disclosure('other-impact','Other captured metrics',impactRows(secondaryImpact),secondaryImpact.length) : '') +
-    (report.retention.trace_available && report.retention.source_retention_seconds ? '<p class="retention urgent">' + safe(report.retention.message) + '</p>' : '') +
-    '<p class="queue-note impact-scope">Values describe the captured window, not current workload health.</p></aside></div>';
+  if (reportTab === 'evidence') content = investigationEvidence(ai || {}) + '<h3 class="capture-heading">Selected alert capture</h3>' + evidencePanel(report);
+  else if (reportTab === 'timeline') content = timelinePanel(report) + investigationTimeline(ai || {});
+  else content = '<div class="overview-layout"><div>' + briefingPanel(payload) + fallback + '</div>' + investigationProgress(ai || {}) + '</div>';
   return '<section id="incident-report"><div class="report-navigation"><div role="tablist" aria-label="Investigation views">' +
     tabs.map(name=>'<button id="tab-' + name + '" role="tab" data-report-tab="' + name + '" aria-selected="' + (name === reportTab) + '" aria-controls="investigation-panel" tabindex="' + (name === reportTab ? 0 : -1) + '">' + name[0].toUpperCase() + name.slice(1) + '</button>').join('') +
     '</div>' + exports + '</div><div id="investigation-panel" role="tabpanel" aria-labelledby="tab-' + reportTab + '" tabindex="0">' + content + '</div><div class="report-technical">' + diagnostics + '</div></section>';
