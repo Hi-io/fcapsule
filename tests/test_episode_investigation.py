@@ -102,6 +102,29 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(len(client.requests), 2)
         self.assertFalse(any(item["status"] == "ready" and item["assessment"] == assessment() for item in self.progress))
 
+    def test_reserved_review_can_repair_excess_known_citations_without_more_calls(self):
+        refs = [f"E{index}" for index in range(10)]
+        self.context["evidence"] = [{"id": ref} for ref in refs]
+        draft = assessment()
+        draft["evidence_ids"] = refs
+        corrected = copy.deepcopy(draft)
+        corrected["evidence_ids"] = refs[:8]
+        state, client = self.run_case([{"action": "finish", "assessment": draft},
+                                      {"action": "finish", "assessment": corrected}], max_checks=0)
+        self.assertEqual(state["status"], "ready")
+        self.assertTrue(state["review"]["schema_repair"])
+        self.assertEqual(len(client.requests), 2)
+        self.assertEqual(len(state["draft_assessment"]["evidence_ids"]), 10)
+        self.assertEqual(len(state["assessment"]["evidence_ids"]), 8)
+        self.assertFalse(any(item["status"] == "ready" and item["assessment"] == draft for item in self.progress))
+
+    def test_overflow_with_unknown_citations_is_not_silently_repaired(self):
+        draft = assessment()
+        draft["evidence_ids"] = ["Q001"] * 8 + ["invented"]
+        state, client = self.run_case([{"action": "finish", "assessment": draft}], max_checks=0)
+        self.assertEqual(state["status"], "incomplete")
+        self.assertEqual(len(client.requests), 1)
+
     def test_review_accepts_misplaced_arrays_and_records_original_layout(self):
         misplaced = {"action": "finish", "assessment": assessment()}
         misplaced["hypotheses"] = misplaced["assessment"].pop("hypotheses")

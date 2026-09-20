@@ -100,6 +100,10 @@ Episode membership is only temporal grouping. Distinguish separate failure phase
 alert intervals. Do not claim an earlier error caused a later one without a connecting mechanism in the evidence.
 Current workload state may differ from incident-time state. Missing samples do not mean normal/zero usage;
 low sampled memory cannot exclude a brief OOM. Namespace proximity does not establish a dependency.
+An alert's startsAt is a detection timestamp, not necessarily the underlying failure time. Prefer a recorded
+container finishedAt for termination order; alert delays must not reverse the causal sequence.
+Compare quantities in consistent units. A logged buffer is only part of process/cgroup memory. Do not claim
+that a measured component exceeded a limit when its value is lower; OOM can be confirmed without a sampled peak.
 When application logs identify a failing dependency, use dependency_evidence for a matching declared Service
 before delegating its log inspection to the operator, if the check budget allows. Shared config alone does not prove traffic.
 Relative baseline changes (e.g. +600%) are not utilization percentages; compare absolute use with configured limits.
@@ -144,7 +148,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                       publish: Callable[[dict[str, Any]], None], max_checks: int = 4,
                       client: Any = None) -> dict[str, Any]:
     state = {"version": "1", "episode_id": context["episode_id"], "status": "running", "started_at": now(),
-             "policy_version": "episode-investigation-1.5", "max_completion_tokens_per_call": max_tokens,
+             "policy_version": "episode-investigation-1.6", "max_completion_tokens_per_call": max_tokens,
              "model": model, "context": context, "checks": [], "calls": [], "assessment": None,
              "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
              "source_retention": "unknown", "preservation": "Mutable workload state is checked early; no source expiry is assumed."}
@@ -152,6 +156,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
     evidence_ids = {item["id"] for item in context["evidence"]}
     seen = set()
     validation_feedback = None
+    review_candidate = None
 
     def request_model(payload, effort, phase):
         if time.monotonic() - started > 420:
@@ -209,6 +214,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             state["message"] = "Assessing episode evidence" if turn == 0 else "Reviewing check results"
             publish(state)
             response, call = request_model(payload, "none" if validation_feedback else "low", "investigation")
+            candidate = None
             try:
                 decision = parse_object(str(response.get("content", "")))
                 call["decision"] = scrub(decision)
@@ -217,10 +223,19 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                         raise ValueError("Run one discriminating check beyond automatic preservation before concluding")
                     if context.get("live_capture") and any(item.get("domain") == "log_template" for item in context["evidence"]) and not any(item["tool"] == "search_logs" for item in state["checks"]):
                         raise ValueError("Search source logs for a discriminating observation before concluding this live episode")
-                    state["assessment"] = validate_assessment(assessment_payload(decision, call), evidence_ids,
+                    candidate = assessment_payload(decision, call)
+                    state["assessment"] = validate_assessment(candidate, evidence_ids,
                                                               {item["incident_id"] for item in context["alerts"]})
             except ValueError as error:
                 call["validation_error"] = str(error)[:240]
+                refs = candidate.get("evidence_ids") if isinstance(candidate, dict) else None
+                if (turn == max_checks and str(error).startswith("Each evidence_ids array must contain")
+                        and isinstance(refs, list) and 8 < len(refs) <= 32
+                        and all(isinstance(ref, str) and ref in evidence_ids for ref in refs)):
+                    # Use the already reserved review call; never trim or publish an invalid draft.
+                    review_candidate = candidate
+                    state["draft_validation_error"] = str(error)
+                    break
                 if validation_feedback is None and turn < max_checks:
                     validation_feedback = {"error": str(error)[:240], "instruction": "Correct the structured response using the contract and available evidence IDs. Do not repeat completed checks."}
                     publish(state)
@@ -240,12 +255,14 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             if any(not isinstance(text, str) or not 1 <= len(text) <= 400 for text in (question, distinguishes)):
                 raise ValueError("Missing purpose for check")
             check(name, arguments, scrub(question), scrub(distinguishes))
-        if state["assessment"] is not None:
-            draft = state.pop("assessment")
-            state.update(status="running", assessment=None, draft_assessment=draft, review={"status": "running"}, message="Checking the conclusion against its evidence")
+        if state["assessment"] is not None or review_candidate is not None:
+            draft = state.pop("assessment") or review_candidate
+            state.update(status="running", assessment=None, draft_assessment=draft,
+                         review={"status": "running", "schema_repair": review_candidate is not None}, message="Checking the conclusion against its evidence")
             publish(state)
             response, call = request_model({**context, "checks": state["checks"], "available_evidence_ids": sorted(evidence_ids),
                 "assessment_to_review": draft,
+                "draft_validation_error": state.get("draft_validation_error"),
                 "instruction": "Evidence review only. Return action=finish with a corrected full assessment; do not call tools. Remove any claim not supported by observations. Resolution means alerts stopped firing, NOT that a job was cleared or a particular fix was applied. Never assert removal, remediation or recovery mechanism without an actual observation of it. Keep historical versus current state distinct. Do not invent metrics or actions. Preserve genuine OOM evidence despite low sampled working set. Keep mechanisms conditional and next actions safe and conditional. Existing text is a draft, not evidence."}, "none", "evidence_review")
             decision = parse_object(str(response.get("content", "")))
             call["decision"] = scrub(decision)
@@ -253,6 +270,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 raise ValueError("Evidence review did not return an assessment")
             reviewed = validate_assessment(assessment_payload(decision, call), evidence_ids, {item["incident_id"] for item in context["alerts"]})
             state.update(assessment=reviewed, status="ready", review={"status": "completed", "changed": reviewed != draft,
+                         "schema_repair": review_candidate is not None,
                          "limitation": "Model-assisted consistency review, not independent proof."})
     except Exception as error:
         state["status"] = "incomplete"

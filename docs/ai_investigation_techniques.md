@@ -170,6 +170,19 @@ validation or durability as a performance shortcut. Queue-data deletion likewise
 requires preservation and an explicit operator decision. These are model instructions,
 not a formal guarantee of safe advice; the product never executes remediation.
 
+Policy 1.6 also separates alert-detection timestamps from recorded termination
+times and requires consistent units when comparing a buffer, working set and
+container limit. A late OOM alert must not imply that termination happened after
+the associated backoff. A component allocation below the limit is not a measured
+limit exceedance; runtime overhead and unobserved peaks remain distinct limitations.
+
+If the last investigation decision exceeds the eight-reference display contract
+using only known top-level references, the reserved final review call may select
+a smaller valid citation set. The invalid draft is retained and never published
+as a conclusion. No references are silently truncated, unavailable references stay
+invalid, and the total provider-call budget does not increase. Final validation
+still rejects an invalid reviewed response.
+
 Live queries require an incident captured through the live integration, matching
 configured cluster identity and allowed namespace. Imported cases use retained
 evidence only. The model cannot provide URLs, PromQL, OpenSearch DSL, shell commands,
