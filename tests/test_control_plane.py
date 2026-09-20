@@ -182,6 +182,19 @@ class ControlPlaneTests(unittest.TestCase):
             control_plane.delete_incident(incident_id)
             self.assertIsNone(control_plane.store.get_incident(incident_id))
 
+    def test_retention_removes_incidents_by_capture_age(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
+            control_plane = ControlPlane(Path(directory) / "state")
+            incident = control_plane.ingest_case(REFERENCE_CASE, "checkout-platform", "Checkout Platform")
+            with control_plane.store._connect() as connection:
+                connection.execute(
+                    "UPDATE incidents SET created_at = ? WHERE incident_id = ?",
+                    ("2020-01-01T00:00:00Z", incident["incident_id"]),
+                )
+
+            self.assertEqual(control_plane.purge_expired_incidents(force=True), 1)
+            self.assertIsNone(control_plane.store.get_incident(incident["incident_id"]))
+
 
 if __name__ == "__main__":
     unittest.main()

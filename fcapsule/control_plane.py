@@ -228,6 +228,7 @@ class ControlPlane:
         while not self.source_stop.is_set():
             if not self.source_configuration()["enabled"]:
                 return
+            self.purge_expired_incidents()
             self.start_source_sync()
             interval = self.source_configuration()["poll_interval_seconds"]
             self.source_stop.wait(interval)
