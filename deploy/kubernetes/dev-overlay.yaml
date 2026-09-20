@@ -9,6 +9,13 @@ spec:
       initContainers:
         - name: install-source
           image: python:3.12-slim
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
           command: ["python", "-m", "pip", "install", "--no-cache-dir", "--target", "/opt/fcapsule", "https://github.com/Hi-io/fcapsule/archive/refs/heads/master.zip"]
           volumeMounts:
             - name: source
