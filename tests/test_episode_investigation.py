@@ -56,14 +56,14 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(state["source_retention"], "unknown")
 
     def test_invalid_citation_never_becomes_ready(self):
-        state, _ = self.run_case([{"action": "finish", "assessment": assessment("Q999")}])
+        state, _ = self.run_case([{"action": "finish", "assessment": assessment("Q999")}], max_checks=0)
         self.assertEqual(state["status"], "incomplete")
         self.assertIsNone(state["assessment"])
         self.assertEqual(state["usage"]["total_tokens"], 130)
 
     def test_unavailable_query_is_not_citable(self):
         self.kit.execute.side_effect = RuntimeError("password=never-persist-this")
-        state, _ = self.run_case([{"action": "finish", "assessment": assessment()}])
+        state, _ = self.run_case([{"action": "finish", "assessment": assessment()}], max_checks=0)
         self.assertEqual(state["checks"][0]["status"], "unavailable")
         self.assertEqual(state["status"], "incomplete")
         self.assertNotIn("never-persist", json.dumps(state))
@@ -74,6 +74,17 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertFalse(state["usage"]["complete"])
         self.assertEqual(state["checks"][0]["status"], "completed")
         self.assertNotIn("do-not-save", json.dumps(state))
+
+    def test_one_schema_repair_uses_existing_budget_and_keeps_rejected_decision(self):
+        state, client = self.run_case([{"action": "finish", "assessment": assessment("invented")},
+                                       {"action": "finish", "assessment": assessment()}])
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(len(client.requests), 2)
+        self.assertEqual(client.requests[0].reasoning_effort, "low")
+        self.assertEqual(client.requests[1].reasoning_effort, "none")
+        self.assertTrue(client.requests[1].json_output)
+        self.assertIn("validation_error", state["calls"][0])
+        self.assertEqual(state["usage"]["total_tokens"], 260)
 
     def test_hard_call_budget_and_disallowed_tools(self):
         decision = {"action": "check", "tool": "resource_history", "arguments": {}, "question": "Resource pressure?", "distinguishes": "CPU or memory"}

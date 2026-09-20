@@ -27,6 +27,8 @@ class ChatRequest:
     messages: list[dict[str, str]]
     max_tokens: int = 2400
     temperature: float = 0.0
+    reasoning_effort: str | None = None
+    json_output: bool = False
 
 
 class DeepSeekChatClient:
@@ -55,6 +57,10 @@ class DeepSeekChatClient:
             "temperature": request.temperature,
             "max_tokens": request.max_tokens,
         }
+        if request.reasoning_effort is not None:
+            body["reasoning_effort"] = request.reasoning_effort
+        if request.json_output:
+            body["response_format"] = {"type": "json_object"}
         http_request = urllib.request.Request(
             self.base_url,
             data=json.dumps(body).encode("utf-8"),

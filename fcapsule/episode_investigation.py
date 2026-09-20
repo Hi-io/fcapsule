@@ -92,6 +92,8 @@ To finish: {"action":"finish","assessment":{"summary":"symptom and scope, <=45 w
 "reason":"what connects or separates the alerts","evidence_ids":["E... or Q..."]}]}}.
 Supply 1-3 hypotheses. If several alerts exist, assess at least one relationship, including no_link_established if appropriate.
 Use connections only for actual different member alerts. 'Supported' is not confirmed causality.
+Use only available_evidence_ids for citations, not original provenance IDs nested within records.
+Each text field is at most 900 characters; hypothesis explanations/reasons and connection reasons at most 500 characters.
 Each reference must exist; unavailable/failed queries are limitations, not positive evidence.
 Do not emit private deliberation. The question, tool result and brief conclusion form the operator audit trail."""
 
@@ -106,6 +108,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
     started = time.monotonic()
     evidence_ids = {item["id"] for item in context["evidence"]}
     seen = set()
+    validation_feedback = None
 
     def check(name, arguments, question, distinguishes, automatic=False):
         row = {"id": f"Q{len(state['checks']) + 1:03d}", "tool": name, "arguments": arguments,
@@ -136,6 +139,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 break
             payload = {**context, "allowed_pods": tools.pods, "tools": tools.CATALOG,
                        "checks": state["checks"], "remaining_checks": max_checks - turn,
+                       "available_evidence_ids": sorted(evidence_ids), "validation_feedback": validation_feedback,
                        "instruction": "Finish using collected evidence now." if turn == max_checks else "Choose the most useful remaining check, or finish when further queries would not help."}
             state["message"] = "Assessing episode evidence" if turn == 0 else "Reviewing check results"
             publish(state)
@@ -147,7 +151,8 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 call.update(status="not_sent", finished_at=now())
                 raise ValueError("Input size budget reached")
             response = client.chat(ChatRequest(model=model, messages=[{"role": "system", "content": SYSTEM},
-                {"role": "user", "content": encoded}], max_tokens=max_tokens))
+                {"role": "user", "content": encoded}], max_tokens=max_tokens,
+                reasoning_effort="none" if validation_feedback else "low", json_output=True))
             usage = response.get("usage") or {}
             call.update({"status": "completed", "finished_at": now(), "usage": usage,
                          "latency_seconds": response.get("latency_seconds"), "finish_reason": response.get("finish_reason")})
@@ -157,10 +162,20 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 else:
                     state["usage"][key] += usage[key]
             publish(state)
-            decision = parse_object(str(response.get("content", "")))
+            try:
+                decision = parse_object(str(response.get("content", "")))
+                call["decision"] = scrub(decision)
+                if decision.get("action") == "finish":
+                    state["assessment"] = validate_assessment(decision.get("assessment"), evidence_ids,
+                                                              {item["incident_id"] for item in context["alerts"]})
+            except ValueError as error:
+                call["validation_error"] = str(error)[:240]
+                if validation_feedback is None and turn < max_checks:
+                    validation_feedback = {"error": str(error)[:240], "instruction": "Correct the structured response using the contract and available evidence IDs. Do not repeat completed checks."}
+                    publish(state)
+                    continue
+                raise
             if decision.get("action") == "finish":
-                state["assessment"] = validate_assessment(decision.get("assessment"), evidence_ids,
-                                                          {item["incident_id"] for item in context["alerts"]})
                 state["status"] = "ready"
                 break
             if turn == max_checks or decision.get("action") != "check":
@@ -178,6 +193,8 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
         state["status"] = "incomplete"
         state["message"] = "No validated conclusion was produced. Retained observations remain available; retry is explicit."
         state["error_type"] = type(error).__name__
+        if isinstance(error, ValueError):
+            state["validation_error"] = str(error)[:240]
         if state["calls"] and state["calls"][-1]["status"] == "running":
             state["calls"][-1].update(status="failed", finished_at=now())
             state["usage"]["complete"] = False
