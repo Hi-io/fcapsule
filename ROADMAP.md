@@ -35,6 +35,11 @@ FCAPSule provides a single-replica Kubernetes control plane, live Prometheus/Ope
 
 ## 4. AI Orchestration
 
+Implemented: joint episode assessment, fixed read-only tool dispatch, incremental
+observation retention, peer/preceding-window comparisons, omitted-log inspection,
+competing hypotheses, bounded calls and provider-reported token usage. These are
+described in [AI techniques](docs/ai_investigation_techniques.md). Remaining work:
+
 - provider-neutral model registry;
 - additional pretrained LLM comparisons;
 - pretrained time-series methods compared with the statistical baseline;

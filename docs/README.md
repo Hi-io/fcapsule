@@ -11,6 +11,7 @@
 ## Understand the Implementation
 
 - [Architecture](architecture.md) and [engineering design](../PROJECT_DESIGN.md)
+- [AI investigation techniques and limits](ai_investigation_techniques.md)
 - [Data and artifact contracts](../DATA_SCHEMA.md)
 - [Design decisions](design_decisions.md)
 - [External workload boundary](external_workload_boundary.md)

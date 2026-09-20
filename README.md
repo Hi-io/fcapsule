@@ -10,9 +10,9 @@ It does not replace Prometheus, OpenSearch, Alertmanager, Kafka, or a tracing ba
 
 FCAPSule provides one control plane with three operator views:
 
-- **Operations** (`/console`) groups related firing alerts into expandable incident episodes. Overview prioritizes an automatic AI assessment and observed impact; Evidence and Timeline keep detailed telemetry accessible. Reports and capsules can be exported.
+- **Operations** (`/console`) groups related firing alerts into expandable incident episodes. Overview presents one evidence-seeking AI investigation per episode, a concrete next action and check progress. Evidence and Timeline expose observations and the agent's activity separately from historical events. Reports and capsules can be exported.
 - **Targets** (`/targets`) configures and tests Prometheus, OpenSearch, and Kubernetes API access, controls namespace scope and polling, and shows coverage for currently observed applications.
-- **Settings** (`/settings`) controls incident retention and the cited-briefing model. With a provider key configured, new reports are analysed automatically in the background. Retention defaults to 30 days. The key remains local in `.env` and is never returned through the console or stored in SQLite.
+- **Settings** (`/settings`) controls incident retention, the investigation model and completion budget per call. With a provider key configured, new reports trigger background episode investigation. Retention defaults to 30 days. The key remains local in `.env` and is never returned through the console or stored in SQLite.
 
 The CLI remains fully usable without the web application.
 
@@ -29,7 +29,7 @@ The project uses the word *domain* for telemetry families with different data sh
 | Application logs | semi-structured text | masking, template reduction, severity and proximity scoring |
 | Topology and configuration | service relationships and runtime changes | cross-source entity alignment and dependency context |
 | On-demand traces | optional case metadata | retain declared availability and source retention; a live trace-backend adapter is not implemented |
-| AI reasoning | selected evidence only | cited investigation paths, limitations, and next checks |
+| AI reasoning | selected evidence and bounded read-only tool observations | competing explanations, alert relationships, reference comparisons and cited next actions |
 
 These are operational modalities, not media modalities. FCAPSule does not generate or process images to satisfy multidomain behavior.
 
@@ -116,7 +116,7 @@ python3 -m fcapsule.cli compare-llms \
   --models deepseek-v4-flash deepseek-v4-pro
 ```
 
-Model comparison is an offline evaluation workflow, not an operator dashboard. The evidence report is built deterministically. When a key is configured, a background worker automatically generates an assessment using the selected model. Valid evidence references and an uncertainty are required, but citation checks do not prove that the model's explanation is true. There is no automatic remediation.
+Model comparison is an offline evaluation workflow, not an operator dashboard. The evidence report is built deterministically. With a key configured, a background investigator preserves mutable workload state and lets the model select up to four bounded checks before concluding. Tools can query resource history, literal log matches, peer/preceding-window comparisons, namespace-scoped database metrics and unselected retained log candidates. Valid evidence references and uncertainty are required, but citation checks do not prove the explanation. No remediation or application replication is executed. See [AI investigation techniques](docs/ai_investigation_techniques.md) for scope, budgets and limitations.
 
 Re-score stored responses after a rubric change without making provider calls:
 
@@ -133,7 +133,8 @@ The control-plane flow produces the artifacts below. Standalone `investigate` wr
 ```text
 capsule.json          structured evidence and provenance
 incident_report.json  responder-focused report: impact, actions, evidence, retention
-ai_briefing.json      optional citation-checked operator briefing; no prompt retained
+episode_investigation.json  episode context, checks, cited assessment and token usage
+ai_briefing.json      legacy per-incident briefing, when already present
 capsule.md            human-readable investigation capsule
 evidence.json         all candidates with scoring components
 evaluation.json       engineering evaluation, not the primary operator view
@@ -141,7 +142,7 @@ baselines.json        comparison baselines
 dashboard.html        static detailed review
 llm_comparison.json   optional same-input model comparison
 llm_prompt.json       optional recorded prompt
-fcapsule_<id>.zip     derived evidence, report and available briefing; no raw inputs
+fcapsule_<id>.zip     derived evidence, report and available investigation; no raw inputs
 ```
 
 ## Data and Retention Policy
@@ -151,7 +152,7 @@ fcapsule_<id>.zip     derived evidence, report and available briefing; no raw in
 - Capsule archives exclude raw input files and raw trace spans, but include selected log examples and retained metric/chart values.
 - Representative log lines are masked before entering evidence. Heuristic masking is not a guarantee of complete anonymization.
 - Trace availability can be supplied by an external case. The live Kubernetes integration does not yet query a trace backend.
-- Every generated hypothesis must cite selected evidence IDs and remains an investigation path rather than a final root-cause claim.
+- Model hypotheses cite captured evidence or successful check observations and remain investigation paths rather than final root-cause claims. Source expiry is unknown unless explicitly supplied; FCAPSule's cleanup policy does not describe Prometheus/OpenSearch retention.
 
 ## Tests
 
@@ -183,6 +184,7 @@ Start with the [documentation index](docs/README.md), which separates current op
 - `docs/kubernetes_deployment.md`: live-source Kubernetes deployment and verification runbook.
 - `docs/external_workload_boundary.md`: boundary between FCAPSule and workloads such as FCAPSule Lab.
 - `docs/architecture.md`: component and deployment architecture.
+- `docs/ai_investigation_techniques.md`: tool-driven episode reasoning, preservation, reference comparisons, validation and token accounting.
 - `docs/data_privacy.md`: collection, anonymization, and retention policy.
 - `docs/design_decisions.md`: important design decisions and tradeoffs.
 - `docs/production_product_requirements.md`: operator-first product requirements and acceptance criteria.

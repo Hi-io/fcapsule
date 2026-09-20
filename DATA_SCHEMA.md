@@ -125,7 +125,7 @@ Field names can be mapped in metadata.
 }
 ```
 
-FCAPSule reads only ConfigMaps referenced by the affected pod. Keys that look credential-bearing are redacted, and Kubernetes Secrets are outside the RBAC contract and are never collected.
+FCAPSule reads ConfigMaps referenced by observed pods. PodSpec records also retain resource requests/limits, pod UID, container restart counts and current/last termination reason, exit code and timestamps when available. Arbitrary termination messages are excluded. Keys that look credential-bearing are redacted, and Kubernetes Secrets are outside the RBAC contract and are never collected.
 
 ### `expected_notes.md`
 
@@ -211,6 +211,30 @@ Model ID, provider, enabled state, maximum tokens, and update time.
 
 ## Artifact Policy
 
+### Episode Investigation
+
+`state_dir/investigations/<sha256-episode-id>.json` stores the shared version-1 investigation.
+The report API includes it as `investigation`; completed/incomplete attempts are also
+copied as `episode_investigation.json` into each participating capsule.
+
+- `episode_id`, `status`, `attempt`, timestamps and input fingerprint;
+- bounded `context` with member alerts, impact and deduplicated `E...` evidence/provenance;
+- `checks`: `Q...` ID, tool, bounded arguments, question, diagnostic purpose, status,
+  timestamps and scrubbed source observations/limitations;
+- `calls`: timestamps, provider usage, latency, finish reason, structured decision
+  and any validation error (never private model deliberation);
+- `assessment`: summary, likely mechanism, next action, expected finding, uncertainty,
+  evidence references, hypothesis states and relationships between member alerts;
+- `usage`: current attempt's prompt/completion/total token sums and completeness flag;
+- `lifetime_usage`: earlier attempts' reported totals, separate from current usage;
+- `previous_runs`: up to three earlier attempts;
+- `source_retention`: `unknown`, distinct from managed incident cleanup.
+
+Allowed statuses and tool boundaries are documented in [AI techniques](docs/ai_investigation_techniques.md).
+Deleting a member invalidates the shared file and its surviving artifact copies.
+
+### Archive Members
+
 The derived ZIP contains:
 
 - `capsule.json`;
@@ -220,6 +244,7 @@ The derived ZIP contains:
 - `baselines.json`;
 - `incident_report.json` when a control-plane report exists;
 - `ai_briefing.json` when present;
+- `episode_investigation.json` when available;
 - `dashboard.html` when rendered.
 
 Only these allowlisted files are included if present. Offline comparison prompts/responses, normalized raw inputs and raw traces are excluded. Selected log examples and retained PM trend values are still telemetry-derived content and may be sensitive.

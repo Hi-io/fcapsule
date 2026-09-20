@@ -21,7 +21,7 @@ FCAPSule complements observability infrastructure. It is not a replacement telem
 3. A firing alert opens a bounded capture; pending alerts do not open incidents.
 4. Related signals for the same application within the correlation window join an episode.
 5. The deterministic pipeline retains evidence and builds an immediately usable report.
-6. With a provider key, the selected model produces an automatic background assessment.
+6. With a provider key, one background episode investigator preserves workload state, selects bounded read-only checks and produces a cited assessment with competing explanations and alert relationships.
 7. Open the episode in Operations, inspect Overview, then follow citations into Evidence.
 8. Use Timeline for ordering, Export for handoff, and archive to clear the working queue.
 9. Retention removes old incidents and their managed files, including archived incidents.
@@ -46,7 +46,7 @@ These are operational data domains, not audio/image/text media modalities. A sou
 
 The first screen answers: what needs attention, which application is affected, what is the observed impact, and where is its investigation?
 
-An expandable episode owns its report selector. Overview shows the AI assessment when available, material impact, a likely explanation, a first check, expected finding, conditional mitigation and uncertainty. Provider errors or a missing key must not block retained evidence. Evidence and Timeline provide progressive detail. Engineering metrics stay collapsed and model comparisons remain offline.
+An expandable episode owns a shared investigation. Overview shows its assessment, one next action, expected finding, uncertainty and compact check progress. The per-alert report selector is available in detail views. Evidence exposes captured facts and agent observations; Timeline separates historical events from subsequent analysis. Tokens remain small and expandable. Provider errors or a missing key must not block evidence. Engineering metrics stay collapsed and model comparisons remain offline. [AI techniques](docs/ai_investigation_techniques.md) documents current methods and limits.
 
 Export makes artifact size, retention eligibility and server-side location inspectable. A current retained report must remain readable after its source capture disappears.
 
@@ -56,7 +56,7 @@ Connection health, discovery counts and namespace-grouped coverage are the prima
 
 ### Settings
 
-Incident retention and automatic AI briefing configuration share one page. Retention defaults to 30 days from capture and includes archived incidents. Model choice, completion budget and replacement key are editable. No additional screen is required for the current workflow.
+Incident retention and automatic AI investigation configuration share one page. Retention defaults to 30 days from capture and includes archived incidents. Model choice, completion budget per call and replacement key are editable. Source-system expiry is not inferred from this policy. No additional screen is required for the current workflow.
 
 ## Evidence and Reasoning Contract
 

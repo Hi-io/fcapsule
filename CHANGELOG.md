@@ -4,6 +4,12 @@
 
 ### Changed
 
+- Replaced the Operations per-alert briefing with a joint, evidence-seeking episode investigation: fixed read-only tools, competing explanations, cited alert relationships, baseline/peer checks and omitted-log inspection.
+- Added mutable workload preservation, CPU/memory limits, last termination/exit code, throttling and OOM metric context without inferring source retention.
+- Added persisted check progress, separate agent timeline, small token accounting, investigation JSON exports and explicit reassessment with bounded history.
+- Preserved diagnostic log fields during grouping, selected alert-proximate examples, and corrected zero-to-zero metric change handling.
+- Added tool scope/budget/citation tests and bounded structured-response recovery; documented AI methods and their limitations.
+
 - Added live Prometheus, OpenSearch and Kubernetes discovery/configuration capture, namespace-grouped coverage and source settings in Targets.
 - Grouped related firing signals into expandable episodes; split reports into Overview, Evidence and Timeline with automatic background AI assessment.
 - Combined retention and model configuration in Settings; added archive/restore and managed incident cleanup.

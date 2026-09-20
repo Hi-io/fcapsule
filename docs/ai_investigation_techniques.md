@@ -1,0 +1,214 @@
+# Evidence-Seeking Episode Investigations
+
+## Purpose
+
+The operator needs a defensible explanation and a useful next action, not another
+alert paraphrase. FCAPSule first preserves an incident capture without requiring an
+LLM. It then lets the selected model choose bounded, read-only checks against the
+configured observability sources. Each observation is saved before another model
+call. A final assessment distinguishes supported, weakened and unresolved
+explanations and links to the observations used.
+
+This is an application of established tool-augmented reasoning, not a claim of a
+new foundation model or a proven causal discovery algorithm. The distinctive
+product emphasis is preserving diagnostic evidence across a correlated episode
+while sources and pod state can change. Application replication, failure replay,
+automatic experiments and remediation are explicitly outside this feature.
+
+## Implemented Techniques
+
+### 1. Joint Episode Reasoning
+
+The store groups alerts using the existing application/time correlation rule.
+One investigation reads up to the latest twelve member reports. It merges duplicate
+evidence by content identity and retains each original incident/evidence reference.
+Up to eighty initial evidence records enter the investigation context. Individual
+reports outside that bound remain accessible; the bound is declared to the model.
+
+The LLM receives alert identities, retained alert conditions when available, selected
+logs, metric findings and configuration. A multi-alert assessment must describe at
+least one relationship: `possibly_related`, `same_symptom` or
+`no_link_established`. Group membership is not evidence of a shared cause.
+
+The output has one episode-level summary, likely mechanism, next action, expected
+finding, uncertainty, one to three competing hypotheses and cited relationships.
+There are no model-generated percentages presented as calibrated confidence.
+
+### 2. Hypothesis-Directed Tool Use
+
+After early preservation, the model returns either a structured check request or a
+final assessment. Each check includes a short diagnostic question and the
+explanations it is intended to distinguish. FCAPSule validates the tool and its
+arguments, executes the read-only operation, saves the result and supplies that
+observation to the next call. It does not request or retain private model reasoning.
+
+This follows the action/observation pattern described in [ReAct](https://react-lm.github.io/).
+The implementation uses structured JSON decisions with a fixed dispatch table,
+not unrestricted function execution or a generic shell agent.
+
+The evidence reference space distinguishes initial capture records (`E...`) from
+executed checks (`Q001`, `Q002`, etc.). Failed checks cannot be cited as successful
+observations. A successful empty query is still an observation of that bounded
+query, never proof that an event did not occur.
+
+### 3. Reference Comparisons
+
+`compare_baseline` compares the affected pod's incident window with a currently
+ready replica of the same workload. If none exists, it uses the preceding equal
+time window on the affected pod. It retains min/max/median, sample counts, temporal
+bounds and bounded trend samples for both sides.
+
+This is observational comparison, not an experiment. Historical readiness, traffic,
+deployment version and limits may differ. The tool labels comparability unverified,
+and the prompt prohibits treating a difference as proof of causality. No healthy
+reference is fabricated when Prometheus returns no samples.
+
+### 4. Diagnostic-Preserving Reduction and Exclusion Review
+
+The capture pipeline still uses deterministic masking and exact template grouping,
+not an LLM per log line. In addition to variable masking, it retains a small
+allowlist of diagnostic fields in the grouping identity: exit code, errno,
+status code, SQL state, reason, delivery disposition, payload encoding,
+`max_connections` and `memory_limit`. Thus `exit_code=1` and `exit_code=137`
+remain different groups while changing job IDs can still collapse.
+
+Each group retains its first example and one closest to the alert; when those are
+the same event, the last example is used. The existing scoring/domain quotas select
+the initial evidence. These are heuristics, not guaranteed sufficient statistics.
+
+The model can inspect up to twelve initially unselected retained log templates via
+`review_omitted`, optionally filtering by short literal terms. It can also search
+the source for incident-window examples. This makes selection revisitable without
+resending every raw log. It is not a comprehensive search of all discarded source
+data, and old capsules are not silently reprocessed with the new grouping rule.
+
+### 5. Early Preservation Without Invented Retention
+
+Every investigation first attempts a current Kubernetes workload snapshot, before
+the first model call. Limits, requests, current state, previous termination reason,
+exit code, restart count, images and referenced ConfigMaps can be useful and may
+change during investigation. Results are timestamped as current observations.
+
+The initial report/capsule has already been retained at this point. Additional
+model-selected observations are persisted as they arrive. Prometheus/OpenSearch
+source expiry remains **unknown**. FCAPSule's own cleanup policy is not a proxy for
+source retention. A current pod snapshot is not retroactively described as the
+configuration at the historical incident time. Last termination is only the last
+retained termination and may have been replaced by a later restart.
+
+## Tool Catalog and Bounds
+
+| Tool | Allowed access | Main limits |
+|---|---|---|
+| `workload_state` | Kubernetes pods and referenced ConfigMaps in the episode namespace/workload | Four pods, sixteen returned records; no Secrets |
+| `resource_history` | Fixed Prometheus expressions for CPU, memory, limits, throttling, restarts, readiness and last OOM termination | Captured pod; at most thirty-minute incident window; bounded summaries |
+| `search_logs` | OpenSearch log queries for a captured pod and incident window | Three literal terms of at most eighty characters; 300 lines; twelve returned patterns |
+| `compare_baseline` | Same workload's ready peer, otherwise preceding affected-pod window | Fixed resource expressions; explicit comparability caveat |
+| `database_pressure` | Three MySQL-exporter connection/limit series in the episode namespace | Four series per expression; labels retained; no inferred dependency from namespace proximity |
+| `review_omitted` | Stored, unselected log templates | Twelve returned candidates; no network access |
+
+Namespace-level MySQL metrics are context, not automatic attribution to a database
+dependency. The tool does not connect directly to MySQL or issue SQL. Configuration
+is read only for pods within the captured workload scope; arbitrary cross-workload
+ConfigMap discovery is not implemented.
+
+Live queries require an incident captured through the live integration, matching
+configured cluster identity and allowed namespace. Imported cases use retained
+evidence only. The model cannot provide URLs, PromQL, OpenSearch DSL, shell commands,
+SQL, arbitrary paths or Kubernetes mutations. Configured sources remain a trusted
+administrator boundary, not a multi-tenant authorization system.
+
+Each attempt allows one automatic preservation check, at most four model-selected
+checks and at most five provider calls. The completion limit in Settings applies
+per call. Calls request JSON output and low reasoning effort. One schema repair can
+use a remaining call with reasoning disabled; it does not increase the total call
+budget. This avoids spending a small completion budget entirely on non-visible
+reasoning. These controls follow the [DeepSeek API contract](https://api-docs.deepseek.com/api/create-chat-completion/).
+Encoded user context is limited to 160,000 characters before transmission.
+Repeated identical checks are rejected. A 420-second soft elapsed-time budget is
+checked between calls, with a 90-second provider timeout; an in-flight call or source
+operation can extend elapsed time beyond the soft budget. Two background workers
+serve episodes. There is no currency budget or global provider rate limiter yet.
+
+## Persistence and Lifecycle
+
+`InvestigationService` coordinates work using the existing control-plane lock and
+worker pool. A report fingerprint avoids rerunning an unchanged completed or
+incomplete attempt automatically. A new episode member schedules a new joint
+assessment after its report is ready. Members arriving during a running attempt
+are coalesced into a follow-up attempt rather than parallel duplicate work.
+
+State is atomically replaced under `state_dir/investigations/<episode-hash>.json`.
+Statuses are `not_started`, `not_configured`, `waiting`, `queued`, `running`, `ready`
+and `incomplete`. Startup resumes interrupted retained work for unarchived episodes.
+A failed unchanged attempt requires explicit Reassess; it is not retried forever.
+
+Completed/incomplete attempts copy `episode_investigation.json` into participating
+capsules and rebuild the ZIP. Up to three earlier attempt records, including checks
+and assessments, are retained in the state. Earlier usage totals accumulate beyond
+that short history. Deleting an episode member invalidates the shared investigation
+and removes its derived copies from surviving capsules so deleted evidence is not
+resurrected there. External downloads are not changed by deletion.
+
+The report API includes the current shared investigation. `GET` and `POST
+/api/episodes/<episode-id>/investigation` inspect or explicitly start/reassess it.
+The deterministic standalone CLI remains unchanged; automated source investigation
+is a control-plane workflow. Legacy per-incident briefing files/API remain readable
+for compatibility but are not the Operations assessment.
+
+## Operator Presentation
+
+- **Overview:** one episode conclusion, one next action, one expected finding,
+  remaining uncertainty, citations and a compact progress column.
+- **Explanations considered:** expandable competing explanations with their evidence.
+- **How the alerts relate:** expandable multi-alert relationships.
+- **Evidence:** executed observations, cited original capture records and the
+  individually selectable alert's existing telemetry disclosures.
+- **Timeline:** historical episode alerts and a separate agent-activity sequence.
+  An investigation performed later is not placed into the historical failure timeline.
+- **Export:** the investigation JSON and the derived capsule ZIP.
+- **Usage:** small expandable input/output/total counts and model-call count.
+  Provider-reported partial counts are marked incomplete; timeouts do not imply zero
+  provider billing. Earlier-attempt totals are separate from the current attempt.
+
+Queue timestamps are relative; exact local timestamps remain available on hover
+and in report detail. Artifact cleanup dates still refer only to FCAPSule retention.
+
+## Trust, Privacy and Validation
+
+Resource observations carry explicit metric semantics alongside measurements. The
+last-termination OOM reason is a state flag, not an event counter; sampled working
+set is not a recorded memory peak. A flag/restart combination must not be dismissed
+solely because sampled memory is low. These interpretations follow the
+[kube-state-metrics contract](https://github.com/kubernetes/kube-state-metrics/blob/main/docs/metrics/workload/pod-metrics.md)
+and [Kubernetes resource behavior](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/).
+They constrain interpretation, not the observed outcome of any particular case.
+
+Telemetry is treated as untrusted input, and the prompt explicitly rejects
+instructions embedded in it. Server-side tool dispatch restricts actions even if a
+model ignores that instruction. No semantic validator can guarantee that every
+accepted sentence follows from its cited observation. Citation validation proves
+reference integrity, not entailment, causality or operational safety.
+
+The provider receives selected evidence and additional scrubbed tool observations.
+Heuristic masking now also covers quoted credential assignments and bearer values;
+it remains incomplete DLP. ConfigMaps can contain secrets under innocuous keys.
+Organizational approval, scoped permissions, protected state and a trusted network
+remain required. See [data privacy](data_privacy.md).
+
+Tests cover scope/argument rejection, missing sources, peer fallback, diagnostic
+code preservation, usage accounting, invalid citations, provider failure, bounded
+calls, background progress, restart recovery and deletion races. These tests do
+not establish general root-cause accuracy. Evaluation should compare the former
+single-call briefing and the new investigator on the same incidents, recording
+discriminating observations found, unsupported claims, operator usefulness,
+latency and tokens, without selecting results to force a preferred hypothesis.
+
+## Implementation Map
+
+- `fcapsule/episode_investigation.py`: model protocol, budgets, validation and loop.
+- `fcapsule/investigation_tools.py`: context construction and allowed query tools.
+- `fcapsule/investigation_service.py`: scheduling, persistence and membership lifecycle.
+- `fcapsule/adapters/`: source queries and runtime diagnostics.
+- `fcapsule/processing/`: diagnostic template reduction and metric analysis.
+- `fcapsule/ui/assets/app.js`: overview, references, observations and progress views.

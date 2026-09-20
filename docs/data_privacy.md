@@ -10,6 +10,7 @@ Prometheus, OpenSearch and Kubernetes remain the source systems of record. FCAPS
 |---|---|---|
 | `state_dir/live-cases/<id>/` | Bounded source logs, PM samples, alerts, metadata and configuration snapshot | Until managed incident deletion or retention cleanup |
 | `state_dir/capsules/<id>/` | Selected evidence, masked log examples, metric trends, report, assessment, evaluation and ZIP | Same incident lifetime |
+| `state_dir/investigations/<episode-hash>.json` | Episode context, scrubbed check results, structured decisions, assessments and usage | Invalidated when an episode member is deleted; up to three previous attempts retained |
 | `state_dir/fcapsule.db` | Application registry, episodes, incident/capsule metadata and non-secret settings | Incident records are cleaned up; registry/settings persist |
 
 Live capture is **not memory-only**. Staged inputs may contain sensitive logs and metrics. An independent staging TTL is not implemented. External `ingest-case` directories are referenced without copying; FCAPSule never deletes an input directory outside its managed state directory.
@@ -30,9 +31,9 @@ Kubernetes collection reads referenced ConfigMaps and pod context. Credential-sh
 
 ## Model Boundary
 
-The optional automatic briefing sends compact retained evidence and configuration context to the configured DeepSeek-compatible provider, not the unrestricted source window. This is an external disclosure and a paid API operation. Confirm organizational approval before enabling it. Selected evidence can still contain sensitive information despite masking.
+The optional episode investigation sends compact retained evidence, configuration and additional scrubbed tool observations to the configured DeepSeek-compatible provider, not the unrestricted source window. Each attempt can make up to five provider calls. This is an external disclosure and a paid API operation. Confirm organizational approval before enabling it. Selected evidence and ConfigMap values can still contain sensitive information despite masking.
 
-The briefing stores a structured result and provider metadata. Offline evaluation separately records prompts and responses. Citation validation checks reference integrity, not factual entailment or causal truth. The tool does not execute remediation.
+The investigation retains its bounded context, public check questions, observations, structured model decisions, validation failures and usage metadata. It does not retain private model deliberation. Completed/incomplete investigations are included in the capsule ZIP. Source errors are recorded generically to avoid persisting request credentials. Offline evaluation separately records prompts/responses. Citation validation checks reference integrity, not factual entailment or causal truth. The tool does not execute remediation. Prometheus/OpenSearch retention is not inferred.
 
 ## Secrets and Deployment
 

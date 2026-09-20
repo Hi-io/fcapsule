@@ -19,6 +19,9 @@ The architecture deliberately separates four responsibilities:
 | `fcapsule/processing/` | entity alignment, anonymization, log templates, PM anomalies, FM timeline |
 | `fcapsule/attention/` | transparent scoring and domain-balanced selection |
 | `fcapsule/reasoning/` | deterministic hypotheses, verification, DeepSeek comparison |
+| `fcapsule/episode_investigation.py` | bounded model decision loop, citation/schema validation and usage |
+| `fcapsule/investigation_tools.py` | scoped read-only checks and joint evidence context |
+| `fcapsule/investigation_service.py` | episode job coalescing, persistence and deletion lifecycle |
 | `fcapsule/evaluation/` | baselines, reduction, preservation, grounding, retention metrics |
 | `fcapsule/store.py` | SQLite application/incident/capsule/model metadata |
 | `fcapsule/control_plane.py` | external-case ingestion, capsule jobs, and local AI configuration |
@@ -55,7 +58,7 @@ Within logs and PM, representatives for errors, retries, latency, pool saturatio
 
 The deterministic reasoner provides a credential-free baseline. For the reference incident it can connect retry evidence, pool evidence, related PM changes, and the FM trigger into a tentative investigation path.
 
-The deterministic verifier rejects unknown evidence IDs, bounds confidence, and reduces confidence when required data is missing. The automatic model assessment receives compact retained evidence and must return structured JSON with valid references and uncertainty. Neither mechanism proves that cited evidence entails every generated claim.
+The deterministic verifier rejects unknown evidence IDs, bounds confidence, and reduces confidence when required data is missing. The optional episode investigator receives merged retained evidence, preserves current workload state, and lets the model select up to four scoped read-only checks. Successful observations become citable evidence for competing explanations and alert relationships. It validates structured output and records usage; it does not publish model confidence percentages. Neither mechanism proves that cited evidence entails every generated claim. See [AI techniques](docs/ai_investigation_techniques.md).
 
 ## Storage
 
@@ -76,6 +79,7 @@ The web application uses the Python standard library HTTP server. This keeps loc
 
 - `GET /api/state`;
 - `GET /api/incidents/<id>/report`;
+- `GET` and `POST /api/episodes/<id>/investigation`;
 - `GET` and `POST /api/settings/general`;
 - `GET /api/capsules/<id>`;
 - `POST /api/capsules`;
@@ -86,7 +90,7 @@ The web application uses the Python standard library HTTP server. This keeps loc
 - `POST /api/sources/sync`;
 - `GET /healthz`.
 
-Long-running pipeline work executes on background threads. Two workers generate optional automatic assessments after evidence is saved. The client polls every four seconds while visible and preserves report selection, disclosure state and editable target fields. Source simulation remains outside this repository.
+Long-running pipeline work executes on background threads. Two workers perform optional episode investigations after evidence is saved. Reports retain their individual telemetry; one episode assessment links their evidence and includes agent activity. The client polls every four seconds while visible and preserves report selection, disclosure state and editable target fields. Source simulation remains outside this repository.
 
 ## Trace Policy
 

@@ -1,12 +1,12 @@
 # FCAPSule AI Grounded Reasoning Prompts
 
-FCAPSule uses deterministic evidence processing, an optional automatic runtime assessment and a separate offline comparison workflow. The examples below preserve the research reasoning intent. Exact executable prompts live in `fcapsule/reasoning/incident_briefing.py` and `fcapsule/reasoning/prompts.py`; conceptual instructions are not all mechanically enforceable.
+FCAPSule uses deterministic evidence processing, an optional tool-driven episode investigation and a separate offline comparison workflow. The examples below preserve the research reasoning intent. The runtime prompt and decision validator live in `fcapsule/episode_investigation.py`; offline comparison uses `fcapsule/reasoning/prompts.py`. `fcapsule/reasoning/incident_briefing.py` is the legacy per-incident path. Conceptual instructions are not all mechanically enforceable.
 
 ## Current Automatic Assessment
 
-After a report is saved, the configured model receives incident identity, impact, timeline, retained configuration and a compact evidence map. It returns `operator_brief`, `likely_mechanism`, `first_action`, `why_this_first`, `expected_finding`, `mitigation`, `evidence_ids`, and `uncertainty`. Two to five valid references and nonempty, length-bounded text fields are required. Provider failure or rejected output leaves retained evidence accessible.
+After member reports are saved, one investigator builds shared episode context and preserves current workload state. The model returns either a whitelisted check request with a public diagnostic question, or an assessment containing `summary`, `likely_mechanism`, `next_action`, `expected_finding`, `uncertainty`, `evidence_ids`, `hypotheses` and `connections`. Successful observations are supplied to the next call. One to eight valid references are required per cited object; unavailable checks cannot supply references. One schema-repair call is allowed within the existing five-call maximum. Provider failure or rejected output leaves retained evidence accessible.
 
-The model is instructed to distinguish symptoms from mechanisms, offer a discriminating first check and conditional mitigation, and avoid invented facts or commands. These are prompt constraints, not a proof that every accepted sentence is correct.
+The model is instructed to distinguish symptoms from mechanisms, test competing explanations, inspect omitted candidates, compare references cautiously and separate historical evidence from current state. It must not infer source expiry or causal relationships from time proximity. The tool argument allowlist is mechanically enforced; factual entailment is not. See [AI investigation techniques](docs/ai_investigation_techniques.md).
 
 ## Hypothesis Generation
 
@@ -71,4 +71,4 @@ Explain the operational telemetry domains separately:
 
 ## Mechanical Enforcement
 
-The deterministic verifier checks IDs, bounds confidence to `[0, 1]`, marks unknown IDs unsupported and reduces confidence for single-item or incomplete support. The automatic assessment separately validates its schema, text limits, uncertainty and cited report IDs. Offline comparison scores structure, citations, domain/signal coverage, actionability and cautious language. None is a semantic fact-checker or a calibrated root-cause probability estimator.
+The deterministic verifier checks IDs, bounds confidence to `[0, 1]`, marks unknown IDs unsupported and reduces confidence for single-item or incomplete support. The episode investigator validates schema, text limits, hypothesis states, member relationships and captured/check evidence IDs. It does not emit confidence percentages. Offline comparison scores structure, citations, domain/signal coverage, actionability and cautious language. None is a semantic fact-checker or calibrated root-cause probability estimator.

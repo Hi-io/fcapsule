@@ -38,7 +38,11 @@ Prometheus firing alert or explicit incident window
                        |
               Operations / API / CLI
                        |
-       optional automatic model assessment
+       episode investigator (optional model)
+                       |
+       bounded read-only checks -> observations
+                       |
+       cited assessment + progress + token usage
 ```
 
 ## Control Plane
@@ -55,7 +59,7 @@ Observability systems are the system of record. FCAPSule owns derived evidence a
 - Topology and relevant configuration facts may be retained.
 - Trace availability and derived findings may be retained; raw spans may not.
 
-Current-format reports are read from retained JSON without loading source files. Legacy reports can be rebuilt from the capsule, but missing raw PM samples cannot be recovered. Background AI assessment is optional and has queued/running/error states; evidence is available before it completes. Citation checking verifies IDs, not truth. Live trace retrieval is future work.
+Current-format reports are read from retained JSON without loading source files. Legacy reports can be rebuilt from the capsule, but missing raw PM samples cannot be recovered. Background AI investigation is optional and runs once per episode input fingerprint. It preserves workload state early, then accepts bounded model-selected checks and a cited assessment. Observations and token counts are saved incrementally; evidence remains available during queued/running/incomplete states. Deleting a member invalidates shared derived analysis. Citation checking verifies IDs, not truth. Live trace retrieval is future work. See [AI techniques](ai_investigation_techniques.md).
 
 ## Deployment Shape
 

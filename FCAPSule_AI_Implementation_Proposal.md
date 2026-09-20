@@ -71,7 +71,7 @@ Implemented live adapters query source APIs and stage bounded normalized inputs 
 
 The control plane stores applications, incidents, capsules, and non-secret model preferences. It provides external-case ingestion and background capsule jobs to the web API.
 
-Operations groups incidents and opens reports; Targets owns source configuration and namespace-grouped coverage; Settings owns retention and the automatic briefing model. Lab workloads remain in a separate project and can use normalized exports or the live Kubernetes path.
+Operations groups incidents and opens a shared episode investigation with individual capture reports; Targets owns source configuration and namespace-grouped coverage; Settings owns retention and the investigation model. The model selects bounded read-only checks, inspects reference windows and omitted log candidates, and returns cited competing explanations and alert relationships. [AI techniques](docs/ai_investigation_techniques.md) describes the implemented bounds and remaining limitations. Lab workloads remain separate; the investigator does not replicate applications or run experiments.
 
 ## Trace Approach
 

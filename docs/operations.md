@@ -28,7 +28,7 @@ The view shows:
 - incident impact, a cited investigation path, uncertainty, and concrete next checks;
 - FM sequence, PM changes, representative evidence, topology, and trace-source retention context;
 
-Overview presents the automatic AI assessment and material observed impact. Evidence groups alerts, anonymized log examples, performance charts and configuration into disclosures. Timeline shows all alerts in the episode. AI evidence references open the relevant evidence directly. Charts include the captured time range; their values describe the incident window, not current workload health. Export provides the retained JSON report and capsule archive. Compression, preservation, grounding and runtime remain in collapsed engineering diagnostics.
+Overview presents one episode assessment, next action, uncertainty and a compact investigation progress column. Competing explanations and alert relationships are expandable. Evidence includes agent observations plus each alert's captured telemetry; the alert selector appears in detail views, not the shared Overview. Timeline separates historical alerts from the later agent activity. References open the cited observation directly. Charts include the captured time range, not current workload health. Queue ages are relative with exact timestamps on hover. Export provides report/investigation JSON and the capsule archive. Compression, preservation, grounding and runtime remain in collapsed engineering diagnostics.
 
 ## Targets View
 
@@ -48,9 +48,9 @@ For Kubernetes installation and source prerequisites, use `docs/kubernetes_deplo
 
 ### Automatic AI Assessment
 
-When a provider key is configured, retaining a report automatically queues analysis with the selected model. Two background workers process these requests without blocking incident capture. Overview displays queued/running status and refreshes when analysis finishes. A missing key points to Settings; provider failures offer Retry analysis and leave the evidence available. Loading and failure states survive restarts. Interrupted jobs and missing assessments for unarchived episode reports are resumed at service startup; failed attempts are not automatically retried in a loop.
+When a provider key is configured, retaining member reports queues one episode investigation. Two workers run these jobs without blocking capture. The investigator preserves mutable workload state, then lets the model select up to four read-only checks. Overview refreshes progress while the model works. A missing key points to Settings; incomplete attempts retain observations and offer Reassess. Startup resumes interrupted unarchived work; failed unchanged attempts are not automatically retried. New members trigger a fresh joint assessment after their reports are ready.
 
-The request includes retained alerts, performance changes, log patterns and available configuration. The model must explain the symptom, likely mechanism, first diagnostic check, expected finding, a conditional mitigation and remaining uncertainty. Two to five valid evidence references are required. Citation validation confirms references exist; it does not independently prove the explanation. No remediation is executed. Successful `ai_briefing.json` results are included in the capsule archive. Existing first-version briefs are regenerated once to adopt the more actionable contract.
+The request includes retained alerts/rules, performance findings, log examples, configuration and subsequent check observations. The final response contains a likely mechanism, one next action, expected finding, uncertainty, competing hypotheses and alert relationships. Citation validation confirms references exist, not causal truth. No remediation or application replication is executed. `episode_investigation.json` includes checks, assessment, usage and up to three previous attempts; it is copied to participating capsule archives on completion. Expand the token count for input/output and previous-attempt totals. See [techniques and limits](ai_investigation_techniques.md).
 
 ## Ingest an External Incident
 
@@ -122,10 +122,10 @@ DEEPSEEK_API_KEY=...
 
 Capsule creation always completes with deterministic detection and evidence-grounded reasoning, whether or not a provider key is available. A configured model may be evaluated or added later as a non-blocking enrichment.
 
-## AI Briefing Settings
+## AI Investigation Settings
 
 Open **Settings** in the console to choose the DeepSeek-compatible model and
-completion budget for an optional cited briefing. Paste a replacement API key only when
+completion budget per call for the optional episode investigator. Paste a replacement API key only when
 necessary. It is saved to the configured state directory's `.env` file and never returned to the browser or
 written to SQLite. The non-secret selection is persisted in `.fcapsule/ai-settings.json`.
 
@@ -137,6 +137,7 @@ written to SQLite. The non-secret selection is persisted in `.fcapsule/ai-settin
   fcapsule.db
   ai-settings.json
   source-settings.json
+  investigations/<episode-hash>.json
   live-cases/<incident-id>/
   capsules/<incident-id>/
 ```
