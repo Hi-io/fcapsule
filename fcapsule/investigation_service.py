@@ -65,6 +65,8 @@ class InvestigationService:
                 raise ValueError("Build at least one report before starting an investigation")
             fingerprint = self.fingerprint(entries)
             previous = self.read(episode_id)
+            if any(call.get("status") == "running" for call in previous.get("calls", [])):
+                previous.setdefault("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})["complete"] = False
             if not retry and previous.get("input_fingerprint") == fingerprint and previous.get("status") in {"ready", "incomplete"}:
                 return previous
             state = {"version": "1", "episode_id": episode_id, "status": "queued", "queued_at": now(),

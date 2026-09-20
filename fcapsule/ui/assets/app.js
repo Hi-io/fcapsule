@@ -473,6 +473,7 @@ function investigationProgress(run = {}) {
   const details = '<dl class="coverage-details"><div><dt>Input tokens</dt><dd>' + Number(usage?.prompt_tokens || 0).toLocaleString('en') + '</dd></div><div><dt>Output tokens</dt><dd>' + Number(usage?.completion_tokens || 0).toLocaleString('en') + '</dd></div><div><dt>Model calls</dt><dd>' + (run.calls?.length || 0) + '</dd></div><div><dt>Earlier attempts</dt><dd>' + Number(run.lifetime_usage?.total_tokens || 0).toLocaleString('en') + ' tokens</dd></div></dl><p class="queue-note">' + (usage?.complete ? 'Provider-reported usage for this attempt.' : 'Some usage is unavailable; displayed counts are not a full billing total.') + '</p>';
   return '<aside class="agent-progress"><h3>Investigation activity</h3>' + (rows ? '<ol class="agent-steps">' + rows + '</ol>' : '<p class="queue-note">No checks recorded yet.</p>') +
     '<div class="usage-note">' + disclosure('token-usage',tokenText,details) + '</div>' +
+    (run.lifetime_usage?.complete === false ? '<p class="queue-note">Earlier-attempt usage is a lower bound; an interrupted request has no final count.</p>' : '') +
     (['ready','incomplete'].includes(run.status) ? '<button class="secondary" data-investigate="' + safe(run.episode_id) + '">' + icon('refresh-cw') + ' Reassess</button>' : '') + '</aside>';
 }
 

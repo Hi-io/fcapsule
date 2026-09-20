@@ -92,7 +92,8 @@ class AutomaticInvestigationTests(unittest.TestCase):
     def test_startup_resumes_interrupted_retained_work(self):
         capsule = self.control._build_capsule(self.id)
         path = self.control.investigator.path(self.episode_id)
-        self.control._write_briefing_state(path, {"status": "running"})
+        self.control._write_briefing_state(path, {"status": "running", "calls": [{"status": "running"}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120, "complete": True}})
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}), patch(
             "fcapsule.investigation_service.run_investigation",
             side_effect=lambda *args: args[4]({"status": "ready", "checks": [], "assessment": {}}),
@@ -101,6 +102,7 @@ class AutomaticInvestigationTests(unittest.TestCase):
             self.control.briefing_executor.shutdown(wait=True)
             self.assertEqual(generate.call_count, 1)
             self.assertEqual(json.loads(path.read_text())["status"], "ready")
+            self.assertFalse(json.loads(path.read_text())["lifetime_usage"]["complete"])
 
     def test_joint_job_waits_for_members_and_deletion_invalidates_shared_exports(self):
         self.control.store.record_incident({**self.incident, "incident_id": "second-signal"})
