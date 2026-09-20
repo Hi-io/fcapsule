@@ -99,7 +99,7 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(state["assessment"]["summary"], corrected["summary"])
         self.assertTrue(state["review"]["changed"])
         self.assertEqual(state["calls"][-1]["phase"], "evidence_review")
-        self.assertEqual(client.requests[-1].reasoning_effort, "low")
+        self.assertEqual(client.requests[-1].reasoning_effort, "none")
         instruction = json.loads(client.requests[-1].messages[1]["content"])["instruction"]
         self.assertIn("convert memory quantities to bytes", instruction)
         self.assertIn("actual peak remains unsampled", instruction)
@@ -153,6 +153,20 @@ class InvestigationEngineTests(unittest.TestCase):
         value["evidence_ids"] = [f"E{index}" for index in range(9)]
         with self.assertRaisesRegex(ValueError, "one to eight"):
             validate_assessment(value, set(value["evidence_ids"]), {"one"})
+
+    def test_no_history_placeholder_is_omitted_without_rejecting_assessment(self):
+        value = assessment()
+        value["historical_comparison"] = {
+            "episode_id": "none", "status": "insufficient_evidence",
+            "summary": "No historical candidates were supplied.", "evidence_ids": ["Q001"],
+        }
+        result = validate_assessment(value, {"Q001"}, {"one"})
+        self.assertNotIn("historical_comparison", result)
+
+    def test_last_investigation_turn_reserves_tokens_for_structured_output(self):
+        state, client = self.run_case([{"action": "finish", "assessment": assessment()}], max_checks=0)
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(client.requests[0].reasoning_effort, "none")
 
     def test_hard_call_budget_and_disallowed_tools(self):
         decision = {"action": "check", "tool": "resource_history", "arguments": {}, "question": "Resource pressure?", "distinguishes": "CPU or memory"}

@@ -92,7 +92,13 @@ def validate_assessment(
             "evidence_ids": citations(comparison),
         }
     elif comparison is not None:
-        raise ValueError("Historical comparison supplied without a recurrence candidate")
+        harmless_placeholder = (
+            isinstance(comparison, dict)
+            and comparison.get("status") == "insufficient_evidence"
+            and str(comparison.get("episode_id", "")).casefold() in {"", "none", "null", "not_available"}
+        )
+        if not harmless_placeholder:
+            raise ValueError("Historical comparison supplied without a recurrence candidate")
     return scrub(result)
 
 
@@ -256,7 +262,11 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                        "instruction": "Finish using collected evidence now." if turn == max_checks else "Choose the most useful remaining check, or finish when further queries would not help."}
             state["message"] = "Assessing episode evidence" if turn == 0 else "Reviewing check results"
             publish(state)
-            response, call = request_model(payload, "none" if validation_feedback else "low", "investigation")
+            response, call = request_model(
+                payload,
+                "none" if validation_feedback or turn == max_checks else "low",
+                "investigation",
+            )
             candidate = None
             try:
                 decision = parse_object(str(response.get("content", "")))
@@ -309,7 +319,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             response, call = request_model({**context, "checks": state["checks"], "available_evidence_ids": sorted(evidence_ids),
                 "assessment_to_review": draft,
                 "draft_validation_error": state.get("draft_validation_error"),
-                "instruction": REVIEW_INSTRUCTION}, "low", "evidence_review")
+                "instruction": REVIEW_INSTRUCTION}, "none", "evidence_review")
             decision = parse_object(str(response.get("content", "")))
             call["decision"] = scrub(decision)
             if decision.get("action") != "finish":
