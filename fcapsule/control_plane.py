@@ -344,7 +344,7 @@ class ControlPlane:
                 "status": str(first_alert.get("status", "firing")),
                 "severity": str(first_alert.get("severity", "warning")),
                 "started_at": str(first_alert.get("startsAt", metadata["window"]["start"])),
-                "ended_at": first_alert.get("endsAt") or metadata["window"]["end"],
+                "ended_at": first_alert.get("endsAt") if str(first_alert.get("status", "firing")).lower() == "resolved" else None,
                 "case_dir": bundle.case_dir,
                 "alert_count": len(bundle.alerts),
                 "log_count": len(bundle.logs),

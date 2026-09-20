@@ -148,6 +148,11 @@ RBAC adds read-only Service access; the namespace and cluster checks still apply
 Reduction also preserves `mysql_error_code` as a categorical diagnostic field, so
 SQL 1054 and 1205 do not collapse into one template. Relative changes from a quiet
 baseline must not be interpreted as absolute resource-utilization percentages.
+Consecutive lab runs also exposed mixed failure phases within a time-grouped episode.
+The investigator is explicitly told that membership does not connect causes. Active
+alerts no longer inherit an `ended_at` value from the capture-window boundary;
+legacy active records are normalized in the model context. Resolution time and the
+end of a telemetry query window are different observations.
 
 Live queries require an incident captured through the live integration, matching
 configured cluster identity and allowed namespace. Imported cases use retained

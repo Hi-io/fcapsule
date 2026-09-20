@@ -96,6 +96,8 @@ Choose checks that discriminate competing explanations. Prefer mutable terminati
 source retention is unknown. Never invent expiry dates. Review omitted evidence for counterexamples when useful.
 Compare a peer or preceding window when it helps; different load/configuration invalidates causal claims.
 Inspect measurements instead of trusting an alert title. Time correlation does not prove causation.
+Episode membership is only temporal grouping. Distinguish separate failure phases, especially across resolved
+alert intervals. Do not claim an earlier error caused a later one without a connecting mechanism in the evidence.
 Current workload state may differ from incident-time state. Missing samples do not mean normal/zero usage;
 low sampled memory cannot exclude a brief OOM. Namespace proximity does not establish a dependency.
 When application logs identify a failing dependency, use dependency_evidence for a matching declared Service

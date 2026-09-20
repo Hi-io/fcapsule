@@ -69,7 +69,8 @@ def episode_context(episode: dict[str, Any], entries: list[dict[str, Any]]) -> d
         report = entry["report"]
         incident_id = entry["incident"]["incident_id"]
         alerts.append({**report["incident"], "incident_id": incident_id,
-                       "current_status": entry["incident"].get("status"), "ended_at": entry["incident"].get("ended_at")})
+                       "current_status": entry["incident"].get("status"),
+                       "ended_at": entry["incident"].get("ended_at") if entry["incident"].get("status") == "resolved" else None})
         for item in report.get("supporting_evidence", []):
             identity = [item.get("type"), item.get("title"), item.get("summary"), item.get("time_range"), item.get("linked_entities"), item.get("configuration")]
             ref = "E" + hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:12]
@@ -86,6 +87,7 @@ def episode_context(episode: dict[str, Any], entries: list[dict[str, Any]]) -> d
         "evidence": list(evidence.values())[:80],
         "impact": [item for entry in entries for item in entry["report"].get("impact", [])][:15],
         "source_retention": "Unknown. Do not infer expiry from incident age or FCAPSule's own cleanup policy.",
+        "grouping_basis": "Same application and temporal proximity only. Independent failure phases can share an episode. A resolved alert followed by another alert is not a demonstrated causal chain.",
         "limits": "Time grouping is not causation. Measurements are sampled. Current state is not historical state."})
 
 

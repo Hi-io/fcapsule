@@ -27,6 +27,13 @@ def wait_for_idle(control_plane: ControlPlane, timeout: float = 15) -> None:
 
 
 class ControlPlaneTests(unittest.TestCase):
+    def test_capture_window_end_is_not_alert_resolution(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
+            plane = ControlPlane(Path(directory) / "state")
+            incident = plane.ingest_case(REFERENCE_CASE, "checkout")
+            self.assertEqual(incident["status"], "firing")
+            self.assertIsNone(incident["ended_at"])
+
     def test_retained_report_does_not_reopen_expired_source(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
             source = Path(directory) / "source"

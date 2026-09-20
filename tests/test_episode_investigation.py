@@ -244,6 +244,12 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertEqual(len(context["evidence"]), 1)
         self.assertEqual(len(context["evidence"][0]["provenance"]), 2)
 
+    def test_active_alert_does_not_inherit_legacy_capture_window_end(self):
+        self.entries[0]["incident"].update(status="firing", ended_at="2026-09-20T12:10:00Z")
+        context = episode_context({"episode_id": "episode"}, self.entries)
+        self.assertIsNone(context["alerts"][0]["ended_at"])
+        self.assertIn("Independent failure phases", context["grouping_basis"])
+
     def test_diagnostic_codes_survive_reduction_and_secrets_do_not(self):
         self.assertNotEqual(template_for_message('exit_code=137 job=19'), template_for_message('exit_code=1 job=20'))
         self.assertEqual(template_for_message('exit_code=1 job=19'), template_for_message('exit_code=1 job=20'))
