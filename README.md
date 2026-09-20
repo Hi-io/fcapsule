@@ -8,7 +8,7 @@ It is not another root-cause chatbot and it does not replace Prometheus, OpenSea
 
 FCAPSule provides one control plane with three operator views:
 
-- **Operations** (`/console`) contains the active incident queue, archived incidents, and responder reports. A report expands beneath its incident and separates FM alerts, PM trends, anonymized log patterns, urgent retention actions, and exports.
+- **Operations** (`/console`) correlates related firing alerts into service-level incident episodes. An investigation expands beneath its episode with the signal timeline and responder reports, separating FM alerts, PM trends, anonymized log patterns, urgent retention actions, and exports.
 - **Targets** (`/targets`) configures and tests Prometheus, OpenSearch, and Kubernetes API access, controls namespace scope and polling, and shows coverage for currently observed applications.
 - **Settings** (`/settings`) controls incident retention and the optional cited-briefing model. The default retention is 30 days. The provider key remains local in `.env` and is never returned through the console or stored in SQLite.
 

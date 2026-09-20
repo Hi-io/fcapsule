@@ -16,11 +16,14 @@ Use `--host`, `--port`, and `--state-dir` to change the binding or storage locat
 
 ## Operations View
 
-The Operations view shows:
+The Operations view treats an incident episode, not an individual alert notification, as the operator's unit of work. Only firing Prometheus alerts open work. Signals for the same application within a 15-minute correlation window join one episode; later signals remain individually auditable and can retain their own reports.
 
-- an incident queue ordered by severity and capture time;
-- an **Open report** action for each incident with a retained capsule; the report expands directly below that queue row;
-- archive and restore controls that keep resolved incidents out of the active queue without deleting evidence;
+The view shows:
+
+- an episode queue ordered by latest activity;
+- severity and lifecycle state, affected application, latest signal time, related-signal count, and report readiness;
+- an **Open investigation** action that expands the related signal timeline and selected report directly below the episode;
+- archive and restore controls that keep an episode out of the active queue without deleting its signals or evidence;
 - incident impact, a verified investigation path, uncertainty, and concrete next checks;
 - FM sequence, PM changes, representative evidence, topology, and trace-source retention context;
 
@@ -38,7 +41,7 @@ Application coverage is shown on Targets because it describes current source dis
 
 Settings combines lifecycle and optional AI configuration. Incident retention defaults to 30 days and accepts values from 1 to 3650 days. FCAPSule permanently removes expired active or archived incidents, their metadata, and managed report/capsule files. The age is measured from the time FCAPSule captured the incident, so importing an older event does not immediately discard it.
 
-Archiving is separate from retention: it hides an incident from the active queue but preserves the report and capsule. Archived incidents can be restored or permanently deleted from the archived view.
+Archiving is separate from retention: it hides an episode from the active queue but preserves all related signals, reports, and capsules. Archived episodes can be restored or permanently deleted from the archived view.
 
 For Kubernetes installation and source prerequisites, use `docs/kubernetes_deployment.md`.
 

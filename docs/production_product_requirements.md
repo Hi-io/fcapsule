@@ -43,10 +43,12 @@ The main console must show:
 
 - open and recently captured incidents ordered by severity and time;
 - service, environment, start time, affected scope, and report readiness;
-- a direct **Open report** action for every incident;
+- a direct **Open investigation** action for every correlated incident episode;
 - application coverage: which operational domains are connected for each application.
 
 The workspace must not make log reduction, retained bytes, model scores, token use, or a model comparison its primary content.
+
+An alert is a signal, not automatically a separate operator task. Pending rules must not enter the queue. Firing signals from the same application and degradation window should form one episode, while remaining visible in an ordered signal timeline for audit and report access. Correlation must be deterministic; an optional model may explain an episode but must not decide whether evidence is silently merged or discarded.
 
 ### Incident report
 

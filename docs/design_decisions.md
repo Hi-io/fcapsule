@@ -19,6 +19,10 @@ separate prevents the product from becoming a simulator or container controller.
 
 External model availability and privacy approval cannot be assumed. Evidence selection, baseline hypotheses, and citation verification therefore work without credentials. Pretrained models are an optional reasoning layer over the same selected evidence.
 
+## Episodes Above Alert Signals
+
+Prometheus alerts are retained as individual signals, but Operations groups firing signals for the same application inside a 15-minute activity window. This makes one service degradation one operator task while preserving every source alert and report. Pending rules do not open episodes. Correlation and lifecycle state are deterministic so alert grouping remains explainable when the model provider is unavailable.
+
 ## Domain-Balanced Selection
 
 Global ranking alone allowed similarly scored PM series to displace diagnostic logs. The selector now reserves capacity per domain and prioritizes representative error, retry, latency, lock, pool, and telemetry-health groups before filling by score.
