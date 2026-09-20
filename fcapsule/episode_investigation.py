@@ -103,6 +103,8 @@ low sampled memory cannot exclude a brief OOM. Namespace proximity does not esta
 When application logs identify a failing dependency, use dependency_evidence for a matching declared Service
 before delegating its log inspection to the operator, if the check budget allows. Shared config alone does not prove traffic.
 Relative baseline changes (e.g. +600%) are not utilization percentages; compare absolute use with configured limits.
+Use latest_alert_at and at_or_after_latest_alert to distinguish current-phase measurements from earlier baseline.
+Healthy samples before an alert do not prove recovery after it or exclude resource retention during the failure.
 Respect tool metric_semantics. An OOMKilled flag with a contemporaneous restart is positive termination evidence;
 low sampled working set or missing cache logs alone do not weaken OOM. Separate observed termination from its unconfirmed mechanism.
 Describe a next manual observation without inventing metric names, paths or APIs. memory.max is a configured cgroup limit, not measured peak usage.

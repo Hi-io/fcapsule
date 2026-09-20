@@ -181,6 +181,16 @@ class LiveSourceTests(unittest.TestCase):
         self.assertEqual(baseline_range["lte"], "2026-09-20T00:05:00Z")
         self.assertEqual(incident_range["gte"], "2026-09-20T00:05:00Z")
 
+    def test_literal_search_reserves_post_alert_capacity_too(self):
+        adapter = OpenSearchAdapter("http://opensearch")
+        adapter.transport = FocusedLogTransport()
+        start = datetime(2026, 9, 20, tzinfo=timezone.utc)
+        adapter.collect_logs("shop", "api-1", start, start + timedelta(minutes=10),
+                             limit=8, focus=start + timedelta(minutes=5), terms=["connection"])
+        self.assertEqual([item[2]["size"] for item in adapter.transport.requests], [2, 6])
+        for _, _, body in adapter.transport.requests:
+            self.assertEqual(body["query"]["bool"]["should"], [{"match_phrase": {"message": "connection"}}])
+
     def test_kubernetes_snapshot_masks_sensitive_configmap_keys(self):
         adapter = KubernetesAdapter("http://kubernetes")
         adapter.transport = FakeTransport(

@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import Mock
 
 from fcapsule.episode_investigation import assessment_payload, run_investigation, validate_assessment
-from fcapsule.investigation_tools import InvestigationTools, episode_context, log_patterns, metric_summary, scrub
+from fcapsule.investigation_tools import InvestigationTools, episode_context, log_patterns, metric_summary, scrub, stamp
 from fcapsule.processing.anonymizer import anonymize_text, template_for_message
 
 
@@ -205,7 +205,7 @@ class InvestigationToolTests(unittest.TestCase):
         self.logs.collect_logs.return_value = []
         result = self.kit.execute("search_logs", {"terms": ["decoder"]})
         self.assertEqual(result["scanned_lines"], 0)
-        self.assertEqual(self.logs.collect_logs.call_args.kwargs, {"limit": 300, "terms": ["decoder"]})
+        self.assertEqual(self.logs.collect_logs.call_args.kwargs, {"limit": 300, "terms": ["decoder"], "focus": self.kit.focus_time})
         self.assertEqual(self.logs.collect_logs.call_args.args[:2], ("ns", "worker-1"))
 
     def test_dependency_checks_require_a_declared_service(self):
@@ -228,7 +228,7 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertEqual(result["unavailable_sources"], ["Prometheus"])
         self.assertEqual(result["patterns"][0]["fields"]["mysql_error_code"], "1054")
         self.assertEqual(self.logs.collect_logs.call_args.args[:2], ("ns", "inventory-1"))
-        self.assertEqual(self.logs.collect_logs.call_args.kwargs, {"limit": 200, "terms": ["1054"]})
+        self.assertEqual(self.logs.collect_logs.call_args.kwargs, {"limit": 200, "terms": ["1054"], "focus": self.kit.focus_time})
         self.assertIn("not historical", result["limitation"])
         self.assertNotIn("private", json.dumps(result))
         self.assertEqual(self.kit.pods, ["worker-1"])
@@ -236,6 +236,24 @@ class InvestigationToolTests(unittest.TestCase):
     def test_sql_error_codes_do_not_collapse_into_one_pattern(self):
         groups = log_patterns([{"message": '{"mysql_error_code":1054}'}, {"message": '{"mysql_error_code":1205}'}])
         self.assertEqual(groups["matching_patterns"], 2)
+
+    def test_post_alert_metrics_do_not_mix_in_healthy_baseline(self):
+        series = [{"metric": "connections", "values": [["2026-09-20T12:00:00Z", 1],
+                  ["2026-09-20T12:05:00Z", 40], ["2026-09-20T12:06:00Z", 40]]}]
+        result = metric_summary(series, stamp("2026-09-20T12:04:00Z"))[0]
+        self.assertEqual(result["min"], 1)
+        self.assertEqual(result["at_or_after_latest_alert"]["min"], 40)
+        self.assertEqual(result["at_or_after_latest_alert"]["samples"], 2)
+        self.assertEqual(metric_summary(series, stamp("2026-09-20T12:10:00Z"))[0]["at_or_after_latest_alert"], {"samples": 0})
+
+    def test_log_focus_uses_latest_member_alert(self):
+        self.entries[0]["incident"]["started_at"] = "2026-09-20T12:02:00Z"
+        later = copy.deepcopy(self.entries[0])
+        later["incident"]["started_at"] = "2026-09-20T12:06:00Z"
+        kit = InvestigationTools([*self.entries, later], self.kit.application, self.sources)
+        self.logs.collect_logs.return_value = []
+        kit.execute("search_logs", {"terms": ["connection"]})
+        self.assertEqual(self.logs.collect_logs.call_args.kwargs["focus"], stamp("2026-09-20T12:06:00Z"))
 
     def test_dedup_keeps_member_provenance(self):
         other = copy.deepcopy(self.entries[0])

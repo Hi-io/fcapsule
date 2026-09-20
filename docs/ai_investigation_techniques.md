@@ -118,7 +118,7 @@ retained termination and may have been replaced by a later restart.
 | `resource_history` | Fixed Prometheus expressions for CPU, memory, limits, throttling, restarts, readiness and last OOM termination | Captured pod; at most thirty-minute incident window; bounded summaries |
 | `search_logs` | OpenSearch log queries for a captured pod and incident window | Three literal terms of at most eighty characters; 300 lines; twelve returned patterns |
 | `compare_baseline` | Same workload's ready peer, otherwise preceding affected-pod window | Fixed resource expressions; explicit comparability caveat |
-| `database_pressure` | Three MySQL-exporter connection/limit series in the episode namespace | Four series per expression; labels retained; no inferred dependency from namespace proximity |
+| `database_pressure` | Three MySQL-exporter connection/limit expressions plus `mysql_up` reachability in the episode namespace | Four series per expression; labels retained; no inferred dependency from namespace proximity |
 | `dependency_evidence` | One selector-backed Service explicitly declared by the affected workload's endpoint environment configuration | Same namespace; one current pod; 200 log lines, fixed resource metrics and eight configuration records; no arbitrary endpoints |
 | `review_omitted` | Stored, unselected log templates | Twelve returned candidates; no network access |
 
@@ -153,6 +153,14 @@ The investigator is explicitly told that membership does not connect causes. Act
 alerts no longer inherit an `ended_at` value from the capture-window boundary;
 legacy active records are normalized in the model context. Resolution time and the
 end of a telemetry query window are different observations.
+
+Live literal searches reserve up to one quarter of their line budget for the
+period before the latest member alert and the rest for matching logs after it.
+Previously, ascending matches could fill the budget with older failures from the
+same episode. Resource and database results now include a separate sampled summary
+at or after that alert. A healthy earlier baseline is not evidence that a later
+connection leak recovered. `mysql_up` identifies exporter collection failure;
+it does not by itself establish that the MySQL process stopped.
 
 Live queries require an incident captured through the live integration, matching
 configured cluster identity and allowed namespace. Imported cases use retained

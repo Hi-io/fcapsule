@@ -75,12 +75,12 @@ class OpenSearchAdapter:
         terms: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         limit = min(max(1, limit), 10000)
-        if terms:
-            hits = self._log_hits(namespace, pod, start, end, limit, "asc", terms)
-        elif focus and start < focus < end:
+        if focus and start < focus < end:
             baseline_size = max(1, limit // 4)
-            hits = self._log_hits(namespace, pod, start, focus, baseline_size, "desc")
-            hits.extend(self._log_hits(namespace, pod, focus, end, limit - baseline_size, "asc"))
+            hits = self._log_hits(namespace, pod, start, focus, baseline_size, "desc", terms)
+            hits.extend(self._log_hits(namespace, pod, focus, end, limit - baseline_size, "asc", terms))
+        elif terms:
+            hits = self._log_hits(namespace, pod, start, end, limit, "asc", terms)
         else:
             hits = self._log_hits(namespace, pod, start, end, limit, "desc")
 

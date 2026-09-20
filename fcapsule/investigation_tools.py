@@ -27,7 +27,7 @@ def stamp(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-def metric_summary(series: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def metric_summary(series: list[dict[str, Any]], focus: datetime | None = None) -> list[dict[str, Any]]:
     result = []
     for item in series[:24]:
         points = [point for point in item.get("values", []) if math.isfinite(float(point[1]))]
@@ -37,7 +37,14 @@ def metric_summary(series: list[dict[str, Any]]) -> list[dict[str, Any]]:
         result.append({"metric": item["metric"], "labels": item.get("labels", {}),
                        "min": min(values), "max": max(values), "median": statistics.median(values),
                        "samples": len(points), "start": points[0][0], "end": points[-1][0],
+                       "first": values[0], "last": values[-1],
                        "trend": points[::max(1, len(points) // 24)][:25]})
+        if focus:
+            recent = [point for point in points if stamp(str(point[0])) >= focus]
+            recent_values = [float(point[1]) for point in recent]
+            result[-1]["at_or_after_latest_alert"] = ({"samples": len(recent), "start": recent[0][0], "end": recent[-1][0],
+                "min": min(recent_values), "max": max(recent_values), "median": statistics.median(recent_values),
+                "first": recent_values[0], "last": recent_values[-1]} if recent else {"samples": 0})
     return result
 
 
@@ -97,7 +104,7 @@ class InvestigationTools:
         "resource_history": "Read captured-window CPU/memory/limits/throttling/restarts/OOM metrics. args: {pod?: known pod}",
         "search_logs": "Search incident-window logs on a known pod for up to 3 literal terms, preserving diagnostic variants. args: {pod?: known pod, terms: [text]}",
         "compare_baseline": "Compare a ready peer with the same workload, or the preceding equal time window. args: {}",
-        "database_pressure": "Query namespace-scoped MySQL connection/max-connection series if exported. Not automatically attributed to this workload. args: {}",
+        "database_pressure": "Query namespace-scoped MySQL connection/limit series and exporter database reachability, with latest-alert phase summaries. Not automatically attributed to this workload. args: {}",
         "dependency_evidence": "Follow one declared same-namespace Service from workload_state.declared_dependencies; inspect one selected pod's incident logs, metrics and current config. Corroborate the dependency with application evidence. args: {service: declared name, terms?: up to 3 literal log terms}",
         "review_omitted": "Inspect candidate evidence excluded from the initial selection, including possible counterevidence. args: {terms?: [text]}",
     }
@@ -110,6 +117,7 @@ class InvestigationTools:
         self.window_start = min(stamp(entry["capsule"]["case"]["window"]["start"]) for entry in entries)
         self.window_end = min(datetime.now(timezone.utc), max(stamp(entry["capsule"]["case"]["window"]["end"]) for entry in entries))
         self.window_start = max(self.window_start, self.window_end - timedelta(minutes=30))
+        self.focus_time = max((stamp(item["incident"]["started_at"]) for item in entries if item["incident"].get("started_at")), default=self.window_start)
 
     def _adapters(self):
         config = self.sources.configuration()
@@ -175,12 +183,13 @@ class InvestigationTools:
             target = targets[0]
             result = {"source": "Declared dependency: Kubernetes + OpenSearch + Prometheus", "pod": target["name"],
                       "service": arguments["service"], "configured_via": matching, "matching_pods": len(targets),
+                      "latest_alert_at": self.focus_time.isoformat(),
                       "window": [self.window_start.isoformat(), self.window_end.isoformat()], "observations": [],
                       "unavailable_sources": [], "observed_at": datetime.now(timezone.utc).isoformat(),
                       "limitation": "One pod sampled. Declaration is not proof of traffic or causation. Service membership and config are current, not historical. Missing samples do not prove health."}
             for source, collect in (
-                ("OpenSearch", lambda: log_patterns(opensearch.collect_logs(self.namespace, target["name"], self.window_start, self.window_end, limit=200, terms=terms))),
-                ("Prometheus", lambda: {"observations": metric_summary(prometheus.collect_pod_metrics(self.namespace, target["name"], self.window_start, self.window_end))}),
+                ("OpenSearch", lambda: log_patterns(opensearch.collect_logs(self.namespace, target["name"], self.window_start, self.window_end, limit=200, terms=terms, focus=self.focus_time))),
+                ("Prometheus", lambda: {"observations": metric_summary(prometheus.collect_pod_metrics(self.namespace, target["name"], self.window_start, self.window_end), self.focus_time)}),
                 ("Kubernetes", lambda: {"observations": kubernetes.configuration_snapshot(target)[:8]}),
             ):
                 try:
@@ -197,8 +206,8 @@ class InvestigationTools:
         if not pod and name != "database_pressure":
             raise ValueError("No captured pod identity is available")
         if name == "resource_history":
-            return scrub({"source": "Prometheus", "pod": pod, "observations": metric_summary(
-                prometheus.collect_pod_metrics(self.namespace, pod, self.window_start, self.window_end)),
+            return scrub({"source": "Prometheus", "pod": pod, "latest_alert_at": self.focus_time.isoformat(), "observations": metric_summary(
+                prometheus.collect_pod_metrics(self.namespace, pod, self.window_start, self.window_end), self.focus_time),
                 "metric_semantics": {
                     "pod_oom_terminated": "Kubernetes last-termination reason OOMKilled (1=yes); a state flag, not an event count. Correlate its onset with the restart counter. A concurrent flag/restart is positive OOM evidence even if the peak was not sampled.",
                     "pod_memory_working_set_bytes": "Sampled working set is not peak total cgroup-accounted memory. Low samples cannot exclude an OOM or establish a false OOM alert.",
@@ -207,8 +216,9 @@ class InvestigationTools:
                     "pod_memory_limit_bytes": "Configured pod-summed limit, not measured memory peak. Multi-container attribution needs individual limits/termination state."},
                 "limitation": "Historical samples may be missing or miss short peaks; no source TTL was inferred."})
         if name == "search_logs":
-            logs = opensearch.collect_logs(self.namespace, pod, self.window_start, self.window_end, limit=300, terms=terms)
+            logs = opensearch.collect_logs(self.namespace, pod, self.window_start, self.window_end, limit=300, terms=terms, focus=self.focus_time)
             return scrub({"source": "OpenSearch", "pod": pod, "window": [self.window_start.isoformat(), self.window_end.isoformat()],
+                         "latest_alert_at": self.focus_time.isoformat(), "sampling": "Up to one quarter before the latest alert; remaining budget at or after it. Bounded matching samples, not complete event counts.",
                          **log_patterns(logs)})
         if name == "compare_baseline":
             peers = [item for item in kubernetes.list_pods({self.namespace})
@@ -227,9 +237,10 @@ class InvestigationTools:
                 "comparability": "Unverified: traffic, historical readiness, limits and configuration may differ. Not a controlled experiment."})
         selector = json.dumps(self.namespace)
         observations = []
-        for metric in ("mysql_global_status_threads_connected", "mysql_global_status_threads_running", "mysql_global_variables_max_connections"):
+        for metric in ("mysql_global_status_threads_connected", "mysql_global_status_threads_running", "mysql_global_variables_max_connections", "mysql_up"):
             for item in prometheus.query_range(metric + "{namespace=" + selector + "}", self.window_start, self.window_end, 60)[:4]:
                 observations.extend(metric_summary([{"metric": metric, "labels": item.get("metric", {}),
-                    "values": [[datetime.fromtimestamp(float(t), timezone.utc).isoformat(), v] for t, v in item.get("values", [])]}]))
+                    "values": [[datetime.fromtimestamp(float(t), timezone.utc).isoformat(), v] for t, v in item.get("values", [])]}], self.focus_time))
         return scrub({"source": "Prometheus MySQL exporter", "scope": self.namespace, "observations": observations,
-            "limitation": "Exporter labels identify the database. Namespace proximity alone does not prove an application dependency. Missing series do not imply zero connections."})
+            "latest_alert_at": self.focus_time.isoformat(),
+            "limitation": "Exporter labels identify the database. Namespace proximity alone does not prove an application dependency. Missing series do not imply zero connections. mysql_up=0 means the exporter could not collect from MySQL, not necessarily that the database process stopped. Healthy samples before the latest alert do not establish recovery or disprove retained sessions during it."})
