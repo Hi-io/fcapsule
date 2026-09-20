@@ -234,9 +234,11 @@ function episodeTable(items, capsules, archived = false) {
         <time class="episode-time" datetime="${safe(item.started_at)}">${formatDate(item.started_at)}</time>
       </span></summary>
       <div class="episode-body" id="body-${safe(item.episode_id)}">
+        ${isOpen ? `
         <div class="investigation-toolbar">${episodeContext(item)}<div class="row-actions">${lifecycle}</div></div>
         ${reportLoading ? '<div class="analysis-state" role="status"><span class="spinner"></span>Opening retained evidence…</div>' : reportError ? `<p class="notice" role="alert">${safe(reportError)}</p>` : selectedReport ? reportPanel(selectedReport) : ''}
         <footer class="episode-footer"><span>${safe(application?.cluster || '')} / ${safe(application?.namespace || '')} · ${item.status === 'resolved' ? 'Resolved ' + formatDate(item.ended_at) : 'Last alert ' + formatDate(item.last_activity_at)}</span><span>Grouped by workload and time</span></footer>
+        ` : ''}
       </div></details></article>`;
   }).join('');
 }
