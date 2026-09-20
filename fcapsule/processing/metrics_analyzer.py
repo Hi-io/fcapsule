@@ -53,7 +53,8 @@ def analyze_metrics(bundle: CaseBundle) -> list[dict[str, Any]]:
             scale = max(abs(baseline_median) * 0.05, 1e-9)
         robust_z = (incident_peak - baseline_median) / scale
         percentage_change = (
-            (incident_peak - baseline_median) / abs(baseline_median) * 100 if baseline_median != 0 else math.copysign(1000.0, incident_peak)
+            (incident_peak - baseline_median) / abs(baseline_median) * 100 if baseline_median != 0
+            else (math.copysign(1000.0, incident_peak) if incident_peak != 0 else 0.0)
         )
         anomaly_score = min(1.0, abs(robust_z) / 6 * 0.65 + min(abs(percentage_change), 200) / 200 * 0.35)
         labels = {str(key): str(value) for key, value in series.get("labels", {}).items()}

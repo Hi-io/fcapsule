@@ -51,6 +51,7 @@ class FCAPSuleHTTPServer(ThreadingHTTPServer):
         super().__init__(address, FCAPSuleHandler)
 
     def server_close(self) -> None:
+        self.control_plane.investigator.stopping = True
         self.control_plane.stop_live_monitoring()
         self.control_plane.briefing_executor.shutdown(wait=False, cancel_futures=True)
         super().server_close()
@@ -112,6 +113,13 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             return
         if path == "/healthz":
             self._json({"status": "ok"})
+            return
+        if path.startswith("/api/episodes/") and path.endswith("/investigation"):
+            episode_id = unquote(path.removeprefix("/api/episodes/").removesuffix("/investigation").rstrip("/"))
+            if not self.server.control_plane.store.get_episode(episode_id):
+                self._json({"error": "Episode not found"}, HTTPStatus.NOT_FOUND)
+            else:
+                self._json(self.server.control_plane.investigator.read(episode_id))
             return
         if path == "/api/settings/ai":
             self._json(self.server.control_plane.ai_configuration())
@@ -199,6 +207,10 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
                 status = HTTPStatus.ACCEPTED if result.get("status") in {"queued", "running"} else HTTPStatus.OK
                 self._json(result, status)
                 return
+            if path.startswith("/api/episodes/") and path.endswith("/investigation"):
+                episode_id = unquote(path.removeprefix("/api/episodes/").removesuffix("/investigation").rstrip("/"))
+                self._json(self.server.control_plane.investigator.start(episode_id, retry=True), HTTPStatus.ACCEPTED)
+                return
             if path.startswith("/api/incidents/") and path.endswith("/archive"):
                 incident_id = unquote(path.removeprefix("/api/incidents/").removesuffix("/archive").rstrip("/"))
                 self._json(self.server.control_plane.set_incident_archived(incident_id, True))
@@ -244,7 +256,7 @@ def create_app_server(
 ) -> FCAPSuleHTTPServer:
     control_plane = ControlPlane(state_dir)
     server = FCAPSuleHTTPServer((host, port), control_plane)
-    control_plane.resume_ai_briefings()
+    control_plane.investigator.resume()
     control_plane.start_live_monitoring()
     return server
 

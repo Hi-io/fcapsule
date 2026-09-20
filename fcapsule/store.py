@@ -419,6 +419,11 @@ class FCAPSuleStore:
             ).fetchall()
             return [self._episode_row(connection, row) for row in rows]
 
+    def episode_for_incident(self, incident_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT episode_id FROM episode_incidents WHERE incident_id = ?", (incident_id,)).fetchone()
+        return self.get_episode(row["episode_id"]) if row else None
+
     def get_episode(self, episode_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(

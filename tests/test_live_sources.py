@@ -131,7 +131,7 @@ class LiveSourceTests(unittest.TestCase):
         self.assertIn(("shop", "api-1"), adapter.pod_inventory({"shop"}))
         end = datetime(2026, 9, 20, tzinfo=timezone.utc)
         metrics = adapter.collect_pod_metrics("shop", "api-1", end - timedelta(minutes=5), end)
-        self.assertEqual(len(metrics), 4)
+        self.assertEqual(len(metrics), 8)
         self.assertEqual(metrics[0]["labels"]["pod"], "api-1")
 
     def test_opensearch_adapter_maps_filebeat_fields(self):

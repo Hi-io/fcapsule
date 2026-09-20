@@ -72,9 +72,12 @@ class OpenSearchAdapter:
         end: datetime,
         limit: int = 2000,
         focus: datetime | None = None,
+        terms: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         limit = min(max(1, limit), 10000)
-        if focus and start < focus < end:
+        if terms:
+            hits = self._log_hits(namespace, pod, start, end, limit, "asc", terms)
+        elif focus and start < focus < end:
             baseline_size = max(1, limit // 4)
             hits = self._log_hits(namespace, pod, start, focus, baseline_size, "desc")
             hits.extend(self._log_hits(namespace, pod, focus, end, limit - baseline_size, "asc"))
@@ -120,6 +123,7 @@ class OpenSearchAdapter:
         end: datetime,
         size: int,
         order: str,
+        terms: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         payload = self.transport.request(
             self.search_path,
@@ -133,7 +137,8 @@ class OpenSearchAdapter:
                             {"range": {"@timestamp": {"gte": _iso(start), "lte": _iso(end)}}},
                             {"term": {"kubernetes.namespace.keyword": namespace}},
                             {"term": {"kubernetes.pod.name.keyword": pod}},
-                        ]
+                        ],
+                        **({"should": [{"match_phrase": {"message": term}} for term in terms], "minimum_should_match": 1} if terms else {}),
                     }
                 },
             },

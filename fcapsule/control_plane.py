@@ -18,6 +18,7 @@ from fcapsule.io.archive_writer import create_archive
 from fcapsule.io.case_loader import load_case
 from fcapsule.io.output_writer import write_json
 from fcapsule.live_sources import LiveSourceCoordinator
+from fcapsule.investigation_service import InvestigationService
 from fcapsule.pipeline import investigate_case
 from fcapsule.reasoning.incident_briefing import generate_incident_briefing
 from fcapsule.store import FCAPSuleStore, utc_now
@@ -38,6 +39,7 @@ class ControlPlane:
         self.briefing_lock = threading.RLock()
         self.briefing_jobs: set[str] = set()
         self.briefing_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="fcapsule-briefing")
+        self.investigator = InvestigationService(self)
         self.running = False
         self.active_job: str | None = None
         self.current_incident_id: str | None = None
@@ -132,7 +134,7 @@ class ControlPlane:
         if api_key:
             write_env_value(self.state_dir / ".env", "DEEPSEEK_API_KEY", api_key)
         self._persist_ai_settings()
-        self.resume_ai_briefings()
+        self.investigator.resume()
         return self.ai_configuration()
 
     def general_configuration(self) -> dict[str, Any]:
@@ -176,11 +178,14 @@ class ControlPlane:
         if not incident:
             raise KeyError(f"Unknown incident: {incident_id}")
         capsule = self.store.get_capsule_for_incident(incident_id)
+        episode = self.store.episode_for_incident(incident_id)
         with self.briefing_lock:
             self.store.delete_incident(incident_id)
             self._remove_managed_tree(incident.get("case_dir"))
             if capsule:
                 self._remove_managed_tree(capsule.get("output_dir"))
+            if episode:
+                self.investigator.invalidate(episode["episode_id"])
         if self.current_incident_id == incident_id:
             active = self.store.list_incidents(limit=1)
             self.current_incident_id = active[0]["incident_id"] if active else None
@@ -461,7 +466,7 @@ class ControlPlane:
                 "signal_preservation": evaluation["important_signal_preservation"],
             },
         )
-        self.start_ai_briefing(incident_id)
+        self.investigator.start_by_incident(incident_id)
         return capsule
 
     def snapshot(self) -> dict[str, Any]:
@@ -481,6 +486,11 @@ class ControlPlane:
                 "sources": json.loads(json.dumps(self.source_state)),
             }
         state["overview"] = self.store.overview()
+        for key in ("episodes", "archived_episodes"):
+            for episode in state["overview"].get(key, []):
+                investigation = self.investigator.read(episode["episode_id"])
+                episode["investigation"] = {"status": investigation["status"],
+                    "completed_checks": sum(check["status"] == "completed" for check in investigation.get("checks", []))}
         return state
 
     def capsule_payload(self, capsule_id: str) -> dict[str, Any] | None:
@@ -538,6 +548,7 @@ class ControlPlane:
                 "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
             },
             "ai_briefing": json.loads(briefing_path.read_text(encoding="utf-8")) if briefing_path.is_file() else None,
+            "investigation": self.investigator.for_incident(incident_id),
         }
 
     def start_ai_briefing(self, incident_id: str, retry: bool = False) -> dict[str, Any]:
@@ -565,6 +576,7 @@ class ControlPlane:
 
     @staticmethod
     def _write_briefing_state(path: Path, result: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(".tmp")
         write_json(temporary, result)
         temporary.replace(path)

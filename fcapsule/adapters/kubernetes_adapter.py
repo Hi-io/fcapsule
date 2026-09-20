@@ -71,6 +71,7 @@ class KubernetesAdapter:
                     "containers": [container.get("name") for container in spec.get("containers", [])],
                     "images": [container.get("image") for container in spec.get("containers", [])],
                     "raw_spec": spec,
+                    "container_statuses": status.get("containerStatuses", []),
                 }
             )
         return pods
@@ -90,6 +91,18 @@ class KubernetesAdapter:
                 "phase": pod.get("phase"),
                 "ready": pod.get("ready"),
                 "configmap_refs": sorted(names),
+                "uid": pod.get("uid"),
+                "resources": [
+                    {"name": item.get("name"), "requests": item.get("resources", {}).get("requests", {}),
+                     "limits": item.get("resources", {}).get("limits", {})}
+                    for item in pod.get("raw_spec", {}).get("containers", [])
+                ],
+                "container_states": [
+                    {"name": item.get("name"), "restart_count": item.get("restartCount", 0),
+                     "ready": item.get("ready"), "state": _termination_state(item.get("state", {})),
+                     "last_state": _termination_state(item.get("lastState", {}))}
+                    for item in pod.get("container_statuses", [])
+                ],
             }
         ]
         for name in sorted(names):
@@ -116,6 +129,13 @@ class KubernetesAdapter:
                 }
             )
         return items
+
+
+def _termination_state(state: dict[str, Any]) -> dict[str, Any]:
+    # Preserve diagnostic fields, never termination messages containing arbitrary logs.
+    allowed = {"reason", "exitCode", "signal", "startedAt", "finishedAt"}
+    return {kind: {key: value for key, value in fields.items() if key in allowed}
+            for kind, fields in state.items() if isinstance(fields, dict)}
 
 
 def _referenced_configmaps(spec: dict[str, Any]) -> set[str]:

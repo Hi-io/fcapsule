@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import math
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
@@ -131,13 +132,17 @@ class PrometheusAdapter:
             "pod_memory_working_set_bytes": f'sum(container_memory_working_set_bytes{{{selector},container!="",image!=""}}) by (namespace,pod)',
             "pod_container_restarts_total": f'sum(kube_pod_container_status_restarts_total{{{selector}}}) by (namespace,pod)',
             "pod_ready": f'min(kube_pod_status_ready{{{selector},condition="true"}}) by (namespace,pod)',
+            "pod_memory_limit_bytes": f'sum(kube_pod_container_resource_limits{{{selector},resource="memory"}}) by (namespace,pod)',
+            "pod_cpu_limit_cores": f'sum(kube_pod_container_resource_limits{{{selector},resource="cpu"}}) by (namespace,pod)',
+            "pod_cpu_throttled_ratio": f'sum(rate(container_cpu_cfs_throttled_periods_total{{{selector},container!=""}}[2m])) / clamp_min(sum(rate(container_cpu_cfs_periods_total{{{selector},container!=""}}[2m])), 0.000001)',
+            "pod_oom_terminated": f'max(kube_pod_container_status_last_terminated_reason{{{selector},reason="OOMKilled"}}) by (namespace,pod)',
         }
         duration = max(1, int((end - start).total_seconds()))
         step = max(15, min(60, duration // 30 or 15))
         series: list[dict[str, Any]] = []
         for metric_name, expression in expressions.items():
             for result in self.query_range(expression, start, end, step):
-                points = [[_timestamp(float(timestamp)), float(value)] for timestamp, value in result.get("values", [])]
+                points = [[_timestamp(float(timestamp)), float(value)] for timestamp, value in result.get("values", []) if math.isfinite(float(value))]
                 if len(points) < 2:
                     continue
                 labels = {str(key): str(value) for key, value in result.get("metric", {}).items()}
