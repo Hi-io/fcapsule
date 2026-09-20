@@ -65,6 +65,8 @@ class PrometheusAdapter:
         data = self._api("/api/v1/alerts") or {}
         alerts = []
         for item in data.get("alerts", []):
+            if str(item.get("state", "firing")).lower() != "firing":
+                continue
             labels = dict(item.get("labels", {}))
             annotations = dict(item.get("annotations", {}))
             alerts.append(

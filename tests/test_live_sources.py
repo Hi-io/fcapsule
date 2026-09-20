@@ -74,6 +74,13 @@ class LiveSourceTests(unittest.TestCase):
                                 "state": "firing",
                                 "activeAt": "2026-09-20T00:00:00Z",
                             }
+                            ,
+                            {
+                                "labels": {"alertname": "PendingThreshold", "severity": "warning", "namespace": "shop"},
+                                "annotations": {"summary": "Not firing yet"},
+                                "state": "pending",
+                                "activeAt": "2026-09-20T00:00:10Z",
+                            },
                         ]
                     },
                 },
@@ -118,7 +125,8 @@ class LiveSourceTests(unittest.TestCase):
                 },
             }
         )
-        self.assertEqual(adapter.active_alerts()[0]["alertname"], "PodRestart")
+        alerts = adapter.active_alerts()
+        self.assertEqual([item["alertname"] for item in alerts], ["PodRestart"])
         self.assertIn("increase(", adapter.alert_rules()["PodRestart"]["query"])
         self.assertIn(("shop", "api-1"), adapter.pod_inventory({"shop"}))
         end = datetime(2026, 9, 20, tzinfo=timezone.utc)

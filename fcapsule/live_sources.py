@@ -182,18 +182,24 @@ class LiveSourceCoordinator:
                 # that do not expose rule definitions.
                 alert_rules = {}
         captured: list[dict[str, Any]] = []
+        active_incident_ids: set[str] = set()
         for alert in alerts:
             rule = alert_rules.get(str(alert.get("alertname", "")))
             if rule:
                 alert["rule"] = rule
             labels = alert.get("labels", {})
             namespace = str(labels.get("namespace", ""))
-            if alert["alertname"] in IGNORED_ALERTS or (namespaces and namespace not in namespaces):
+            if (
+                str(alert.get("status", "")).lower() != "firing"
+                or alert["alertname"] in IGNORED_ALERTS
+                or (namespaces and namespace not in namespaces)
+            ):
                 continue
             pod = _resolve_alert_pod(pods, namespace, labels)
             if pod is None or not alert.get("startsAt"):
                 continue
             incident_id = _incident_id(alert, namespace, pod["name"])
+            active_incident_ids.add(incident_id)
             if self.store.get_incident(incident_id):
                 continue
             app_id = _app_id(config["cluster_name"], namespace, pod["workload"])
@@ -205,7 +211,8 @@ class LiveSourceCoordinator:
             "last_sync_at": utc_now(),
             "pods_visible": len(pods),
             "applications_visible": len(grouped),
-            "active_alerts": len([item for item in alerts if item["alertname"] not in IGNORED_ALERTS]),
+            "active_alerts": len(active_incident_ids),
+            "active_incident_ids": sorted(active_incident_ids),
             "captured": captured,
             "configuration": config,
         }

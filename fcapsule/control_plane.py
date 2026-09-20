@@ -247,6 +247,7 @@ class ControlPlane:
             self._event("sources", "running", "Discovering workloads and checking telemetry coverage")
             result = self.live_sources.synchronize()
             captured = list(result.pop("captured", []))
+            active_incident_ids = set(result.pop("active_incident_ids", []))
             with self.lock:
                 self.source_state.update(result)
                 self.source_state["error"] = None
@@ -256,8 +257,10 @@ class ControlPlane:
                     item["app_id"],
                     item["app_name"],
                     self.source_configuration()["environment"],
+                    source_kind="live",
                 )
                 incident_ids.append(str(incident["incident_id"]))
+            self.store.reconcile_live_incidents(active_incident_ids, str(result["last_sync_at"]))
             if incident_ids and self.source_configuration()["auto_build_reports"]:
                 for incident_id in incident_ids:
                     self._build_capsule(incident_id)
@@ -281,6 +284,7 @@ class ControlPlane:
         app_id: str,
         app_name: str | None = None,
         environment: str = "development",
+        source_kind: str = "external",
     ) -> dict[str, Any]:
         """Register an externally captured normalized incident without copying raw telemetry."""
 
@@ -323,6 +327,7 @@ class ControlPlane:
                 "raw_bytes": raw_bytes,
                 "trace_access": metadata.get("trace_access", {"available": False, "raw_spans_retained": False}),
                 "summary": str(annotation.get("summary") or metadata["case_title"]),
+                "source_kind": source_kind,
             }
         )
         with self.lock:
