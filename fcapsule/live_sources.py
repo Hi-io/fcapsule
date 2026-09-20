@@ -277,7 +277,10 @@ class LiveSourceCoordinator:
         (case_dir / "metadata.yaml").write_text(yaml.safe_dump(metadata, sort_keys=False), encoding="utf-8")
         write_json(case_dir / "alert.json", alert)
         write_json(case_dir / "prometheus_metrics.json", {"window": metadata["window"], "series": prometheus.collect_pod_metrics(pod["namespace"], pod["name"], start, end)})
-        write_json(case_dir / "opensearch_logs.json", {"hits": opensearch.collect_logs(pod["namespace"], pod["name"], start, end)})
+        write_json(
+            case_dir / "opensearch_logs.json",
+            {"hits": opensearch.collect_logs(pod["namespace"], pod["name"], start, end, focus=alert_time)},
+        )
         write_json(case_dir / "kubernetes_config.json", {"items": kubernetes.configuration_snapshot(pod)})
         return case_dir
 

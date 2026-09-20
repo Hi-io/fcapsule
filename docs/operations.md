@@ -30,6 +30,8 @@ The report distinguishes its evidence by domain: FM alert records, PM trend line
 
 Targets is the live-source control surface. It shows connection health for Prometheus, OpenSearch, and the Kubernetes API and lets an operator change source URLs, the OpenSearch index pattern, cluster identity, namespace scope, poll interval, incident window, and automatic report generation. **Test connections** checks credentials and reachability without changing settings; **Sync now** performs immediate discovery and alert polling.
 
+For high-volume workloads, the OpenSearch capture budget is alert-focused. One quarter is reserved for the newest records immediately before the alert and three quarters for records from the alert onward. This preserves a small behavioral baseline without allowing routine traffic at the beginning of the incident window to displace the failure evidence.
+
 Application coverage is shown on Targets because it describes current source discovery rather than incident state. A discovered workload is mapped by cluster, namespace, workload, and pod. Workloads that disappear are omitted from current coverage while their historical incidents remain available.
 
 ## Settings View

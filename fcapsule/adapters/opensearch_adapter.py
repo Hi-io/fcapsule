@@ -71,26 +71,24 @@ class OpenSearchAdapter:
         start: datetime,
         end: datetime,
         limit: int = 2000,
+        focus: datetime | None = None,
     ) -> list[dict[str, Any]]:
-        payload = self.transport.request(
-            self.search_path,
-            method="POST",
-            body={
-                "size": min(max(1, limit), 10000),
-                "sort": [{"@timestamp": "asc"}],
-                "query": {
-                    "bool": {
-                        "filter": [
-                            {"range": {"@timestamp": {"gte": _iso(start), "lte": _iso(end)}}},
-                            {"term": {"kubernetes.namespace.keyword": namespace}},
-                            {"term": {"kubernetes.pod.name.keyword": pod}},
-                        ]
-                    }
-                },
-            },
-        )
+        limit = min(max(1, limit), 10000)
+        if focus and start < focus < end:
+            baseline_size = max(1, limit // 4)
+            hits = self._log_hits(namespace, pod, start, focus, baseline_size, "desc")
+            hits.extend(self._log_hits(namespace, pod, focus, end, limit - baseline_size, "asc"))
+        else:
+            hits = self._log_hits(namespace, pod, start, end, limit, "desc")
+
+        unique_hits: dict[str, dict[str, Any]] = {}
+        for hit in hits:
+            source = hit.get("_source", {})
+            key = str(hit.get("_id") or f"{source.get('@timestamp')}|{source.get('message')}|{source.get('log')}")
+            unique_hits.setdefault(key, hit)
+
         logs = []
-        for hit in payload.get("hits", {}).get("hits", []):
+        for hit in unique_hits.values():
             source = dict(hit.get("_source", {}))
             kubernetes = source.get("kubernetes", {}) if isinstance(source.get("kubernetes"), dict) else {}
             pod_data = kubernetes.get("pod", {}) if isinstance(kubernetes.get("pod"), dict) else {}
@@ -109,7 +107,38 @@ class OpenSearchAdapter:
                     "message": message,
                 }
             )
-        return [item for item in logs if item.get("@timestamp") and item["message"]]
+        return sorted(
+            (item for item in logs if item.get("@timestamp") and item["message"]),
+            key=lambda item: str(item["@timestamp"]),
+        )
+
+    def _log_hits(
+        self,
+        namespace: str,
+        pod: str,
+        start: datetime,
+        end: datetime,
+        size: int,
+        order: str,
+    ) -> list[dict[str, Any]]:
+        payload = self.transport.request(
+            self.search_path,
+            method="POST",
+            body={
+                "size": size,
+                "sort": [{"@timestamp": order}],
+                "query": {
+                    "bool": {
+                        "filter": [
+                            {"range": {"@timestamp": {"gte": _iso(start), "lte": _iso(end)}}},
+                            {"term": {"kubernetes.namespace.keyword": namespace}},
+                            {"term": {"kubernetes.pod.name.keyword": pod}},
+                        ]
+                    }
+                },
+            },
+        )
+        return list(payload.get("hits", {}).get("hits", []))
 
 
 def _log_level(source: dict[str, Any], message: str) -> str:

@@ -23,6 +23,34 @@ class FakeTransport:
         raise AssertionError(f"Unexpected request: {path}")
 
 
+class FocusedLogTransport:
+    def __init__(self):
+        self.requests = []
+
+    def request(self, path, method="GET", body=None):
+        self.requests.append((path, method, body))
+        order = body["sort"][0]["@timestamp"]
+        if order == "desc":
+            hit = {
+                "_id": "baseline",
+                "_source": {
+                    "@timestamp": "2026-09-20T00:04:59Z",
+                    "message": "inventory request completed",
+                    "kubernetes": {"namespace": "shop", "pod": {"name": "api-1"}},
+                },
+            }
+        else:
+            hit = {
+                "_id": "incident",
+                "_source": {
+                    "@timestamp": "2026-09-20T00:05:01Z",
+                    "message": "max_connections reached; checkout rejected",
+                    "kubernetes": {"namespace": "shop", "pod": {"name": "api-1"}},
+                },
+            }
+        return {"hits": {"hits": [hit]}}
+
+
 class LiveSourceTests(unittest.TestCase):
     def test_alert_for_disappeared_named_pod_is_not_reassigned(self):
         pods = [{"namespace": "shop", "name": "healthy-api", "workload": "api"}]
@@ -126,6 +154,24 @@ class LiveSourceTests(unittest.TestCase):
         logs = adapter.collect_logs("shop", "api-1", end - timedelta(minutes=5), end)
         self.assertEqual(logs[0]["level"], "ERROR")
         self.assertEqual(logs[0]["service"], "payments")
+
+    def test_opensearch_adapter_reserves_capacity_for_post_alert_logs(self):
+        adapter = OpenSearchAdapter("http://opensearch")
+        adapter.transport = FocusedLogTransport()
+        start = datetime(2026, 9, 20, tzinfo=timezone.utc)
+        focus = start + timedelta(minutes=5)
+
+        logs = adapter.collect_logs("shop", "api-1", start, start + timedelta(minutes=10), limit=8, focus=focus)
+
+        self.assertEqual([item["message"] for item in logs], [
+            "inventory request completed",
+            "max_connections reached; checkout rejected",
+        ])
+        self.assertEqual([request[2]["size"] for request in adapter.transport.requests], [2, 6])
+        baseline_range = adapter.transport.requests[0][2]["query"]["bool"]["filter"][0]["range"]["@timestamp"]
+        incident_range = adapter.transport.requests[1][2]["query"]["bool"]["filter"][0]["range"]["@timestamp"]
+        self.assertEqual(baseline_range["lte"], "2026-09-20T00:05:00Z")
+        self.assertEqual(incident_range["gte"], "2026-09-20T00:05:00Z")
 
     def test_kubernetes_snapshot_masks_sensitive_configmap_keys(self):
         adapter = KubernetesAdapter("http://kubernetes")
