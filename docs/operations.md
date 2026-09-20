@@ -18,6 +18,11 @@ Use `--host`, `--port`, and `--state-dir` to change the binding or storage locat
 
 The Operations view treats an incident episode, not an individual alert notification, as the operator's unit of work. Only firing Prometheus alerts open work. Signals for the same application within a 15-minute correlation window join one episode; later signals remain individually auditable and can retain their own reports.
 
+An active episode takes its title and severity from a currently firing signal, not
+an older resolved critical alert. Once resolved, its highest-severity historical
+signal represents the episode. Time grouping is a navigation aid, not evidence that
+consecutive failures share a root cause.
+
 The view shows:
 
 - an episode queue ordered by latest activity;

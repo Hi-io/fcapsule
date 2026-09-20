@@ -383,11 +383,12 @@ class FCAPSuleStore:
         if not signals:
             connection.execute("DELETE FROM incident_episodes WHERE episode_id = ?", (episode_id,))
             return
+        firing = [item for item in signals if str(item["status"]).lower() == "firing"]
         primary = max(
-            signals,
+            firing or signals,
             key=lambda item: (SEVERITY_RANK.get(str(item["severity"]).lower(), 0), str(item["started_at"])),
         )
-        active = any(str(item["status"]).lower() == "firing" for item in signals)
+        active = bool(firing)
         ended_values = [str(item["ended_at"]) for item in signals if item["ended_at"]]
         connection.execute(
             """

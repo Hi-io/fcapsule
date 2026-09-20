@@ -109,6 +109,26 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(store.list_episodes()[0]["status"], "active")
             self.assertEqual(store.list_episodes()[0]["signal_count"], 1)
 
+    def test_resolved_critical_alert_does_not_title_a_different_active_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = FCAPSuleStore(Path(directory) / "state.db")
+            store.upsert_application("app", "App", "shop", "local")
+            old = {"incident_id": "old", "app_id": "app", "case_dir": "/tmp/old",
+                   "started_at": "2026-09-20T10:00:00Z", "ended_at": "2026-09-20T10:02:00Z",
+                   "status": "resolved", "severity": "critical", "summary": "Past schema error"}
+            new = {"incident_id": "new", "app_id": "app", "case_dir": "/tmp/new",
+                   "started_at": "2026-09-20T10:05:00Z", "status": "firing", "severity": "warning",
+                   "summary": "Current lock contention"}
+            store.record_incident(old)
+            store.record_incident(new)
+            episode = store.list_episodes()[0]
+            self.assertEqual(episode["primary_incident_id"], "new")
+            self.assertEqual(episode["title"], "Current lock contention")
+            self.assertEqual(episode["severity"], "warning")
+            self.assertEqual(episode["signal_count"], 2)
+            store.record_incident({**new, "status": "resolved", "ended_at": "2026-09-20T10:07:00Z"})
+            self.assertEqual(store.list_episodes()[0]["severity"], "critical")
+
     def test_model_profile_validation(self):
         with tempfile.TemporaryDirectory() as directory:
             store = FCAPSuleStore(Path(directory) / "state.db")
