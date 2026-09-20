@@ -494,6 +494,23 @@ class FCAPSuleStore:
             for episode_id in affected:
                 self._refresh_episode(connection, episode_id)
 
+    def activate_live_incident(self, incident_id: str) -> bool:
+        """Promote a previously observed alert when Prometheus reports it firing."""
+
+        with self._connect() as connection:
+            result = connection.execute(
+                """
+                UPDATE incidents
+                SET status = 'firing', ended_at = NULL, source_kind = 'live'
+                WHERE incident_id = ?
+                """,
+                (incident_id,),
+            )
+            if result.rowcount == 0:
+                return False
+            self._assign_episode(connection, incident_id)
+        return True
+
     def get_incident(self, incident_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM incidents WHERE incident_id = ?", (incident_id,)).fetchone()

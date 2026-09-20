@@ -105,6 +105,9 @@ class StoreTests(unittest.TestCase):
                 }
             )
             self.assertEqual(store.list_episodes(), [])
+            self.assertTrue(store.activate_live_incident("pending-signal"))
+            self.assertEqual(store.list_episodes()[0]["status"], "active")
+            self.assertEqual(store.list_episodes()[0]["signal_count"], 1)
 
     def test_model_profile_validation(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -201,6 +201,7 @@ class LiveSourceCoordinator:
             incident_id = _incident_id(alert, namespace, pod["name"])
             active_incident_ids.add(incident_id)
             if self.store.get_incident(incident_id):
+                self.store.activate_live_incident(incident_id)
                 continue
             app_id = _app_id(config["cluster_name"], namespace, pod["workload"])
             case_dir = self._capture_case(config, prometheus, opensearch, kubernetes, alert, pod, incident_id)
