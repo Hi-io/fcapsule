@@ -31,8 +31,37 @@ def generate_hypotheses(selected: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ("mismatch", "schema", "configuration", "config", "unsafe-write"),
     )
     config_context = _first(selected, "configuration", ("configmap", "config", "environment"))
+    connection_log = _first(
+        selected,
+        "log_template",
+        ("max_connections", "connection pool", "rejected connection", "retained by connection"),
+    )
 
-    if config_mismatch_log and config_context:
+    if connection_log and config_context and alert and any(
+        term in (alert["title"] + " " + alert["summary"]).lower()
+        for term in ("mysql", "connection", "pool")
+    ):
+        support = [alert["evidence_id"], connection_log["evidence_id"], config_context["evidence_id"]]
+        hypotheses.append(
+            {
+                "hypothesis_id": "hyp_001",
+                "hypothesis": "Inventory connection retention may be consuming MySQL's configured connection budget and rejecting checkout work.",
+                "confidence": round(
+                    min(0.9, sum(next(item["score"] for item in selected if item["evidence_id"] == value) for value in support) / len(support)),
+                    3,
+                ),
+                "supporting_evidence": support,
+                "contradicting_evidence": [],
+                "missing_evidence": ["Connection ownership and pool checkout duration by process"],
+                "next_checks": [
+                    "Compare retained application sessions with the MySQL max_connections value captured from configuration.",
+                    "Identify the pool owner retaining sessions and release idle connections before increasing the server limit.",
+                    "Confirm checkout recovery after connection utilization falls below the alert threshold.",
+                ],
+            }
+        )
+
+    if config_mismatch_log and config_context and not hypotheses:
         support = [config_mismatch_log["evidence_id"], config_context["evidence_id"]]
         if alert:
             support.append(alert["evidence_id"])

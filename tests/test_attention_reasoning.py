@@ -51,6 +51,40 @@ class AttentionReasoningTests(unittest.TestCase):
         self.assertIn("configuration mismatch", hypotheses[0]["hypothesis"].lower())
         self.assertIn("ev_config", hypotheses[0]["supporting_evidence"])
 
+    def test_mysql_connection_retention_uses_alert_logs_and_configuration(self):
+        selected = [
+            {
+                "evidence_id": "ev_alert",
+                "type": "alert",
+                "title": "MySQL connections saturated",
+                "summary": "Connection use is above 80 percent",
+                "score": 0.9,
+            },
+            {
+                "evidence_id": "ev_pool",
+                "type": "log_template",
+                "title": "Leaked database session retained by connection pool",
+                "summary": "36 sessions retained; max_connections is 40",
+                "score": 0.88,
+            },
+            {
+                "evidence_id": "ev_config",
+                "type": "configuration",
+                "title": "ConfigMap lab-mysql-config",
+                "summary": "lab.cnf sets max_connections=40",
+                "score": 0.82,
+            },
+        ]
+
+        hypothesis = generate_hypotheses(selected)[0]
+
+        self.assertIn("connection retention", hypothesis["hypothesis"].lower())
+        self.assertEqual(
+            hypothesis["supporting_evidence"],
+            ["ev_alert", "ev_pool", "ev_config"],
+        )
+        self.assertNotIn("configuration mismatch", hypothesis["hypothesis"].lower())
+
     def test_verifier_rejects_unknown_evidence(self):
         hypothesis = {
             "hypothesis_id": "hyp_bad",
