@@ -21,3 +21,6 @@ class UIAssetTests(unittest.TestCase):
             self.assertIn(label, HTML)
         self.assertNotIn("https://", HTML)
         self.assertIn("--accent:", CSS)
+        self.assertIn('rel="icon"', HTML)
+        self.assertIn('href="#app"', HTML)
+        self.assertIn('aria-label="FCAPSule"', HTML)

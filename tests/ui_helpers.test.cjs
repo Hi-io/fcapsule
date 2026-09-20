@@ -10,6 +10,42 @@ function helper(name, next, context = {}) {
   return vm.runInNewContext(code + '\n' + name, context);
 }
 
+test('export shows actual artifact sizes and escapes retained paths', () => {
+  const render = helper('capsuleExport', 'reportPanel', {
+    safe: value => String(value ?? '').replaceAll('<', '&lt;'),
+    bytes: value => value + ' B', formatDate: value => value,
+  });
+  const payload = { record: {capsule_id:'capsule/one'}, report:{incident:{incident_id:'one'}},
+    storage:{archive_bytes:4096, report_bytes:8192, directory:'/data/<source>', expires_at:'2026-10-20', retention_days:30} };
+  const html = render(payload);
+  assert.match(html, /capsule%2Fone\/fcapsule_one.zip/);
+  assert.match(html, /4096 B/);
+  assert.match(html, /8192 B/);
+  assert.match(html, /Eligible for cleanup 2026-10-20/);
+  assert.match(html, /\/data\/&lt;source>/);
+  assert.doesNotMatch(html, /<source>/);
+  payload.storage.archive_bytes = null;
+  assert.doesNotMatch(render(payload), /fcapsule_one.zip/);
+  assert.equal(render({}), '');
+});
+
+test('connection testing does not replace unsaved settings', async () => {
+  const button = {disabled:false}; const notice = {hidden:true, textContent:''};
+  const state = {sources:{}}; const window = {};
+  const code = source.slice(source.indexOf('async function testTargets('), source.indexOf('async function syncTargets('));
+  const run = vm.runInNewContext(code + '\ntestTargets', {
+    document:{querySelector: selector => selector === '#test-targets' ? button : notice},
+    window, lastState:state, refresh:async()=>{},
+    renderTargets:()=>assert.fail('Editable form must not be replaced'),
+    fetch:async()=>({ok:true,json:async()=>({ok:true,targets:{prometheus:{ok:true}}})}),
+  });
+  await run();
+  assert.equal(button.disabled, false);
+  assert.equal(notice.hidden, false);
+  assert.equal(state.sources.targets.prometheus.ok, true);
+  assert.match(notice.textContent, /Saved source connections are healthy/);
+});
+
 test('masked JSON logs retain concise messages, including escaped quotes', () => {
   const label = helper('logLabel', 'briefingPanel');
   assert.equal(label('{"message":"Poison job failed", "job_id": <NUM>}'), 'Poison job failed');

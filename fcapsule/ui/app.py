@@ -19,19 +19,21 @@ HTML = """<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FCAPSule</title>
+  <link rel="icon" href="/assets/icons/scan-line.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body>
+  <a class="skip-link" href="#app">Skip to content</a>
   <header class="product-bar">
-    <a class="wordmark" href="/console"><span>FCAPS</span>ule</a>
+    <a class="wordmark" href="/console" aria-label="FCAPSule"><span class="brand-mark" aria-hidden="true"><span class="ui-icon" data-icon="scan-line"></span></span><span class="brand-name">FCAPSule</span></a>
     <nav aria-label="Primary">
       <a href="/console" data-nav="console"><span class="ui-icon" data-icon="activity" aria-hidden="true"></span>Operations</a>
       <a href="/targets" data-nav="targets"><span class="ui-icon" data-icon="network" aria-hidden="true"></span>Targets</a>
       <a href="/settings" data-nav="settings"><span class="ui-icon" data-icon="settings-2" aria-hidden="true"></span>Settings</a>
     </nav>
-    <div class="system-state"><i></i><span id="system-state">Ready</span></div>
+    <div class="system-state" role="status"><i></i><span id="system-state">Connecting</span></div>
   </header>
-  <main id="app"><div class="boot">Loading FCAPSule...</div></main>
+  <main id="app" tabindex="-1"><div class="boot">Loading FCAPSule...</div></main>
   <script src="/assets/app.js"></script>
 </body>
 </html>"""

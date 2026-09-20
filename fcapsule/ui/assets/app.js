@@ -13,6 +13,7 @@ const shortTime = value => value ? new Date(value).toLocaleTimeString([], {hour:
 document.querySelector(`[data-nav="${view}"]`)?.classList.add('active');
 document.querySelector(`[data-nav="${view}"]`)?.setAttribute('aria-current', 'page');
 document.body.dataset.view = view;
+document.title = ({console:'Operations', targets:'Targets', settings:'Settings'})[view] + ' | FCAPSule';
 let lastState = null;
 let selectedReport = null;
 let selectedEpisodeId = null;
@@ -141,6 +142,7 @@ function renderTargets(state) {
   };
   app.innerHTML = `
     <div class="page-head"><div><div class="eyebrow">Source connections</div><h1>Targets</h1><p>Connect the cluster data used for discovery and incident capture.</p></div><div class="actions"><button class="secondary" id="configure-targets">${icon('settings-2')}Configure</button><button class="secondary" id="test-targets">Test connections</button><button id="sync-targets" ${state.running ? 'disabled' : ''}>Sync now</button></div></div>
+    <p id="target-notice" class="notice" role="status" ${window.targetNotice ? '' : 'hidden'}>${safe(window.targetNotice || '')}</p>
     <div class="targets-workspace"><section class="target-grid">${targetCard('prometheus','Prometheus')}${targetCard('opensearch','OpenSearch')}${targetCard('kubernetes','Kubernetes API')}</section>
     <details class="connection-settings" data-disclosure="connections" ${openDisclosures.has('connections') || window.targetNotice || !config.prometheus_url ? 'open' : ''}><summary><span class="disclosure-title">${icon('settings-2')}<span>Connection settings</span></span><span class="queue-note">${config.enabled ? 'Automatic polling enabled' : 'Manual synchronization'}</span></summary><section class="sheet"><div class="sheet-body">
       <div class="field"><label for="prometheus-url">Prometheus URL</label><input id="prometheus-url" value="${safe(config.prometheus_url)}"></div>
@@ -151,7 +153,6 @@ function renderTargets(state) {
       <div class="form-pair"><div class="field"><label for="poll-interval">Poll interval (seconds)</label><input id="poll-interval" type="number" min="10" max="3600" value="${safe(config.poll_interval_seconds)}"></div><div class="field"><label for="window-minutes">Incident window (minutes)</label><input id="window-minutes" type="number" min="2" max="120" value="${safe(config.incident_window_minutes)}"></div></div>
       <label class="toggle"><input id="source-enabled" type="checkbox" ${config.enabled ? 'checked' : ''}>Poll sources and capture new firing alerts automatically</label>
       <label class="toggle" style="margin-top:8px"><input id="auto-reports" type="checkbox" ${config.auto_build_reports ? 'checked' : ''}>Build a responder report after capture</label>
-      ${window.targetNotice ? `<p class="notice">${safe(window.targetNotice)}</p>` : ''}
       <div class="actions"><button id="save-targets">Save settings</button></div>
     </div></section></details>
     <section class="sheet discovery-section"><div class="sheet-head"><h2>Discovery</h2><span class="queue-note" id="discovery-time">${state.sources.last_sync_at ? formatDate(state.sources.last_sync_at) : 'Not synchronized'}</span></div><div class="sheet-body">
@@ -219,9 +220,24 @@ async function saveTargets() {
 }
 
 async function testTargets() {
-  window.targetNotice = 'Testing source connections...'; renderTargets(lastState);
-  const response = await fetch('/api/sources/test', {method:'POST'}); const result = await response.json();
-  lastState.sources.targets = result.targets || {}; window.targetNotice = result.ok ? 'All source connections are healthy.' : 'One or more targets could not be reached.'; renderTargets(lastState);
+  const button = document.querySelector('#test-targets');
+  const notice = document.querySelector('#target-notice');
+  button.disabled = true;
+  notice.hidden = false;
+  notice.textContent = 'Testing saved source connections...';
+  try {
+    const response = await fetch('/api/sources/test', {method:'POST'});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Unable to test connections.');
+    lastState.sources.targets = result.targets || {};
+    window.targetNotice = result.ok ? 'Saved source connections are healthy.' : 'One or more saved targets could not be reached.';
+    await refresh();
+  } catch (error) {
+    window.targetNotice = error.message || 'Unable to test connections.';
+  } finally {
+    notice.textContent = window.targetNotice;
+    button.disabled = false;
+  }
 }
 
 async function syncTargets() {
@@ -462,6 +478,19 @@ function timelinePanel(report) {
     disclosure('retained-sequence', 'Captured evidence sequence', '<ol class="event-timeline">' + (report.timeline || []).map(item=>'<li><time>' + formatDate(item.timestamp) + '</time><div><strong>' + safe(item.title) + '</strong><small>' + safe(item.description) + '</small></div></li>').join('') + '</ol>') +
     (report.topology?.length ? '<p class="queue-note">Dependencies: ' + report.topology.map(item=>safe(item.from) + ' → ' + safe(item.to)).join(' · ') + '</p>' : '') + '</section>';
 }
+function capsuleExport(payload) {
+  const capsule = payload.record;
+  if (!capsule) return '';
+  const storage = payload.storage || {};
+  const root = '/artifacts/' + encodeURIComponent(capsule.capsule_id) + '/';
+  const link = (file, title, size) => '<a class="button-link" href="' + root + encodeURIComponent(file) + '" download><span>' + title + '</span><small>' + (size == null ? '' : bytes(size)) + '</small></a>';
+  return '<details class="export-menu" data-disclosure="exports"><summary id="export-summary">Export</summary><div class="export-panel">' +
+    (storage.archive_bytes !== null ? link('fcapsule_' + payload.report.incident.incident_id + '.zip', 'Capsule archive', storage.archive_bytes) : '<p>Archive unavailable</p>') +
+    link('incident_report.json', 'Report JSON', storage.report_bytes) +
+    '<p>Retained evidence and analysis. Not a full telemetry backup.</p>' +
+    (storage.expires_at ? '<p><strong>Eligible for cleanup ' + formatDate(storage.expires_at) + '</strong>' + storage.retention_days + '-day retention, including archived incidents.</p>' : '') +
+    (storage.directory ? '<details><summary>Storage location</summary><code>' + safe(storage.directory) + '</code></details>' : '') + '</div></details>';
+}
 function reportPanel(payload) {
   if (!payload.report) return '<section class="report-empty"><h3>Evidence captured</h3><p>The report is ' + (lastState?.running ? 'being prepared.' : 'not built yet.') + '</p><button data-build-capsule="' + safe(payload.incident.incident_id) + '" ' + (lastState?.running ? 'disabled' : '') + '>Build report</button></section>';
   const report = payload.report;
@@ -471,7 +500,7 @@ function reportPanel(payload) {
   const others = (report.impact || []).filter(item=>!relevant.includes(item));
   const impact = relevant.length ? impactRows(relevant.slice(0,3)) : '<p class="queue-note">No material change was established in the captured impact metrics.</p>';
   const secondaryImpact = [...relevant.slice(3), ...others];
-  const exports = capsule ? '<details class="export-menu" data-disclosure="exports"><summary>Export</summary><div><a class="button-link" href="/artifacts/' + encodeURIComponent(capsule.capsule_id) + '/incident_report.json" download>Report JSON</a><a class="button-link" href="/artifacts/' + encodeURIComponent(capsule.capsule_id) + '/' + encodeURIComponent('fcapsule_' + incident.incident_id + '.zip') + '" download>Capsule archive</a></div></details>' : '';
+  const exports = capsuleExport(payload);
   const ai = payload.ai_briefing;
   const fallback = ai?.status !== 'ready' ? '<section class="observed-summary"><h3>Observed</h3><p>' + safe(report.fault_alerts?.[0]?.description || incident.summary) + '</p></section>' : '';
   const d = report.engineering_diagnostics;
@@ -549,9 +578,24 @@ async function refresh() {
       }
     }
   } catch (_) {
+    document.querySelector('.system-state').className = 'system-state error';
     document.querySelector('#system-state').textContent = 'Disconnected';
   } finally { refreshing = false; }
 }
 refresh();
 setInterval(refresh, 4000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+document.addEventListener('click', event => {
+  if (!event.target.closest('.export-menu')) {
+    document.querySelector('.export-menu')?.removeAttribute('open');
+    openDisclosures.delete('exports');
+  }
+});
+document.addEventListener('keydown', event => {
+  const menu = document.querySelector('.export-menu[open]');
+  if (event.key === 'Escape' && menu) {
+    menu.removeAttribute('open');
+    openDisclosures.delete('exports');
+    menu.querySelector('summary').focus();
+  }
+});

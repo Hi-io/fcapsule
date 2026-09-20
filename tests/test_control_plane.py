@@ -1,10 +1,12 @@
 import json
 import os
+import shutil
 import tempfile
 import threading
 import time
 import unittest
 from pathlib import Path
+from datetime import datetime, timedelta
 from unittest.mock import patch
 from urllib.request import Request, urlopen
 from zipfile import ZipFile
@@ -25,6 +27,29 @@ def wait_for_idle(control_plane: ControlPlane, timeout: float = 15) -> None:
 
 
 class ControlPlaneTests(unittest.TestCase):
+    def test_retained_report_does_not_reopen_expired_source(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
+            source = Path(directory) / "source"
+            shutil.copytree(REFERENCE_CASE, source)
+            plane = ControlPlane(Path(directory) / "state")
+            incident = plane.ingest_case(source, "checkout", "Checkout")
+            plane._build_capsule(incident["incident_id"])
+            before = plane.incident_report_payload(incident["incident_id"])
+            shutil.rmtree(source)
+            with patch("fcapsule.control_plane.load_case", side_effect=AssertionError("Source must not be reopened")):
+                after = plane.incident_report_payload(incident["incident_id"])
+            self.assertEqual(before["report"], after["report"])
+            storage = after["storage"]
+            self.assertEqual(storage["archive_bytes"], Path(after["record"]["archive_path"]).stat().st_size)
+            self.assertEqual(storage["report_bytes"], (Path(storage["directory"]) / "incident_report.json").stat().st_size)
+            expected = datetime.fromisoformat(incident["created_at"].replace("Z", "+00:00")) + timedelta(days=30)
+            self.assertEqual(datetime.fromisoformat(storage["expires_at"].replace("Z", "+00:00")), expected)
+            # Older/missing reports can still be derived from a retained capsule.
+            (Path(storage["directory"]) / "incident_report.json").unlink()
+            rebuilt = plane.incident_report_payload(incident["incident_id"])
+            self.assertEqual(rebuilt["report"]["report_version"], "1.3")
+            self.assertTrue(rebuilt["report"]["log_patterns"])
+
     def test_source_sync_builds_every_new_incident_report(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
             control_plane = ControlPlane(Path(directory) / "state")

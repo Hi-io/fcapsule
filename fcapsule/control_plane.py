@@ -512,17 +512,31 @@ class ControlPlane:
             return {"incident": incident, "report": None}
         report_path = Path(capsule_record["output_dir"]) / "incident_report.json"
         capsule = json.loads(capsule_path.read_text(encoding="utf-8"))
-        source_metrics = load_case(incident["case_dir"]).metrics
         report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.is_file() else None
         if not report or report.get("report_version") != "1.3":
+            # Retained reports must remain readable after source telemetry expires.
+            try:
+                source_metrics = load_case(incident["case_dir"]).metrics if Path(incident["case_dir"]).is_dir() else None
+            except FileNotFoundError:
+                source_metrics = None
             report = build_incident_report(capsule, incident, source_metrics)
             write_json(report_path, report)
             create_archive(Path(capsule_record["output_dir"]), incident_id)
         briefing_path = Path(capsule_record["output_dir"]) / "ai_briefing.json"
+        archive_path = Path(capsule_record["archive_path"])
+        retention_days = self.general_configuration()["incident_retention_days"]
+        expires_at = datetime.fromisoformat(incident["created_at"].replace("Z", "+00:00")) + timedelta(days=retention_days)
         return {
             "incident": incident,
             "record": capsule_record,
             "report": report,
+            "storage": {
+                "directory": str(capsule_path.parent),
+                "archive_bytes": archive_path.stat().st_size if archive_path.is_file() else None,
+                "report_bytes": report_path.stat().st_size,
+                "retention_days": retention_days,
+                "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
+            },
             "ai_briefing": json.loads(briefing_path.read_text(encoding="utf-8")) if briefing_path.is_file() else None,
         }
 
