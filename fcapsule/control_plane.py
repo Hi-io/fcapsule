@@ -25,7 +25,11 @@ from fcapsule.store import FCAPSuleStore, utc_now
 from fcapsule.ui.dashboard import render_dashboard
 
 
-def _resource_identity(alert: dict[str, Any], fallback: str) -> dict[str, str]:
+def _resource_identity(
+    alert: dict[str, Any],
+    fallback: str,
+    configurations: list[dict[str, Any]] | None = None,
+) -> dict[str, str]:
     """Identify the monitored target while keeping collector identity as evidence."""
 
     labels = alert.get("labels", {}) if isinstance(alert.get("labels"), dict) else {}
@@ -37,6 +41,16 @@ def _resource_identity(alert: dict[str, Any], fallback: str) -> dict[str, str]:
         return next((str(labels[name]) for name in names if labels.get(name)), "")
 
     node = label("node", "kubernetes_node", "hostname", "host", "nodename")
+    if not node and "node" in normalized_name:
+        collector_pod = label("pod", "pod_name", "kubernetes_pod_name")
+        node = next(
+            (
+                str(item["node"])
+                for item in configurations or []
+                if item.get("kind") == "PodSpec" and item.get("name") == collector_pod and item.get("node")
+            ),
+            "",
+        )
     if not node and "node" in normalized_name:
         node = label("instance")
         if node.count(":") == 1:
@@ -118,7 +132,7 @@ class ControlPlane:
             try:
                 bundle = load_case(incident["case_dir"])
                 if bundle.alerts:
-                    identity = _resource_identity(bundle.alerts[0], str(incident["app_id"]))
+                    identity = _resource_identity(bundle.alerts[0], str(incident["app_id"]), bundle.configurations)
                     self.store.update_incident_identity(
                         str(incident["incident_id"]), identity["kind"], identity["name"], identity["alert_identity"]
                     )
@@ -373,7 +387,7 @@ class ControlPlane:
             )
         first_alert = bundle.alerts[0]
         annotation = first_alert.get("annotations", {}) if isinstance(first_alert.get("annotations"), dict) else {}
-        identity = _resource_identity(first_alert, app_name or str(metadata.get("service", app_id)))
+        identity = _resource_identity(first_alert, app_name or str(metadata.get("service", app_id)), bundle.configurations)
         raw_bytes = sum(
             path.stat().st_size
             for path in bundle.case_dir.iterdir()

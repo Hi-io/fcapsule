@@ -31,7 +31,7 @@ The view shows:
   occurrence; every item opens its episode;
 - an episode queue ordered by latest activity;
 - active episodes prioritized before resolved ones;
-- severity and lifecycle state, affected resource, latest signal time, related-signal count, and report readiness;
+- severity and lifecycle state, affected resource, latest signal time, related-signal count, and report readiness; node alerts prefer the captured node-exporter Pod's Kubernetes node over collector or IP labels;
 - a compact recurrence badge when the same application, affected resource and
   normalized alert identity occurred earlier in retained history;
 - URL-persisted namespace, resource, lifecycle, age and text/short-reference

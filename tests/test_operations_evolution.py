@@ -77,6 +77,15 @@ class OperationsEvolutionTests(unittest.TestCase):
         self.assertEqual(identity["kind"], "node")
         self.assertEqual(identity["name"], "go15")
 
+    def test_node_identity_uses_the_captured_collector_pod_node_before_an_ip_fallback(self):
+        identity = _resource_identity(
+            {"alertname": "NodeMemoryHighUtilization", "labels": {"instance": "10.0.0.248:9100", "pod": "node-exporter-worker"}},
+            "prometheus-node-exporter",
+            [{"kind": "PodSpec", "name": "node-exporter-worker", "node": "pc-worker"}],
+        )
+        self.assertEqual(identity["kind"], "node")
+        self.assertEqual(identity["name"], "pc-worker")
+
     def test_historical_comparison_must_reference_a_supplied_episode_and_evidence(self):
         comparison = {
             "episode_id": "episode-prior",
