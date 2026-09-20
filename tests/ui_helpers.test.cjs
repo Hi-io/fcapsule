@@ -35,3 +35,16 @@ test('closed episodes do not duplicate the selected report controls', () => {
   assert.equal((html.match(/id="signal-report"/g) || []).length, 1);
   assert.equal((html.match(/class="episode is-open"/g) || []).length, 1);
 });
+
+test('domain disclosures retain native semantics, count and decorative icon', () => {
+  const disclosure = helper('disclosure', 'reportId', {
+    safe: value => String(value ?? '').replaceAll('<', '&lt;'),
+    openDisclosures: new Set(['domain-logs']),
+  });
+  const html = disclosure('domain-logs', 'Log evidence', '<pre>retained log</pre>', 2);
+  assert.match(html, /<details[^>]+ open>/);
+  assert.match(html, /<summary id="disclosure-domain-logs">/);
+  assert.match(html, /data-icon="logs" aria-hidden="true"/);
+  assert.match(html, /detail-count">2/);
+  assert.match(html, /<pre>retained log<\/pre>/);
+});
