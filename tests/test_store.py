@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fcapsule.store import FCAPSuleStore
@@ -50,6 +51,60 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(overview["totals"]["degraded_applications"], 1)
             self.assertEqual(overview["totals"]["raw_bytes_observed"], 100000)
             self.assertEqual(len(overview["models"]), 2)
+
+    def test_related_signals_are_grouped_into_operator_episodes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = FCAPSuleStore(Path(directory) / "state.db")
+            store.upsert_application("checkout", "Checkout", "shop", "local")
+            start = datetime(2026, 9, 20, 10, 0, tzinfo=timezone.utc)
+
+            def record(number: int, minutes: int, severity: str, summary: str) -> None:
+                store.record_incident(
+                    {
+                        "incident_id": f"signal-{number}",
+                        "app_id": "checkout",
+                        "scenario": summary,
+                        "status": "firing",
+                        "severity": severity,
+                        "started_at": (start + timedelta(minutes=minutes)).isoformat().replace("+00:00", "Z"),
+                        "case_dir": f"/tmp/case-{number}",
+                        "summary": summary,
+                    }
+                )
+
+            record(1, 0, "warning", "Elevated checkout latency")
+            record(2, 6, "critical", "Checkout requests are failing")
+            record(3, 30, "warning", "A later degradation")
+
+            episodes = store.list_episodes()
+            self.assertEqual(len(episodes), 2)
+            grouped = next(item for item in episodes if item["signal_count"] == 2)
+            self.assertEqual(grouped["severity"], "critical")
+            self.assertEqual(grouped["primary_incident_id"], "signal-2")
+            self.assertEqual([item["incident_id"] for item in grouped["signals"]], ["signal-1", "signal-2"])
+            self.assertEqual(store.overview()["totals"]["signals"], 3)
+            self.assertEqual(store.overview()["totals"]["incidents"], 2)
+
+            store.set_episode_archived(grouped["episode_id"], True)
+            self.assertEqual(len(store.list_episodes()), 1)
+            self.assertEqual(store.list_episodes(archived=True)[0]["signal_count"], 2)
+
+    def test_pending_alerts_do_not_create_operator_episodes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = FCAPSuleStore(Path(directory) / "state.db")
+            store.upsert_application("checkout", "Checkout", "shop", "local")
+            store.record_incident(
+                {
+                    "incident_id": "pending-signal",
+                    "app_id": "checkout",
+                    "scenario": "Threshold pending",
+                    "status": "pending",
+                    "started_at": "2026-09-20T10:00:00Z",
+                    "case_dir": "/tmp/pending",
+                    "summary": "Threshold pending",
+                }
+            )
+            self.assertEqual(store.list_episodes(), [])
 
     def test_model_profile_validation(self):
         with tempfile.TemporaryDirectory() as directory:

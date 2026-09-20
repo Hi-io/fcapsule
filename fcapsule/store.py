@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +17,9 @@ DEFAULT_MODEL_PROFILES = (
     ("deepseek-v4-flash", "deepseek", 2400, False),
     ("deepseek-v4-pro", "deepseek", 3600, True),
 )
+
+EPISODE_JOIN_MINUTES = 15
+SEVERITY_RANK = {"info": 0, "warning": 1, "critical": 2}
 
 
 def utc_now() -> str:
@@ -83,7 +86,29 @@ class FCAPSuleStore:
                     trace_access TEXT NOT NULL,
                     summary TEXT NOT NULL,
                     created_at TEXT NOT NULL,
+                    archived_at TEXT,
+                    source_kind TEXT NOT NULL DEFAULT 'external'
+                );
+
+                CREATE TABLE IF NOT EXISTS incident_episodes (
+                    episode_id TEXT PRIMARY KEY,
+                    app_id TEXT NOT NULL REFERENCES applications(app_id),
+                    title TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    last_activity_at TEXT NOT NULL,
+                    ended_at TEXT,
+                    primary_incident_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
                     archived_at TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS episode_incidents (
+                    episode_id TEXT NOT NULL REFERENCES incident_episodes(episode_id) ON DELETE CASCADE,
+                    incident_id TEXT NOT NULL UNIQUE REFERENCES incidents(incident_id) ON DELETE CASCADE,
+                    PRIMARY KEY (episode_id, incident_id)
                 );
 
                 CREATE TABLE IF NOT EXISTS capsules (
@@ -121,6 +146,10 @@ class FCAPSuleStore:
                     ON incidents(app_id, started_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_capsules_app_time
                     ON capsules(app_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_episodes_app_activity
+                    ON incident_episodes(app_id, last_activity_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_episode_incidents_episode
+                    ON episode_incidents(episode_id);
                 """
             )
             incident_columns = {
@@ -129,6 +158,13 @@ class FCAPSuleStore:
             }
             if "archived_at" not in incident_columns:
                 connection.execute("ALTER TABLE incidents ADD COLUMN archived_at TEXT")
+            if "source_kind" not in incident_columns:
+                connection.execute("ALTER TABLE incidents ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'external'")
+            connection.execute(
+                "UPDATE incidents SET source_kind = 'live' WHERE case_dir LIKE ?",
+                ("%/live-cases/%",),
+            )
+            self._backfill_episodes(connection)
             now = utc_now()
             for model_id, provider, max_tokens, enabled in DEFAULT_MODEL_PROFILES:
                 connection.execute(
@@ -217,8 +253,8 @@ class FCAPSuleStore:
                 INSERT INTO incidents
                     (incident_id, app_id, scenario, status, severity, started_at, ended_at,
                      case_dir, alert_count, log_count, metric_series_count, raw_bytes,
-                     trace_access, summary, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     trace_access, summary, created_at, source_kind)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(incident_id) DO UPDATE SET
                     status=excluded.status,
                     ended_at=excluded.ended_at,
@@ -227,7 +263,8 @@ class FCAPSuleStore:
                     metric_series_count=excluded.metric_series_count,
                     raw_bytes=excluded.raw_bytes,
                     trace_access=excluded.trace_access,
-                    summary=excluded.summary
+                    summary=excluded.summary,
+                    source_kind=excluded.source_kind
                 """,
                 (
                     incident_id,
@@ -245,13 +282,217 @@ class FCAPSuleStore:
                     _json(payload.get("trace_access", {})),
                     payload.get("summary", ""),
                     now,
+                    payload.get("source_kind", "external"),
                 ),
             )
+            if str(payload.get("status", "firing")).lower() != "pending":
+                self._assign_episode(connection, incident_id)
             connection.execute(
                 "UPDATE applications SET status = ?, updated_at = ? WHERE app_id = ?",
                 ("degraded", now, payload["app_id"]),
             )
         return self.get_incident(incident_id) or {}
+
+    @staticmethod
+    def _parse_time(value: str) -> datetime:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+    def _backfill_episodes(self, connection: sqlite3.Connection) -> None:
+        rows = connection.execute(
+            """
+            SELECT i.incident_id
+            FROM incidents i
+            LEFT JOIN episode_incidents ei ON ei.incident_id = i.incident_id
+            WHERE ei.incident_id IS NULL AND lower(i.status) != 'pending'
+            ORDER BY i.started_at, i.created_at
+            """
+        ).fetchall()
+        for row in rows:
+            self._assign_episode(connection, str(row["incident_id"]))
+
+    def _assign_episode(self, connection: sqlite3.Connection, incident_id: str) -> str:
+        linked = connection.execute(
+            "SELECT episode_id FROM episode_incidents WHERE incident_id = ?", (incident_id,)
+        ).fetchone()
+        if linked:
+            episode_id = str(linked["episode_id"])
+            self._refresh_episode(connection, episode_id)
+            return episode_id
+
+        incident = connection.execute("SELECT * FROM incidents WHERE incident_id = ?", (incident_id,)).fetchone()
+        if not incident:
+            raise KeyError(f"Unknown incident: {incident_id}")
+        started_at = str(incident["started_at"])
+        started = self._parse_time(started_at)
+        lower_bound = (started - timedelta(minutes=EPISODE_JOIN_MINUTES)).isoformat().replace("+00:00", "Z")
+        upper_bound = (started + timedelta(minutes=EPISODE_JOIN_MINUTES)).isoformat().replace("+00:00", "Z")
+        candidate = connection.execute(
+            """
+            SELECT episode_id
+            FROM incident_episodes
+            WHERE app_id = ? AND archived_at IS NULL
+              AND last_activity_at >= ? AND started_at <= ?
+            ORDER BY last_activity_at DESC
+            LIMIT 1
+            """,
+            (incident["app_id"], lower_bound, upper_bound),
+        ).fetchone()
+        if candidate:
+            episode_id = str(candidate["episode_id"])
+        else:
+            episode_id = f"episode-{incident_id}"
+            now = utc_now()
+            connection.execute(
+                """
+                INSERT INTO incident_episodes
+                    (episode_id, app_id, title, status, severity, started_at, last_activity_at,
+                     ended_at, primary_incident_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    episode_id,
+                    incident["app_id"],
+                    incident["summary"] or incident["scenario"],
+                    "active" if str(incident["status"]).lower() == "firing" else "resolved",
+                    incident["severity"],
+                    started_at,
+                    started_at,
+                    None if str(incident["status"]).lower() == "firing" else incident["ended_at"],
+                    incident_id,
+                    now,
+                    now,
+                ),
+            )
+        connection.execute(
+            "INSERT OR IGNORE INTO episode_incidents (episode_id, incident_id) VALUES (?, ?)",
+            (episode_id, incident_id),
+        )
+        self._refresh_episode(connection, episode_id)
+        return episode_id
+
+    def _refresh_episode(self, connection: sqlite3.Connection, episode_id: str) -> None:
+        signals = connection.execute(
+            """
+            SELECT i.* FROM incidents i
+            JOIN episode_incidents ei ON ei.incident_id = i.incident_id
+            WHERE ei.episode_id = ?
+            ORDER BY i.started_at, i.created_at
+            """,
+            (episode_id,),
+        ).fetchall()
+        if not signals:
+            connection.execute("DELETE FROM incident_episodes WHERE episode_id = ?", (episode_id,))
+            return
+        primary = max(
+            signals,
+            key=lambda item: (SEVERITY_RANK.get(str(item["severity"]).lower(), 0), str(item["started_at"])),
+        )
+        active = any(str(item["status"]).lower() == "firing" for item in signals)
+        ended_values = [str(item["ended_at"]) for item in signals if item["ended_at"]]
+        connection.execute(
+            """
+            UPDATE incident_episodes
+            SET title = ?, status = ?, severity = ?, started_at = ?, last_activity_at = ?,
+                ended_at = ?, primary_incident_id = ?, updated_at = ?
+            WHERE episode_id = ?
+            """,
+            (
+                primary["summary"] or primary["scenario"],
+                "active" if active else "resolved",
+                primary["severity"],
+                min(str(item["started_at"]) for item in signals),
+                max(str(item["started_at"]) for item in signals),
+                None if active else (max(ended_values) if ended_values else max(str(item["started_at"]) for item in signals)),
+                primary["incident_id"],
+                utc_now(),
+                episode_id,
+            ),
+        )
+
+    def list_episodes(self, limit: int = 50, archived: bool = False) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM incident_episodes WHERE archived_at IS "
+                + ("NOT NULL" if archived else "NULL")
+                + " ORDER BY last_activity_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [self._episode_row(connection, row) for row in rows]
+
+    def get_episode(self, episode_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM incident_episodes WHERE episode_id = ?", (episode_id,)
+            ).fetchone()
+            return self._episode_row(connection, row) if row else None
+
+    def _episode_row(self, connection: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
+        result = dict(row)
+        signal_rows = connection.execute(
+            """
+            SELECT i.*, CASE WHEN c.capsule_id IS NULL THEN 0 ELSE 1 END AS report_ready
+            FROM incidents i
+            JOIN episode_incidents ei ON ei.incident_id = i.incident_id
+            LEFT JOIN capsules c ON c.incident_id = i.incident_id
+            WHERE ei.episode_id = ?
+            GROUP BY i.incident_id
+            ORDER BY i.started_at
+            """,
+            (row["episode_id"],),
+        ).fetchall()
+        signals = [self._incident_row(item) for item in signal_rows]
+        result["signals"] = signals
+        result["signal_count"] = len(signals)
+        result["report_count"] = sum(int(item.get("report_ready", 0)) for item in signals)
+        result["alert_count"] = sum(int(item["alert_count"]) for item in signals)
+        return result
+
+    def set_episode_archived(self, episode_id: str, archived: bool) -> dict[str, Any]:
+        archived_at = utc_now() if archived else None
+        with self._connect() as connection:
+            result = connection.execute(
+                "UPDATE incident_episodes SET archived_at = ?, updated_at = ? WHERE episode_id = ?",
+                (archived_at, utc_now(), episode_id),
+            )
+            if result.rowcount == 0:
+                raise KeyError(f"Unknown episode: {episode_id}")
+            connection.execute(
+                """
+                UPDATE incidents SET archived_at = ? WHERE incident_id IN
+                    (SELECT incident_id FROM episode_incidents WHERE episode_id = ?)
+                """,
+                (archived_at, episode_id),
+            )
+        return self.get_episode(episode_id) or {}
+
+    def episode_incident_ids(self, episode_id: str) -> list[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT incident_id FROM episode_incidents WHERE episode_id = ?", (episode_id,)
+            ).fetchall()
+        return [str(row["incident_id"]) for row in rows]
+
+    def reconcile_live_incidents(self, active_incident_ids: set[str], observed_at: str) -> None:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT incident_id FROM incidents WHERE source_kind = 'live' AND lower(status) = 'firing'"
+            ).fetchall()
+            affected: set[str] = set()
+            for row in rows:
+                incident_id = str(row["incident_id"])
+                if incident_id in active_incident_ids:
+                    continue
+                episode = connection.execute(
+                    "SELECT episode_id FROM episode_incidents WHERE incident_id = ?", (incident_id,)
+                ).fetchone()
+                connection.execute(
+                    "UPDATE incidents SET status = 'resolved', ended_at = ? WHERE incident_id = ?",
+                    (observed_at, incident_id),
+                )
+                if episode:
+                    affected.add(str(episode["episode_id"]))
+            for episode_id in affected:
+                self._refresh_episode(connection, episode_id)
 
     def get_incident(self, incident_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
@@ -280,10 +521,15 @@ class FCAPSuleStore:
 
     def delete_incident(self, incident_id: str) -> None:
         with self._connect() as connection:
+            episode = connection.execute(
+                "SELECT episode_id FROM episode_incidents WHERE incident_id = ?", (incident_id,)
+            ).fetchone()
             connection.execute("DELETE FROM capsules WHERE incident_id = ?", (incident_id,))
             result = connection.execute("DELETE FROM incidents WHERE incident_id = ?", (incident_id,))
             if result.rowcount == 0:
                 raise KeyError(f"Unknown incident: {incident_id}")
+            if episode:
+                self._refresh_episode(connection, str(episode["episode_id"]))
 
     def incidents_older_than(self, cutoff: str) -> list[dict[str, Any]]:
         with self._connect() as connection:
@@ -434,19 +680,24 @@ class FCAPSuleStore:
         applications = self.list_applications()
         incidents = self.list_incidents()
         archived_incidents = self.list_incidents(archived=True)
+        episodes = self.list_episodes()
+        archived_episodes = self.list_episodes(archived=True)
         capsules = self.list_capsules()
         observed_applications = [item for item in applications if item["status"] != "not_observed"]
         return {
             "applications": applications,
             "incidents": incidents,
             "archived_incidents": archived_incidents,
+            "episodes": episodes,
+            "archived_episodes": archived_episodes,
             "capsules": capsules,
             "models": self.list_model_profiles(),
             "totals": {
                 "applications": len(observed_applications),
                 "degraded_applications": sum(1 for item in observed_applications if item["status"] == "degraded"),
-                "incidents": len(incidents),
-                "archived_incidents": len(archived_incidents),
+                "incidents": len(episodes),
+                "archived_incidents": len(archived_episodes),
+                "signals": len(incidents),
                 "capsules": len(capsules),
                 "raw_bytes_observed": sum(int(item["raw_bytes"]) for item in incidents),
                 "capsule_bytes_retained": sum(int(item["size_bytes"]) for item in capsules),
