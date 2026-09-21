@@ -75,9 +75,13 @@ def episode_context(episode: dict[str, Any], entries: list[dict[str, Any]]) -> d
     for entry in entries:
         report = entry["report"]
         incident_id = entry["incident"]["incident_id"]
-        alerts.append({**report["incident"], "incident_id": incident_id,
-                       "current_status": entry["incident"].get("status"),
-                       "ended_at": entry["incident"].get("ended_at") if entry["incident"].get("status") == "resolved" else None})
+        alert_context = {**report["incident"], "incident_id": incident_id,
+                         "current_status": entry["incident"].get("status"),
+                         "ended_at": entry["incident"].get("ended_at") if entry["incident"].get("status") == "resolved" else None}
+        discovery_labels = _discovery_labels(report)
+        if discovery_labels:
+            alert_context["labels"] = discovery_labels
+        alerts.append(alert_context)
         for item in report.get("supporting_evidence", []):
             identity = [item.get("type"), item.get("title"), item.get("summary"), item.get("time_range"), item.get("linked_entities"), item.get("configuration")]
             ref = "E" + hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:12]
@@ -96,6 +100,22 @@ def episode_context(episode: dict[str, Any], entries: list[dict[str, Any]]) -> d
         "source_retention": "Unknown. Do not infer expiry from incident age or FCAPSule's own cleanup policy.",
         "grouping_basis": "Same application and temporal proximity only. Independent failure phases can share an episode. A resolved alert followed by another alert is not a demonstrated causal chain.",
         "limits": "Time grouping is not causation. Measurements are sampled. Current state is not historical state."})
+
+
+def _discovery_labels(report: dict[str, Any]) -> dict[str, str]:
+    """Retain only explicit, non-sensitive identities needed to inspect target discovery."""
+
+    for alert in report.get("fault_alerts", []):
+        rule = alert.get("rule") if isinstance(alert.get("rule"), dict) else {}
+        labels = rule.get("labels") if isinstance(rule.get("labels"), dict) else {}
+        retained = {
+            key: str(labels[key])
+            for key in ("target_service", "kubernetes_service", "target_workload")
+            if labels.get(key)
+        }
+        if retained:
+            return retained
+    return {}
 
 
 class InvestigationTools:

@@ -423,6 +423,18 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertIsNone(context["alerts"][0]["ended_at"])
         self.assertIn("Independent failure phases", context["grouping_basis"])
 
+    def test_episode_context_retains_only_explicit_discovery_identities(self):
+        self.entries[0]["report"]["fault_alerts"] = [
+            {"name": "MetricsMissing", "rule": {"labels": {
+                "service": "orders-api", "target_service": "app-metrics", "target_workload": "orders-api",
+                "unrelated": "not-used",
+            }}}
+        ]
+
+        context = episode_context({"episode_id": "episode"}, self.entries)
+
+        self.assertEqual(context["alerts"][0]["labels"], {"target_service": "app-metrics", "target_workload": "orders-api"})
+
     def test_diagnostic_codes_survive_reduction_and_secrets_do_not(self):
         self.assertNotEqual(template_for_message('exit_code=137 job=19'), template_for_message('exit_code=1 job=20'))
         self.assertEqual(template_for_message('exit_code=1 job=19'), template_for_message('exit_code=1 job=20'))
