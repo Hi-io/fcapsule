@@ -199,7 +199,7 @@ class LiveSourceCoordinator:
             service_name = str(
                 labels.get("target_service") or labels.get("kubernetes_service") or labels.get("service", "")
             ).strip()
-            if service_name:
+            if service_name and not labels.get("target_workload"):
                 try:
                     # A target-discovery alert is often scoped to a Service rather than a
                     # single pod. Resolve it through the Service selector, not its name.
@@ -339,6 +339,10 @@ def _resolve_alert_pod(
     if workload_name:
         matches = [item for item in pods if item["namespace"] == namespace and item.get("workload") == workload_name]
         return matches[0] if len(matches) == 1 else None
+    target_workload = str(labels.get("target_workload", "")).strip()
+    if target_workload:
+        matches = [item for item in pods if item["namespace"] == namespace and item.get("workload") == target_workload]
+        return sorted(matches, key=lambda item: (not item.get("ready", False), item["name"]))[0] if matches else None
     service_name = str(labels.get("service", "")).strip()
     if service_name:
         # ``None`` keeps this helper useful for offline captures. Live collection passes

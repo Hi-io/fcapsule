@@ -72,11 +72,15 @@ class LiveSourceTests(unittest.TestCase):
             _resolve_alert_pod(orders + [unrelated], "shop", {"service": "orders"}, orders),
             orders[1],
         )
+        self.assertEqual(
+            _resolve_alert_pod(orders + [unrelated], "shop", {"target_workload": "orders"}),
+            orders[1],
+        )
         self.assertIsNone(
             _resolve_alert_pod(orders + [unrelated], "shop", {"service": "shared"}, orders + [unrelated])
         )
 
-    def test_live_capture_resolves_target_service_before_logical_service_name(self):
+    def test_live_capture_uses_explicit_target_workload_for_a_shared_monitoring_service(self):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory)
             coordinator = LiveSourceCoordinator(FCAPSuleStore(state / "state.db"), state)
@@ -97,12 +101,20 @@ class LiveSourceTests(unittest.TestCase):
                 "ready": True,
                 "phase": "Running",
             }
+            inventory = {
+                "name": "inventory-1",
+                "namespace": "shop",
+                "workload": "inventory-api",
+                "labels": {"app.kubernetes.io/name": "inventory-api"},
+                "ready": True,
+                "phase": "Running",
+            }
             prometheus, opensearch, kubernetes = Mock(), Mock(), Mock()
             coordinator.adapters = Mock(return_value=(prometheus, opensearch, kubernetes))
             coordinator.test_connections = Mock(
                 return_value={"targets": {name: {"ok": True} for name in ("prometheus", "opensearch", "kubernetes")}}
             )
-            kubernetes.list_pods.return_value = [pod]
+            kubernetes.list_pods.return_value = [pod, inventory]
             prometheus.pod_inventory.return_value = {}
             opensearch.pod_log_counts.return_value = {}
             prometheus.active_alerts.return_value = [
@@ -114,16 +126,16 @@ class LiveSourceTests(unittest.TestCase):
                         "namespace": "shop",
                         "service": "orders-api",
                         "target_service": "lab-app-metrics",
+                        "target_workload": "orders-api",
                     },
                 }
             ]
             prometheus.alert_rules.return_value = {}
-            kubernetes.service_pods.return_value = [pod]
 
             with patch.object(coordinator, "_capture_case", return_value=state / "case"):
                 result = coordinator.synchronize()
 
-            kubernetes.service_pods.assert_called_once_with("shop", "lab-app-metrics", [pod])
+            kubernetes.service_pods.assert_not_called()
             self.assertEqual(len(result["captured"]), 1)
 
     def test_prometheus_adapter_normalizes_inventory_alerts_and_ranges(self):

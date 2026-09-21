@@ -70,12 +70,13 @@ and all content, bounds and reference validations still apply.
 Some Prometheus alerts describe a missing target and therefore identify a
 Kubernetes `Service`, not a particular pod. When a logical application name differs
 from the Kubernetes Service, the alert can supply `target_service` (or
-`kubernetes_service`) while retaining its operator-facing `service` label. During
-live capture FCAPSule resolves that identity through the Service's selector. It
-proceeds only when the selected pods belong to one workload, preserving an
-unambiguous anchor for the capsule. An empty selector result or a Service spanning
-workloads remains an explicit limitation; FCAPSule does not guess from a matching
-name or text similarity.
+`kubernetes_service`) while retaining its operator-facing `service` label. A shared
+monitoring Service can additionally declare `target_workload`; that explicit
+workload is the capsule anchor, while the Service remains evidence for the
+discovery chain. Otherwise live capture resolves the Service identity through its
+selector and proceeds only when the selected pods belong to one workload. An empty
+selector result or a Service spanning workloads remains an explicit limitation;
+FCAPSule does not guess from a matching name or text similarity.
 
 ### 3. Bounded Historical Recurrence Comparison
 
