@@ -145,6 +145,14 @@ summary:focus-visible, button:focus-visible, a:focus-visible { outline:2px solid
 .overview-layout { padding:30px 26px; gap:30px; grid-template-columns:minmax(0,1.65fr) minmax(215px,.85fr); }
 .overview-layout aside { padding-left:24px; }
 .briefing .brief-lead { font-size:15px; line-height:1.75; }
+.findings { margin:18px 0 28px; border-top:1px solid var(--line); }
+.finding { padding:16px 0; border-bottom:1px solid var(--line); }
+.finding.primary { border-left:3px solid #d19b27; padding:16px 0 16px 16px; background:#fff8e6; }
+.finding h4 { margin:3px 0 0; color:var(--text); }
+.finding p { margin:9px 0; }
+.finding-category { color:var(--muted); font-size:11px; text-transform:capitalize; }
+.finding-next { font-size:13px; color:#445062; }
+.compact-data { max-height:180px; overflow:auto; margin:8px 0 0; padding:10px; background:#f5f7fa; border:1px solid var(--line); border-radius:4px; font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace; white-space:pre-wrap; }
 .briefing h4 { font-size:12px; font-weight:650; color:var(--muted); margin-top:24px; }
 .next-check { background:#f2f6ff; border-left:3px solid var(--accent); padding:16px 18px 7px; margin:24px 0; }
 .next-check h4 { color:var(--accent); margin-top:0; }

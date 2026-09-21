@@ -11,6 +11,7 @@ from typing import Any
 from fcapsule.episode_investigation import now, run_investigation
 from fcapsule.investigation_tools import InvestigationTools, episode_context
 from fcapsule.io.archive_writer import create_archive
+from fcapsule.reasoning.findings import derive_findings
 
 
 class InvestigationService:
@@ -246,6 +247,8 @@ class InvestigationService:
                                  revision_id=queued.get("revision_id"), parent_revision_id=queued.get("parent_revision_id"),
                                  revision_reason=queued.get("revision_reason"), source_mode=queued.get("source_mode"),
                                  evidence_manifest=evidence_manifest)
+                    if state.get("status") in {"ready", "incomplete"}:
+                        state["findings"] = derive_findings(state)
                     self.plane._write_briefing_state(self.path(episode_id), state)
                     self._record_revision(state)
                     if state["status"] in {"ready", "incomplete"}:
