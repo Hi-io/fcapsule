@@ -3,9 +3,10 @@ import json
 import unittest
 from unittest.mock import Mock
 
-from fcapsule.episode_investigation import assessment_payload, run_investigation, validate_assessment
+from fcapsule.episode_investigation import SYSTEM, assessment_payload, run_investigation, validate_assessment
 from fcapsule.investigation_tools import InvestigationTools, episode_context, log_patterns, metric_summary, scrub, stamp
 from fcapsule.processing.anonymizer import anonymize_text, template_for_message
+from fcapsule.reasoning.context_budget import estimate_tokens
 
 
 def assessment(ref="Q001"):
@@ -27,6 +28,17 @@ class FakeClient:
         if isinstance(decision, Exception):
             raise decision
         return {"content": json.dumps(decision), "usage": {"prompt_tokens": 100, "completion_tokens": 30, "total_tokens": 130}}
+
+
+class NoUsageClient(FakeClient):
+    """A provider response without billing metadata must still consume the reserve."""
+
+    def chat(self, request):
+        self.requests.append(request)
+        decision = next(self.decisions)
+        if isinstance(decision, Exception):
+            raise decision
+        return {"content": json.dumps(decision), "usage": {}}
 
 
 class InvestigationEngineTests(unittest.TestCase):
@@ -189,6 +201,35 @@ class InvestigationEngineTests(unittest.TestCase):
         state, client = self.run_case([{"action": "finish", "assessment": assessment()}], max_checks=0)
         self.assertEqual(state["status"], "ready")
         self.assertEqual(client.requests[0].reasoning_effort, "none")
+
+    def test_full_request_including_instructions_and_catalogue_fits_the_input_cap(self):
+        self.context["evidence"] = [
+            {"id": f"E{index}", "domain": "log_template", "summary": "diagnostic context " + "x" * 1800}
+            for index in range(16)
+        ]
+        state, client = self.run_case([{"action": "finish", "assessment": assessment()}], max_checks=0,
+                                      max_total_tokens=5000, max_prompt_tokens=1600)
+        self.assertEqual(state["status"], "ready")
+        for request in client.requests:
+            self.assertLessEqual(
+                estimate_tokens(request.messages[0]["content"]) + estimate_tokens(request.messages[1]["content"]),
+                1600,
+            )
+
+    def test_missing_provider_usage_still_blocks_unreserved_follow_up_calls(self):
+        decision = {"action": "check", "tool": "resource_history", "arguments": {},
+                    "question": "Resource pressure?", "distinguishes": "CPU or memory"}
+        client = NoUsageClient([decision] * 5)
+        state = run_investigation(
+            self.context, self.kit, "test-model", 1000, lambda state: None, client=client,
+            max_checks=4, max_total_tokens=4000, max_prompt_tokens=1600,
+        )
+        budget = state["token_budget"]
+        self.assertFalse(state["usage"]["complete"])
+        self.assertLess(len(client.requests), 5)
+        self.assertGreater(budget["accounted_total_tokens"], 0)
+        self.assertEqual(budget["accounted_total_tokens"], budget["reserved_total_tokens"])
+        self.assertLessEqual(budget["accounted_total_tokens"], budget["maximum_total_tokens"])
 
     def test_hard_call_budget_and_disallowed_tools(self):
         decision = {"action": "check", "tool": "resource_history", "arguments": {}, "question": "Resource pressure?", "distinguishes": "CPU or memory"}

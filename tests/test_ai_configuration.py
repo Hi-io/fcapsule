@@ -28,6 +28,14 @@ class _FailingMediaClient(_MediaClient):
 
 
 class AiConfigurationTests(unittest.TestCase):
+    def test_default_investigation_budget_is_bounded_for_interactive_triage(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": "", "OPENROUTER_API_KEY": ""}):
+            plane = ControlPlane(Path(directory) / "state")
+            config = plane.ai_configuration()
+            self.assertEqual(config["max_total_tokens"], 12000)
+            self.assertEqual(config["max_prompt_tokens"], 2100)
+            self.assertEqual(config["max_checks"], 1)
+
     def test_budget_settings_are_bounded_and_available_to_investigator(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": "", "OPENROUTER_API_KEY": ""}):
             plane = ControlPlane(Path(directory) / "state")

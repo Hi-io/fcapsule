@@ -16,7 +16,10 @@ def estimate_tokens(value: Any) -> int:
     """Use a deliberately conservative character estimate before a provider replies."""
 
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=True, separators=(",", ":"))
-    return max(1, math.ceil(len(text) / 3.6))
+    # Compact JSON and identifier-heavy telemetry usually tokenize more densely than
+    # prose. Reserve against 3.2 characters per token so a missing provider usage
+    # field cannot turn a nominal budget into an optimistic estimate.
+    return max(1, math.ceil(len(text) / 3.2))
 
 
 def _short(value: Any, limit: int = 320) -> str:
@@ -149,7 +152,11 @@ def compact_for_model(
             for item in payload["evidence"]:
                 item["summary"] = _short(item.get("summary"), 140)
                 item["title"] = _short(item.get("title"), 100)
-        elif any(item.get("observation") for item in payload["prior_checks"]):
+        elif any(
+            item.get("observation")
+            and (not isinstance(item.get("observation"), str) or len(item["observation"]) > 180)
+            for item in payload["prior_checks"]
+        ):
             for item in payload["prior_checks"]:
                 item["observation"] = _short(json.dumps(item.get("observation"), ensure_ascii=True), 180)
         elif len(payload["evidence"]) > 1:

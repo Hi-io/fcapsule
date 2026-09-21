@@ -76,7 +76,11 @@ def run_source_disconnected_review(
         "version": "1", "episode_id": context["episode_id"], "source_mode": "retained_only",
         "status": "running", "question": clean_question, "model": model, "started_at": _now(),
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
-        "token_budget": {"maximum_total_tokens": max_total_tokens, "maximum_prompt_tokens": max_prompt_tokens},
+        "token_budget": {"maximum_total_tokens": max_total_tokens, "maximum_prompt_tokens": max_prompt_tokens,
+                         "estimated_prompt_tokens": 0, "maximum_completion_tokens": 0,
+                         "reserved_total_tokens": 0, "accounted_total_tokens": 0,
+                         "provider_reported_total_tokens": 0, "unbudgeted_provider_total_tokens": 0,
+                         "remaining_tokens": max_total_tokens},
         "result": None,
     }
     publish(state)
@@ -86,15 +90,33 @@ def run_source_disconnected_review(
         # retained observations rather than agreement with earlier prose.
         retained_context.pop("previous_runs", None)
         retained_context.pop("assessment", None)
-        model_context, visible_ids = compact_for_model(retained_context, retained_checks, max_prompt_tokens=max_prompt_tokens)
-        prompt = {"question": clean_question, "source_mode": "retained_only", "retained_episode": model_context,
-                  "available_evidence_ids": sorted(visible_ids),
-                  "instruction": "Answer the stated question from preserved records only."}
+        base_prompt = {
+            "question": clean_question,
+            "source_mode": "retained_only",
+            "available_evidence_ids": [],
+            "instruction": "Answer the stated question from preserved records only.",
+        }
+        fixed_tokens = estimate_tokens(SYSTEM) + estimate_tokens(base_prompt) + 192
+        context_limit = max(320, max_prompt_tokens - fixed_tokens - 32)
+        model_context, visible_ids = compact_for_model(
+            retained_context, retained_checks, max_prompt_tokens=context_limit,
+        )
+        prompt = {**base_prompt, "retained_episode": model_context}
+        prompt["available_evidence_ids"] = sorted(visible_ids)
         estimated_prompt = estimate_tokens(SYSTEM) + estimate_tokens(prompt)
+        if estimated_prompt > max_prompt_tokens:
+            raise ValueError("Source-disconnected review input size budget reached")
         completion_limit = min(max(256, int(max_tokens)), max_total_tokens - estimated_prompt)
         if completion_limit < 256:
             raise ValueError("Source-disconnected review token budget is too small")
-        state["token_budget"].update({"estimated_prompt_tokens": estimated_prompt, "maximum_completion_tokens": completion_limit})
+        reservation = estimated_prompt + completion_limit
+        state["token_budget"].update({
+            "estimated_prompt_tokens": estimated_prompt,
+            "maximum_completion_tokens": completion_limit,
+            "reserved_total_tokens": reservation,
+            "accounted_total_tokens": reservation,
+            "remaining_tokens": max(0, max_total_tokens - reservation),
+        })
         publish(state)
         response = (client or DeepSeekChatClient(timeout_seconds=90)).chat(ChatRequest(
             model=model,
@@ -109,6 +131,16 @@ def run_source_disconnected_review(
                 state["usage"][key] = usage[key]
             else:
                 state["usage"]["complete"] = False
+        reported_total = usage.get("total_tokens")
+        if isinstance(reported_total, int) and reported_total >= 0:
+            state["token_budget"]["provider_reported_total_tokens"] = reported_total
+            overflow = max(0, reported_total - reservation)
+            if overflow:
+                state["token_budget"]["unbudgeted_provider_total_tokens"] = overflow
+                state["token_budget"]["accounted_total_tokens"] += overflow
+                state["token_budget"]["remaining_tokens"] = max(
+                    0, max_total_tokens - state["token_budget"]["accounted_total_tokens"],
+                )
         state["result"] = validate_source_review(_parse(str(response.get("content", ""))), set(visible_ids))
         state["status"] = "ready"
     except Exception as error:

@@ -225,7 +225,9 @@ copied as `episode_investigation.json` into each participating capsule.
   and any validation error (never private model deliberation);
 - `assessment`: summary, likely mechanism, next action, expected finding, uncertainty,
   evidence references, hypothesis states and relationships between member alerts;
-- `usage`: current attempt's prompt/completion/total token sums and completeness flag;
+- `usage`: current attempt's provider-reported prompt/completion/total token sums and completeness flag;
+- `token_budget`: configured full-request and total caps, pre-call reservation, conservative accounted amount,
+  provider-reported amount, any post-call excess, and remaining capacity;
 - `lifetime_usage`: earlier attempts' reported totals, separate from current usage;
 - `previous_runs`: up to three earlier attempts;
 - `source_retention`: `unknown`, distinct from managed incident cleanup.

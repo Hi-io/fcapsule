@@ -209,14 +209,23 @@ evidence only. The model cannot provide URLs, PromQL, OpenSearch DSL, shell comm
 SQL, arbitrary paths or Kubernetes mutations. Configured sources remain a trusted
 administrator boundary, not a multi-tenant authorization system.
 
-Each attempt allows one automatic preservation check, at most four model-selected
-checks and at most six provider calls (five investigation decisions plus one final
-evidence review). The completion limit in Settings applies
-per call. Calls request JSON output and low reasoning effort. One schema repair can
-use a remaining call with reasoning disabled; it does not increase the total call
-budget. Final evidence review also disables private reasoning output. This avoids spending a small completion budget entirely on non-visible
-reasoning. These controls follow the [DeepSeek API contract](https://api-docs.deepseek.com/api/create-chat-completion/).
-Encoded user context is limited to 160,000 characters before transmission.
+The product default is one automatic preservation check, one model-selected check,
+one final assessment and one evidence review. That normally means no more than three
+provider calls. Operators can raise the number of model-selected checks to four, for a
+maximum of six calls. The default per-investigation reserve is 12,000 tokens and the
+default full-request input cap is 2,100 tokens. The latter includes system instructions,
+the tool catalogue, citation IDs and selected evidence; it is not merely a cap on log
+text. The completion limit in Settings applies per call. Calls request JSON output and
+low reasoning effort. One schema repair can use a remaining call with reasoning
+disabled; it does not increase the total call budget. Final evidence review also
+disables private reasoning output. These controls follow the [DeepSeek API contract](https://api-docs.deepseek.com/api/create-chat-completion/).
+
+Before each request, FCAPSule reserves its estimated full input plus the allowed
+completion. A missing provider usage field therefore cannot create further unreserved
+calls. If a provider later reports more tokens than the reservation, the excess is
+charged to the attempt before another call can be made. The UI distinguishes provider
+usage from this safety reserve. This is containment, not a guarantee that an upstream
+provider will never bill hidden reasoning differently from its API output limit.
 Repeated identical checks are rejected. A 420-second soft elapsed-time budget is
 checked between calls, with a 90-second provider timeout; an in-flight call or source
 operation can extend elapsed time beyond the soft budget. Two background workers
@@ -300,8 +309,8 @@ remain required. See [data privacy](data_privacy.md).
 
 Tests cover scope/argument rejection, missing sources, peer fallback, diagnostic
 code preservation, recurrence-candidate bounds, usage accounting, invalid citations,
-provider failure, bounded calls, background progress, restart recovery and deletion
-races. These tests do
+provider failure, bounded calls, full-request compaction, missing provider usage,
+background progress, restart recovery and deletion races. These tests do
 not establish general root-cause accuracy. Evaluation should compare the former
 single-call briefing and the new investigator on the same incidents, recording
 discriminating observations found, unsupported claims, operator usefulness,

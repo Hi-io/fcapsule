@@ -220,9 +220,9 @@ class ControlPlane:
         default = next((item for item in profiles if item["model_id"] == "deepseek-v4-pro"), profiles[0])
         model = self.store.get_setting("ai_active_model", str(default["model_id"])) or str(default["model_id"])
         max_tokens = _bounded_int(self.store.get_setting("ai_max_tokens", str(default["max_tokens"])), int(default["max_tokens"]), 256, 6000)
-        maximum_total_tokens = _bounded_int(self.store.get_setting("ai_max_total_tokens", "18000"), 18000, 4000, 100000)
-        maximum_prompt_tokens = _bounded_int(self.store.get_setting("ai_max_prompt_tokens", "2600"), 2600, 1200, 12000)
-        maximum_checks = _bounded_int(self.store.get_setting("ai_max_checks", "2"), 2, 0, 4)
+        maximum_total_tokens = _bounded_int(self.store.get_setting("ai_max_total_tokens", "12000"), 12000, 4000, 100000)
+        maximum_prompt_tokens = _bounded_int(self.store.get_setting("ai_max_prompt_tokens", "2100"), 2100, 1600, 12000)
+        maximum_checks = _bounded_int(self.store.get_setting("ai_max_checks", "1"), 1, 0, 4)
         credential = os.environ.get("DEEPSEEK_API_KEY")
         return {
             "provider": "deepseek",
@@ -314,7 +314,7 @@ class ControlPlane:
             raise ValueError("Model ID must be a non-empty identifier without spaces")
         max_tokens = _bounded_int(payload.get("max_tokens", current["max_tokens"]), current["max_tokens"], 256, 6000)
         maximum_total_tokens = _bounded_int(payload.get("max_total_tokens", current["max_total_tokens"]), current["max_total_tokens"], 4000, 100000)
-        maximum_prompt_tokens = _bounded_int(payload.get("max_prompt_tokens", current["max_prompt_tokens"]), current["max_prompt_tokens"], 1200, 12000)
+        maximum_prompt_tokens = _bounded_int(payload.get("max_prompt_tokens", current["max_prompt_tokens"]), current["max_prompt_tokens"], 1600, 12000)
         maximum_checks = _bounded_int(payload.get("max_checks", current["max_checks"]), current["max_checks"], 0, 4)
         api_key = str(payload.get("api_key", "")).strip()
         if api_key and len(api_key) < 12:

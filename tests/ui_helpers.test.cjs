@@ -128,9 +128,10 @@ test('partial token usage is not displayed as complete accounting', () => {
     safe:value=>String(value ?? ''), icon:()=>'', formatDate:value=>value,
     disclosure:(id,title,body)=>title+body,
   });
-  const html = progress({status:'incomplete', checks:[], usage:{total_tokens:42,complete:false}, calls:[]});
+  const html = progress({status:'incomplete', checks:[], usage:{total_tokens:42,complete:false}, calls:[], token_budget:{accounted_total_tokens:640,maximum_total_tokens:12000,remaining_tokens:11360}});
   assert.match(html,/At least 42 tokens/);
-  assert.match(html,/not a full billing total/);
+  assert.match(html,/safety reserve prevents unbounded follow-up calls/);
+  assert.match(html,/640 \/ 12,000/);
 });
 
 test('agent event times remain separate from the historical incident sequence', () => {

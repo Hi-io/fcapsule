@@ -1,7 +1,8 @@
 import json
 import unittest
 
-from fcapsule.reasoning.source_review import run_source_disconnected_review, validate_source_review
+from fcapsule.reasoning.context_budget import estimate_tokens
+from fcapsule.reasoning.source_review import SYSTEM, run_source_disconnected_review, validate_source_review
 
 
 class FakeClient:
@@ -52,6 +53,28 @@ class SourceDisconnectedReviewTests(unittest.TestCase):
                 "sufficiency": "sufficient", "answer": "Answer", "missing_discriminator": "None",
                 "supporting_evidence_ids": ["unknown"],
             }, {"E001"})
+
+    def test_review_request_includes_system_instruction_within_the_input_cap(self):
+        self.context["evidence"] = [
+            {"id": f"E{index:03d}", "domain": "log_template", "title": "Event",
+             "summary": "bounded retained observation " + "x" * 1600}
+            for index in range(16)
+        ]
+        client = FakeClient({
+            "sufficiency": "unresolved", "answer": "The retained record does not establish a network cause.",
+            "missing_discriminator": "The target error was not retained.", "supporting_evidence_ids": ["E000"],
+        })
+        result = run_source_disconnected_review(
+            self.context, [], "Can the retained capsule establish the exact cause?", "test-model", 700,
+            lambda state: None, max_prompt_tokens=1600, max_total_tokens=3500, client=client,
+        )
+        self.assertEqual(result["status"], "ready")
+        request = client.requests[0]
+        self.assertLessEqual(
+            estimate_tokens(request.messages[0]["content"]) + estimate_tokens(request.messages[1]["content"]),
+            1600,
+        )
+        self.assertGreater(result["token_budget"]["accounted_total_tokens"], 0)
 
 
 if __name__ == "__main__":

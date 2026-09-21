@@ -176,7 +176,9 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
              "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
              "token_budget": {"maximum_total_tokens": max_total_tokens, "maximum_prompt_tokens": max_prompt_tokens,
                               "maximum_checks": max_checks, "estimated_prompt_tokens": 0,
-                              "reserved_completion_tokens": 0},
+                              "reserved_completion_tokens": 0, "reserved_total_tokens": 0,
+                              "accounted_total_tokens": 0, "provider_reported_total_tokens": 0,
+                              "unbudgeted_provider_total_tokens": 0, "remaining_tokens": max_total_tokens},
              "source_retention": "unknown", "preservation": "Mutable workload state is checked early; no source expiry is assumed."}
     started = time.monotonic()
     evidence_ids = {item["id"] for item in context["evidence"]}
@@ -184,23 +186,43 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
     validation_feedback = None
     review_candidate = None
 
+    def compact_payload(base: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+        """Fit the entire API request, not only its incident evidence, into the cap."""
+
+        # A compact context can expose a bounded list of E/Q IDs after this
+        # calculation. Reserve enough room for those citations before fitting it.
+        fixed_tokens = estimate_tokens(SYSTEM) + estimate_tokens(base) + 192
+        context_limit = max(320, max_prompt_tokens - fixed_tokens - 32)
+        model_context, visible_evidence_ids = compact_for_model(
+            context,
+            state["checks"],
+            max_prompt_tokens=context_limit,
+        )
+        return {**base, "episode": model_context}, visible_evidence_ids
+
     def request_model(payload, effort, phase, desired_completion_tokens):
         if time.monotonic() - started > 420:
             raise ValueError("Investigation time budget reached")
         encoded = json.dumps(payload, ensure_ascii=True)
-        if estimate_tokens(encoded) > max_prompt_tokens + 64:
-            raise ValueError("Input size budget reached")
         estimated_prompt = estimate_tokens(SYSTEM) + estimate_tokens(encoded)
-        reported = int(state["usage"].get("total_tokens", 0))
-        remaining = max_total_tokens - reported - estimated_prompt
+        if estimated_prompt > max_prompt_tokens:
+            raise ValueError("Input size budget reached")
+        budget = state["token_budget"]
+        accounted = int(budget.get("accounted_total_tokens", 0))
+        remaining = max_total_tokens - accounted - estimated_prompt
         response_limit = min(max_tokens, desired_completion_tokens, remaining)
         if response_limit < 256:
             raise ValueError("Investigation token budget reached before another model response could be reserved")
         call = {"started_at": now(), "status": "running", "reasoning_effort": effort, "phase": phase,
                 "estimated_prompt_tokens": estimated_prompt, "maximum_completion_tokens": response_limit}
         state["calls"].append(call)
-        state["token_budget"]["estimated_prompt_tokens"] += estimated_prompt
-        state["token_budget"]["reserved_completion_tokens"] += response_limit
+        reservation = estimated_prompt + response_limit
+        budget["estimated_prompt_tokens"] += estimated_prompt
+        budget["reserved_completion_tokens"] += response_limit
+        budget["reserved_total_tokens"] += reservation
+        budget["accounted_total_tokens"] += reservation
+        budget["remaining_tokens"] = max(0, max_total_tokens - budget["accounted_total_tokens"])
+        call["reserved_tokens"] = reservation
         publish(state)
         response = client.chat(ChatRequest(model=model, messages=[{"role": "system", "content": SYSTEM},
             {"role": "user", "content": encoded}], max_tokens=response_limit, reasoning_effort=effort, json_output=True))
@@ -212,6 +234,20 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 state["usage"]["complete"] = False
             else:
                 state["usage"][key] += usage[key]
+        reported_total = usage.get("total_tokens")
+        if isinstance(reported_total, int) and reported_total >= 0:
+            budget["provider_reported_total_tokens"] += reported_total
+            overflow = max(0, reported_total - reservation)
+            if overflow:
+                # A provider can account hidden reasoning differently from the
+                # requested completion limit. Charge the observed excess before
+                # deciding whether another call is permitted.
+                budget["unbudgeted_provider_total_tokens"] += overflow
+                budget["accounted_total_tokens"] += overflow
+                budget["remaining_tokens"] = max(0, max_total_tokens - budget["accounted_total_tokens"])
+            call["accounted_tokens"] = reservation + overflow
+        else:
+            call["accounted_tokens"] = reservation
         publish(state)
         return response, call
 
@@ -242,16 +278,11 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 state["status"] = "incomplete"
                 state["message"] = "Investigation time budget reached. Checks are retained."
                 break
-            # Leave room for the tool catalogue and orchestration envelope.
-            model_context, visible_evidence_ids = compact_for_model(
-                context,
-                state["checks"],
-                max_prompt_tokens=max(1200, max_prompt_tokens - 850),
-            )
-            payload = {"episode": model_context, "allowed_pods": tools.pods, "tools": tools.CATALOG,
+            payload, visible_evidence_ids = compact_payload({"allowed_pods": tools.pods, "tools": tools.CATALOG,
                        "remaining_checks": max_checks - turn,
-                       "available_evidence_ids": sorted(visible_evidence_ids), "validation_feedback": validation_feedback,
-                       "instruction": "Finish using collected evidence now." if turn == max_checks else "Choose the most useful remaining check, or finish when further queries would not help."}
+                       "available_evidence_ids": [], "validation_feedback": validation_feedback,
+                       "instruction": "Finish using collected evidence now." if turn == max_checks else "Choose the most useful remaining check, or finish when further queries would not help."})
+            payload["available_evidence_ids"] = sorted(visible_evidence_ids)
             state["message"] = "Assessing episode evidence" if turn == 0 else "Reviewing check results"
             publish(state)
             response, call = request_model(
@@ -309,15 +340,13 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             state.update(status="running", assessment=None, draft_assessment=draft,
                          review={"status": "running", "schema_repair": review_candidate is not None}, message="Checking the conclusion against its evidence")
             publish(state)
-            model_context, visible_evidence_ids = compact_for_model(
-                context,
-                state["checks"],
-                max_prompt_tokens=max(1200, max_prompt_tokens - 850),
-            )
-            response, call = request_model({"episode": model_context, "available_evidence_ids": sorted(visible_evidence_ids),
+            review_base = {"available_evidence_ids": [],
                 "assessment_to_review": draft,
                 "draft_validation_error": state.get("draft_validation_error"),
-                "instruction": REVIEW_INSTRUCTION}, "none", "evidence_review", 900)
+                "instruction": REVIEW_INSTRUCTION}
+            payload, visible_evidence_ids = compact_payload(review_base)
+            payload["available_evidence_ids"] = sorted(visible_evidence_ids)
+            response, call = request_model(payload, "none", "evidence_review", 900)
             decision = parse_object(str(response.get("content", "")))
             call["decision"] = scrub(decision)
             reviewed = validate_assessment(
