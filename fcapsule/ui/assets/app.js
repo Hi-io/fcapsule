@@ -92,7 +92,7 @@ function sources(config) {
 }
 
 function consoleSignature(state) {
-  return JSON.stringify([state.overview.episodes, state.overview.archived_episodes, state.overview.triage, selectedReport, selectedEpisodeId, showArchived, queueFilters, reportTab, reportLoading, reportError, state.running]);
+  return JSON.stringify([state.overview.episodes, state.overview.archived_episodes, state.overview.triage, state.overview.related_groups, selectedReport, selectedEpisodeId, showArchived, queueFilters, reportTab, reportLoading, reportError, state.running]);
 }
 function resourceLabel(item, application) {
   const resource = item.resource || {};
@@ -145,6 +145,14 @@ function triageStrip(items) {
   if (!items.length || showArchived) return '';
   return `<section class="triage" aria-label="Needs attention"><div class="triage-head"><h2>Needs attention</h2><span>Focused from retained incident history</span></div><div class="triage-list">${items.map(item => `<button class="triage-item" data-triage-episode="${safe(item.episode_id)}"><span class="triage-kind ${safe(item.kind)}">${safe(item.label)}</span><span><strong>${safe(item.title)}</strong><small>${safe(item.detail)}</small></span><span class="triage-open">View</span></button>`).join('')}</div></section>`;
 }
+function relatedActivity(groups) {
+  if (!groups.length || showArchived) return '';
+  const basisText = basis => (basis || []).filter(item => item.kind !== 'time_window').slice(0,2).map(item => {
+    const label = item.kind === 'same_node' ? 'Shared node' : item.kind === 'shared_dependency' ? 'Shared dependency' : 'Shared alert';
+    return label + ': ' + item.value;
+  }).join(' · ');
+  return `<section class="related-activity" aria-label="Potential shared conditions"><div class="related-activity-head"><div><h2>Potential shared conditions</h2><p>Separate episodes are linked only when their retained alert and operating context agree.</p></div><span>${groups.length} cue${groups.length === 1 ? '' : 's'}</span></div><div class="related-group-list">${groups.slice(0,3).map(group => `<article class="related-group"><div class="related-group-main"><span class="related-reference">${safe(group.reference)}</span><strong>${safe(group.title)}</strong><small>${safe(basisText(group.basis))}</small></div><div class="related-group-episodes">${(group.episodes || []).map(episode => `<span><button class="related-open" data-related-open="${safe(episode.episode_id)}">${safe(episode.reference)}</button><small>${safe(episode.title)}</small><button class="related-separate" data-related-group="${safe(group.group_id)}" data-related-separate="${safe(episode.episode_id)}" title="Keep this episode separate">Separate</button></span>`).join('')}</div></article>`).join('')}</div></section>`;
+}
 function renderConsole(state) {
   lastConsoleSignature = consoleSignature(state);
   const data = state.overview;
@@ -155,6 +163,7 @@ function renderConsole(state) {
   app.innerHTML = `
     <div class="page-head"><div><div class="eyebrow">Incident workspace</div><h1>Operations</h1><p>${active} active · ${data.episodes.length - active} resolved</p></div><a class="button-link" href="/targets">Manage targets</a></div>
     ${triageStrip(data.triage || [])}
+    ${relatedActivity(data.related_groups || [])}
     <section class="queue"><div class="sheet-head"><h2>${showArchived ? 'Archived episodes' : 'Incident queue'}</h2><button class="secondary" id="queue-mode">${showArchived ? 'Back to queue' : `Archived (${data.archived_episodes.length})`}</button></div>
     ${queueFiltersPanel(allQueueEpisodes, apps)}
     ${episodeTable(episodes, data.capsules, showArchived)}</section>`;
@@ -173,6 +182,13 @@ function renderConsole(state) {
   document.querySelectorAll('[data-triage-episode]').forEach(button => button.addEventListener('click', () => {
     const episode = data.episodes.find(item => item.episode_id === button.dataset.triageEpisode);
     if (episode) openEpisodeReport(episode.episode_id, episode.primary_incident_id);
+  }));
+  document.querySelectorAll('[data-related-open]').forEach(button => button.addEventListener('click', () => {
+    const episode = data.episodes.find(item => item.episode_id === button.dataset.relatedOpen);
+    if (episode) openEpisodeReport(episode.episode_id, episode.primary_incident_id);
+  }));
+  document.querySelectorAll('[data-related-separate]').forEach(button => button.addEventListener('click', () => {
+    separateRelatedEpisode(button.dataset.relatedGroup, button.dataset.relatedSeparate);
   }));
   document.querySelectorAll('[data-episode-toggle]').forEach(summary => summary.addEventListener('click', event => {
     event.preventDefault();
@@ -209,6 +225,7 @@ function renderConsole(state) {
   document.querySelectorAll('[data-add-evidence]').forEach(button => button.addEventListener('click', () => showEvidenceDialog(button.dataset.addEvidence)));
   document.querySelectorAll('[data-update-evidence-investigation]').forEach(button => button.addEventListener('click', () => updateWithEvidence(button.dataset.updateEvidenceInvestigation)));
   document.querySelectorAll('[data-correct-evidence]').forEach(button => button.addEventListener('click', () => correctEvidence(button.dataset.correctEvidence)));
+  document.querySelectorAll('[data-source-review]').forEach(button => button.addEventListener('click', () => askSourceReview(button.dataset.sourceReview)));
   document.querySelectorAll('[data-copy-incident-link]').forEach(button => button.addEventListener('click', () => copyIncidentLink(button)));
   document.querySelectorAll('[data-investigation-ref]').forEach(button => button.addEventListener('click', () => {
     reportTab = 'evidence';
@@ -480,6 +497,18 @@ function mediaEvidencePanel(payload) {
   return `<section class="media-evidence"><div class="section-heading"><h3>Additional evidence</h3><div class="row-actions"><button class="secondary" data-add-evidence="${safe(episodeId || '')}">Add evidence</button>${ready ? `<button data-update-evidence-investigation="${safe(episodeId || '')}">Update investigation</button>` : ''}</div></div>${rows || '<p class="queue-note">No operator-supplied image or audio evidence.</p>'}${history}</section>`;
 }
 
+function sourceReviewPanel(payload) {
+  const episodeId = selectedEpisodeId || payload.investigation?.episode_id;
+  if (!episodeId) return '';
+  const reviews = payload.source_disconnected_reviews || [];
+  const rows = reviews.slice(0, 3).map(item => {
+    const result = item.result || {};
+    return `<article class="source-review-row"><div><strong>${safe(item.question)}</strong><small>${safe(String(item.status || '').replaceAll('_',' '))} · ${safe(formatDate(item.completed_at || item.created_at))}</small>${result.answer ? `<p>${safe(result.answer)}</p><p class="queue-note">${safe(String(result.sufficiency || '').replaceAll('_',' '))} · ${safe(result.missing_discriminator || '')}</p>` : ''}</div></article>`;
+  }).join('');
+  const body = '<p class="queue-note">Ask a narrow question from preserved records only. Live sources are not queried.</p><button class="secondary" data-source-review="' + safe(episodeId) + '">Ask retained-capsule question</button>' + (rows ? '<div class="source-review-list">' + rows + '</div>' : '');
+  return disclosure('source-disconnected-review', 'Retained-capsule review', body, reviews.length || '');
+}
+
 function fileToBase64(file) {
   return file.arrayBuffer().then(buffer => {
     const data = new Uint8Array(buffer); let text = '';
@@ -537,6 +566,18 @@ async function updateWithEvidence(episodeId) {
   const response = await fetch('/api/episodes/' + encodeURIComponent(episodeId) + '/investigation/update', {method:'POST'}); const result = await response.json();
   if (!response.ok) { alert(result.error || 'Unable to update investigation.'); return; }
   if (selectedReport) { selectedReport.investigation = result; renderPreservingFocus(() => renderConsole(lastState)); }
+}
+
+async function askSourceReview(episodeId) {
+  const question = window.prompt('Question for the retained capsule');
+  if (question === null || !question.trim()) return;
+  const response = await fetch('/api/episodes/' + encodeURIComponent(episodeId) + '/source-review', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({question:question.trim()})});
+  const result = await response.json();
+  if (!response.ok) { alert(result.error || 'Unable to start the retained-capsule review.'); return; }
+  if (selectedReport) {
+    selectedReport.source_disconnected_reviews = [result, ...(selectedReport.source_disconnected_reviews || [])];
+    renderPreservingFocus(() => renderConsole(lastState));
+  }
 }
 
 async function correctEvidence(attachmentId) {
@@ -609,6 +650,14 @@ async function deleteEpisode(id) {
   const result = await response.json();
   if (!response.ok) { alert(result.error || 'Unable to delete episode'); return; }
   selectedReport = null; selectedEpisodeId = null; await refresh();
+}
+
+async function separateRelatedEpisode(groupId, episodeId) {
+  if (!confirm('Keep this episode separate from the automatic related-condition cue?')) return;
+  const response = await fetch(`/api/related-groups/${encodeURIComponent(groupId)}/episodes/${encodeURIComponent(episodeId)}/separate`, {method:'POST'});
+  const result = await response.json();
+  if (!response.ok) { alert(result.error || 'Unable to separate the episode.'); return; }
+  await refresh();
 }
 
 async function copyIncidentLink(button) {
@@ -693,7 +742,7 @@ function briefingPanel(payload) {
 
 function investigationRefs(run, ids = []) {
   const labels = new Map();
-  const checks = {workload_state:'Runtime snapshot',resource_history:'Resource history',search_logs:'Source logs',compare_baseline:'Baseline comparison',database_pressure:'Database metrics',dependency_evidence:'Dependency evidence',review_omitted:'Omitted log patterns',historical_episode:'Prior episode'};
+  const checks = {workload_state:'Runtime snapshot',resource_history:'Resource history',search_logs:'Source logs',compare_baseline:'Baseline comparison',database_pressure:'Database metrics',dependency_evidence:'Dependency evidence',review_omitted:'Omitted log patterns',historical_episode:'Prior episode',alert_rule_logic:'Alert logic',scrape_discovery:'Target discovery'};
   return ids.map(id => {
     const item = [...(run.checks || []), ...(run.context?.evidence || [])].find(item=>item.id === id);
     const label = checks[item?.tool] || (item?.domain === 'log_template' ? logLabel(item.title) : item?.title) || item?.question || id;
@@ -839,7 +888,7 @@ function reportPanel(payload) {
   let content;
   if (reportTab === 'evidence') content = investigationEvidence(ai || {}) + '<h3 class="capture-heading">Selected alert capture</h3>' + evidencePanel(report);
   else if (reportTab === 'timeline') content = timelinePanel(report) + investigationTimeline(ai || {});
-  else content = '<div class="overview-layout"><div>' + briefingPanel(payload) + fallback + mediaEvidencePanel(payload) + '</div>' + investigationProgress(ai || {}) + '</div>';
+  else content = '<div class="overview-layout"><div>' + briefingPanel(payload) + fallback + mediaEvidencePanel(payload) + sourceReviewPanel(payload) + '</div>' + investigationProgress(ai || {}) + '</div>';
   return '<section id="incident-report"><div class="report-navigation"><div role="tablist" aria-label="Investigation views">' +
     tabs.map(name=>'<button id="tab-' + name + '" role="tab" data-report-tab="' + name + '" aria-selected="' + (name === reportTab) + '" aria-controls="investigation-panel" tabindex="' + (name === reportTab ? 0 : -1) + '">' + name[0].toUpperCase() + name.slice(1) + '</button>').join('') +
     '</div>' + exports + '</div><div id="investigation-panel" role="tabpanel" aria-labelledby="tab-' + reportTab + '" tabindex="0">' + content + '</div><div class="report-technical">' + diagnostics + '</div></section>';

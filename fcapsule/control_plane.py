@@ -25,6 +25,7 @@ from fcapsule.pipeline import investigate_case
 from fcapsule.reasoning.incident_briefing import generate_incident_briefing
 from fcapsule.reasoning.llm_client import ChatRequest, DeepSeekChatClient, LLMUnavailableError
 from fcapsule.reasoning.openrouter import OpenRouterClient, OpenRouterError
+from fcapsule.related_groups import RelatedEpisodeService
 from fcapsule.store import FCAPSuleStore, utc_now
 from fcapsule.ui.dashboard import render_dashboard
 
@@ -118,6 +119,7 @@ class ControlPlane:
         self.briefing_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="fcapsule-briefing")
         self.evidence = EvidenceService(self)
         self.investigator = InvestigationService(self)
+        self.related_groups = RelatedEpisodeService(self)
         self.running = False
         self.active_job: str | None = None
         self.current_incident_id: str | None = None
@@ -438,6 +440,14 @@ class ControlPlane:
         if not ready:
             raise ValueError("No processed evidence is ready to update this investigation")
         return self.investigator.start(episode_id, retry=True, reason="evidence_added")
+
+    def start_source_disconnected_review(self, episode_id: str, question: str) -> dict[str, Any]:
+        return self.investigator.start_source_disconnected_review(episode_id, question)
+
+    def separate_related_episode(self, group_id: str, episode_id: str) -> dict[str, Any]:
+        """Record an operator correction so an automatic correlation is not restored."""
+
+        return self.store.separate_related_episode(group_id, episode_id)
 
     def set_incident_archived(self, incident_id: str, archived: bool) -> dict[str, Any]:
         incident = self.store.set_incident_archived(incident_id, archived)
@@ -767,6 +777,11 @@ class ControlPlane:
 
     def snapshot(self) -> dict[str, Any]:
         self.purge_expired_incidents()
+        try:
+            related_groups = self.related_groups.refresh()
+        except (FileNotFoundError, json.JSONDecodeError, KeyError, OSError, ValueError):
+            # Correlation is an optional queue cue; it must not make Operations unreadable.
+            related_groups = self.store.list_related_episode_groups()
         with self.lock:
             state = {
                 "running": self.running,
@@ -783,6 +798,7 @@ class ControlPlane:
                 "sources": json.loads(json.dumps(self.source_state)),
             }
         state["overview"] = self.store.overview()
+        state["overview"]["related_groups"] = related_groups
         for key in ("episodes", "archived_episodes"):
             for episode in state["overview"].get(key, []):
                 investigation = self.investigator.read(episode["episode_id"])
@@ -889,6 +905,7 @@ class ControlPlane:
             "investigation": self.investigator.for_incident(incident_id),
             "media_evidence": self.evidence.list(episode_id) if episode_id else [],
             "investigation_revisions": self.investigator.revisions(episode_id) if episode_id else [],
+            "source_disconnected_reviews": self.investigator.source_disconnected_reviews(episode_id) if episode_id else [],
         }
 
     def start_ai_briefing(self, incident_id: str, retry: bool = False) -> dict[str, Any]:

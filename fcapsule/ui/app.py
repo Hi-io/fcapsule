@@ -249,6 +249,18 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
                 episode_id = unquote(path.removeprefix("/api/episodes/").removesuffix("/investigation/update").rstrip("/"))
                 self._json(self.server.control_plane.update_investigation_with_evidence(episode_id), HTTPStatus.ACCEPTED)
                 return
+            if path.startswith("/api/episodes/") and path.endswith("/source-review"):
+                episode_id = unquote(path.removeprefix("/api/episodes/").removesuffix("/source-review").rstrip("/"))
+                payload = self._payload()
+                self._json(self.server.control_plane.start_source_disconnected_review(episode_id, str(payload.get("question") or "")), HTTPStatus.ACCEPTED)
+                return
+            if path.startswith("/api/related-groups/") and path.endswith("/separate"):
+                parts = path.strip("/").split("/")
+                if len(parts) != 6 or parts[0:2] != ["api", "related-groups"] or parts[3] != "episodes":
+                    self._json({"error": "Invalid related group path"}, HTTPStatus.BAD_REQUEST)
+                    return
+                self._json(self.server.control_plane.separate_related_episode(unquote(parts[2]), unquote(parts[4])))
+                return
             if path.startswith("/api/episodes/") and path.endswith("/investigation"):
                 episode_id = unquote(path.removeprefix("/api/episodes/").removesuffix("/investigation").rstrip("/"))
                 self._json(self.server.control_plane.investigator.start(episode_id, retry=True), HTTPStatus.ACCEPTED)

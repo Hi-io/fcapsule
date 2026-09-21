@@ -204,6 +204,46 @@ class FCAPSuleStore:
                     completed_at TEXT
                 );
 
+                CREATE TABLE IF NOT EXISTS source_disconnected_reviews (
+                    review_id TEXT PRIMARY KEY,
+                    episode_id TEXT NOT NULL REFERENCES incident_episodes(episode_id) ON DELETE CASCADE,
+                    question TEXT NOT NULL,
+                    input_fingerprint TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    state_path TEXT NOT NULL,
+                    result TEXT NOT NULL DEFAULT '{}',
+                    usage TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    completed_at TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS related_episode_groups (
+                    group_id TEXT PRIMARY KEY,
+                    correlation_key TEXT NOT NULL UNIQUE,
+                    cluster TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    relationship TEXT NOT NULL,
+                    basis TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS related_group_members (
+                    group_id TEXT NOT NULL REFERENCES related_episode_groups(group_id) ON DELETE CASCADE,
+                    episode_id TEXT NOT NULL REFERENCES incident_episodes(episode_id) ON DELETE CASCADE,
+                    PRIMARY KEY (group_id, episode_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS related_group_exclusions (
+                    correlation_key TEXT NOT NULL,
+                    episode_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (correlation_key, episode_id)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_incidents_app_time
                     ON incidents(app_id, started_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_capsules_app_time
@@ -216,6 +256,10 @@ class FCAPSuleStore:
                     ON evidence_attachments(episode_id, created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_investigation_revisions_episode
                     ON investigation_revisions(episode_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_source_disconnected_reviews_episode
+                    ON source_disconnected_reviews(episode_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_related_group_members_episode
+                    ON related_group_members(episode_id);
                 """
             )
             incident_columns = {
@@ -970,6 +1014,166 @@ class FCAPSuleStore:
                 "SELECT * FROM investigation_revisions WHERE episode_id = ? ORDER BY created_at DESC", (episode_id,)
             ).fetchall()
         return [self._revision_row(row) for row in rows]
+
+    @staticmethod
+    def _source_review_row(row: sqlite3.Row) -> dict[str, Any]:
+        result = dict(row)
+        result["result"] = _decode(result.get("result"), {})
+        result["usage"] = _decode(result.get("usage"), {})
+        return result
+
+    def record_source_disconnected_review(self, payload: dict[str, Any]) -> dict[str, Any]:
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO source_disconnected_reviews
+                    (review_id, episode_id, question, input_fingerprint, model, status, state_path,
+                     result, usage, created_at, completed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(review_id) DO UPDATE SET
+                    status=excluded.status, result=excluded.result, usage=excluded.usage,
+                    state_path=excluded.state_path, completed_at=excluded.completed_at
+                """,
+                (
+                    str(payload["review_id"]), str(payload["episode_id"]), str(payload["question"])[:500],
+                    str(payload.get("input_fingerprint") or ""), str(payload["model"]),
+                    str(payload.get("status") or "queued"), str(payload["state_path"]),
+                    _json(payload.get("result") or {}), _json(payload.get("usage") or {}),
+                    payload.get("created_at") or now, payload.get("completed_at"),
+                ),
+            )
+        return self.get_source_disconnected_review(str(payload["review_id"])) or {}
+
+    def get_source_disconnected_review(self, review_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM source_disconnected_reviews WHERE review_id = ?", (review_id,)
+            ).fetchone()
+        return self._source_review_row(row) if row else None
+
+    def list_source_disconnected_reviews(self, episode_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM source_disconnected_reviews WHERE episode_id = ? ORDER BY created_at DESC", (episode_id,)
+            ).fetchall()
+        return [self._source_review_row(row) for row in rows]
+
+    def upsert_related_episode_group(self, payload: dict[str, Any]) -> dict[str, Any]:
+        episode_ids = sorted({str(item) for item in payload.get("episode_ids", []) if item})
+        if len(episode_ids) < 2:
+            raise ValueError("A related episode group needs at least two episodes")
+        correlation_key = str(payload["correlation_key"])
+        group_id = str(payload["group_id"])
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO related_episode_groups
+                    (group_id, correlation_key, cluster, title, status, severity, relationship, basis, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(correlation_key) DO UPDATE SET
+                    title=excluded.title, status=excluded.status, severity=excluded.severity,
+                    relationship=excluded.relationship, basis=excluded.basis, updated_at=excluded.updated_at
+                """,
+                (
+                    group_id, correlation_key, str(payload["cluster"]), str(payload["title"]),
+                    str(payload["status"]), str(payload["severity"]), str(payload["relationship"]),
+                    _json(payload.get("basis") or []), now, now,
+                ),
+            )
+            row = connection.execute(
+                "SELECT group_id FROM related_episode_groups WHERE correlation_key = ?", (correlation_key,)
+            ).fetchone()
+            actual_group_id = str(row["group_id"])
+            excluded = {
+                str(item["episode_id"])
+                for item in connection.execute(
+                    "SELECT episode_id FROM related_group_exclusions WHERE correlation_key = ?", (correlation_key,)
+                ).fetchall()
+            }
+            for episode_id in episode_ids:
+                if episode_id not in excluded:
+                    connection.execute(
+                        "INSERT OR IGNORE INTO related_group_members (group_id, episode_id) VALUES (?, ?)",
+                        (actual_group_id, episode_id),
+                    )
+        return self.get_related_episode_group(actual_group_id) or {}
+
+    def _related_group_row(
+        self, connection: sqlite3.Connection, row: sqlite3.Row, include_archived: bool = True,
+    ) -> dict[str, Any]:
+        result = dict(row)
+        result["reference"] = _reference("GRP", str(row["group_id"]))
+        result["basis"] = _decode(result.get("basis"), [])
+        members = connection.execute(
+            """
+            SELECT e.* FROM incident_episodes e
+            JOIN related_group_members gm ON gm.episode_id = e.episode_id
+            WHERE gm.group_id = ?
+            """ + ("" if include_archived else " AND e.archived_at IS NULL") + """
+            ORDER BY e.started_at
+            """,
+            (row["group_id"],),
+        ).fetchall()
+        result["episodes"] = [
+            {
+                "episode_id": str(item["episode_id"]), "reference": _reference("EP", str(item["episode_id"])),
+                "title": str(item["title"]), "status": str(item["status"]), "severity": str(item["severity"]),
+                "started_at": str(item["started_at"]), "app_id": str(item["app_id"]),
+            }
+            for item in members
+        ]
+        result["episode_count"] = len(result["episodes"])
+        return result
+
+    def get_related_episode_group(self, group_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM related_episode_groups WHERE group_id = ?", (group_id,)
+            ).fetchone()
+            return self._related_group_row(connection, row) if row else None
+
+    def list_related_episode_groups(self, limit: int = 20) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT g.* FROM related_episode_groups g
+                WHERE (
+                    SELECT COUNT(*)
+                    FROM related_group_members gm
+                    JOIN incident_episodes e ON e.episode_id = gm.episode_id
+                    WHERE gm.group_id = g.group_id AND e.archived_at IS NULL
+                ) >= 2
+                ORDER BY g.updated_at DESC LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            return [self._related_group_row(connection, row, include_archived=False) for row in rows]
+
+    def separate_related_episode(self, group_id: str, episode_id: str) -> dict[str, Any]:
+        with self._connect() as connection:
+            group = connection.execute(
+                "SELECT correlation_key FROM related_episode_groups WHERE group_id = ?", (group_id,)
+            ).fetchone()
+            if not group:
+                raise KeyError("Related episode group not found")
+            member = connection.execute(
+                "SELECT 1 FROM related_group_members WHERE group_id = ? AND episode_id = ?", (group_id, episode_id)
+            ).fetchone()
+            if not member:
+                raise KeyError("Episode is not part of this related group")
+            connection.execute(
+                "DELETE FROM related_group_members WHERE group_id = ? AND episode_id = ?", (group_id, episode_id)
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO related_group_exclusions (correlation_key, episode_id, created_at) VALUES (?, ?, ?)",
+                (str(group["correlation_key"]), episode_id, utc_now()),
+            )
+            connection.execute(
+                "UPDATE related_episode_groups SET updated_at = ? WHERE group_id = ?", (utc_now(), group_id)
+            )
+        return self.get_related_episode_group(group_id) or {}
 
     def record_capsule(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self._connect() as connection:

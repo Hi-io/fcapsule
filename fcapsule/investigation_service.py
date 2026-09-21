@@ -12,12 +12,14 @@ from fcapsule.episode_investigation import now, run_investigation
 from fcapsule.investigation_tools import InvestigationTools, episode_context
 from fcapsule.io.archive_writer import create_archive
 from fcapsule.reasoning.findings import derive_findings
+from fcapsule.reasoning.source_review import run_source_disconnected_review
 
 
 class InvestigationService:
     def __init__(self, plane):
         self.plane = plane
         self.jobs: set[str] = set()
+        self.source_review_jobs: set[str] = set()
         self.stopping = False
 
     def path(self, episode_id: str) -> Path:
@@ -27,6 +29,10 @@ class InvestigationService:
         directory = self.plane.state_dir / "investigations" / hashlib.sha256(episode_id.encode()).hexdigest()
         return directory / (hashlib.sha256(revision_id.encode()).hexdigest() + ".json")
 
+    def source_review_path(self, episode_id: str, review_id: str) -> Path:
+        directory = self.plane.state_dir / "source-disconnected-reviews" / hashlib.sha256(episode_id.encode()).hexdigest()
+        return directory / (hashlib.sha256(review_id.encode()).hexdigest() + ".json")
+
     def read(self, episode_id: str) -> dict[str, Any]:
         path = self.path(episode_id)
         return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {
@@ -34,6 +40,9 @@ class InvestigationService:
 
     def revisions(self, episode_id: str) -> list[dict[str, Any]]:
         return self.plane.store.list_investigation_revisions(episode_id)
+
+    def source_disconnected_reviews(self, episode_id: str) -> list[dict[str, Any]]:
+        return self.plane.store.list_source_disconnected_reviews(episode_id)
 
     def _record_revision(self, state: dict[str, Any]) -> None:
         revision_id = str(state.get("revision_id") or "")
@@ -64,7 +73,12 @@ class InvestigationService:
         episode = self.plane.store.get_episode(episode_id)
         if not episode:
             return
-        history = {"episode_id": episode_id, "generated_at": now(), "revisions": self.revisions(episode_id)}
+        history = {
+            "episode_id": episode_id,
+            "generated_at": now(),
+            "revisions": self.revisions(episode_id),
+            "source_disconnected_reviews": self.source_disconnected_reviews(episode_id),
+        }
         for signal in episode["signals"]:
             record = self.plane.store.get_capsule_for_incident(str(signal["incident_id"]))
             if not record:
@@ -145,6 +159,105 @@ class InvestigationService:
     def start_by_incident(self, incident_id: str) -> dict[str, Any]:
         episode = self.plane.store.episode_for_incident(incident_id)
         return self.start(episode["episode_id"]) if episode else {}
+
+    def start_source_disconnected_review(self, episode_id: str, question: str) -> dict[str, Any]:
+        """Ask one bounded question without passing a live-source adapter to the worker."""
+
+        with self.plane.briefing_lock:
+            episode = self.plane.store.get_episode(episode_id)
+            if not episode:
+                raise KeyError("Episode not found")
+            clean_question = str(question or "").strip()
+            if not 1 <= len(clean_question) <= 500:
+                raise ValueError("Question must contain between 1 and 500 characters")
+            entries = self.entries(episode)
+            if not entries:
+                raise ValueError("Build at least one report before asking a retained-capsule question")
+            if not self.plane.ai_configuration()["api_key_configured"]:
+                raise ValueError("Add a provider key in Settings to review a retained capsule")
+            retained = self.read(episode_id)
+            fingerprint = hashlib.sha256(json.dumps({
+                "base": self.fingerprint(entries, self.plane.evidence.manifest(episode_id)),
+                "question": clean_question,
+                "checks": retained.get("checks", []),
+            }, sort_keys=True).encode()).hexdigest()
+            for existing in self.source_disconnected_reviews(episode_id):
+                if existing.get("input_fingerprint") == fingerprint and existing.get("status") in {"queued", "running", "ready"}:
+                    return existing
+            review_id = f"review-{uuid.uuid4().hex}"
+            config = self.plane.ai_configuration()
+            state = {
+                "review_id": review_id, "episode_id": episode_id, "question": clean_question,
+                "input_fingerprint": fingerprint, "source_mode": "retained_only", "status": "queued",
+                "model": config["model"], "created_at": now(), "result": None,
+            }
+            self._write_source_review(state)
+            self.source_review_jobs.add(review_id)
+            self.plane.briefing_executor.submit(self._run_source_disconnected_review, episode_id, state)
+            return state
+
+    def _write_source_review(self, state: dict[str, Any]) -> None:
+        path = self.source_review_path(str(state["episode_id"]), str(state["review_id"]))
+        self.plane._write_briefing_state(path, state)
+        self.plane.store.record_source_disconnected_review(
+            {
+                "review_id": state["review_id"], "episode_id": state["episode_id"],
+                "question": state["question"], "input_fingerprint": state["input_fingerprint"],
+                "model": state["model"], "status": state["status"], "state_path": str(path),
+                "result": state.get("result") or {}, "usage": state.get("usage") or {},
+                "created_at": state.get("created_at") or state.get("started_at") or now(),
+                "completed_at": state.get("finished_at") if state.get("status") in {"ready", "incomplete"} else None,
+            }
+        )
+
+    def _retained_review_context(self, episode_id: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        episode = self.plane.store.get_episode(episode_id)
+        if not episode:
+            raise KeyError("Episode not found")
+        entries = self.entries(episode)
+        if not entries:
+            raise ValueError("No retained reports are available for this episode")
+        context = episode_context(episode, entries)
+        context["evidence"].extend(self.plane.evidence.model_evidence(episode_id))
+        latest = self.read(episode_id)
+        checks = [item for item in latest.get("checks", []) if isinstance(item, dict) and item.get("status") == "completed"]
+        context["capture_limit"] = "Retained records only. No live telemetry, source API, or prior assessment is available to this review."
+        return context, checks
+
+    def _run_source_disconnected_review(self, episode_id: str, queued: dict[str, Any]) -> None:
+        review_id = str(queued["review_id"])
+        try:
+            context, checks = self._retained_review_context(episode_id)
+            config = self.plane.ai_configuration()
+
+            def publish(state: dict[str, Any]) -> None:
+                with self.plane.briefing_lock:
+                    current = self.plane.store.get_episode(episode_id)
+                    if self.stopping or not current:
+                        raise RuntimeError("Source-disconnected review cancelled after shutdown or deletion")
+                    state.update(review_id=review_id, episode_id=episode_id, question=queued["question"],
+                                 input_fingerprint=queued["input_fingerprint"], model=config["model"],
+                                 created_at=queued["created_at"], source_mode="retained_only")
+                    self._write_source_review(state)
+                    if state.get("status") in {"ready", "incomplete"}:
+                        self._write_revision_exports(episode_id)
+
+            run_source_disconnected_review(
+                context, checks, str(queued["question"]), config["model"],
+                min(config["max_tokens"], 700), publish,
+                max_prompt_tokens=min(config["max_prompt_tokens"], 2200),
+                max_total_tokens=min(config["max_total_tokens"], 3500),
+            )
+        except Exception as error:
+            with self.plane.briefing_lock:
+                state = dict(queued)
+                state.update(status="incomplete", finished_at=now(), error_type=type(error).__name__,
+                             message="The retained-capsule review could not complete. Try again explicitly.")
+                self._write_source_review(state)
+                self._write_revision_exports(episode_id)
+        finally:
+            with self.plane.briefing_lock:
+                self.source_review_jobs.discard(review_id)
 
     def start(self, episode_id: str, retry: bool = False, reason: str = "initial_capture",
               source_mode: str = "live_sources") -> dict[str, Any]:

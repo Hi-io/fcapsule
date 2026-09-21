@@ -153,6 +153,11 @@ summary:focus-visible, button:focus-visible, a:focus-visible { outline:2px solid
 .finding-category { color:var(--muted); font-size:11px; text-transform:capitalize; }
 .finding-next { font-size:13px; color:#445062; }
 .compact-data { max-height:180px; overflow:auto; margin:8px 0 0; padding:10px; background:#f5f7fa; border:1px solid var(--line); border-radius:4px; font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace; white-space:pre-wrap; }
+.source-review-list { margin-top:16px; border-top:1px solid var(--line); }
+.source-review-row { padding:14px 0; border-bottom:1px solid var(--line); }
+.source-review-row strong, .source-review-row small { display:block; }
+.source-review-row small { margin-top:4px; color:var(--muted); }
+.source-review-row p { margin:8px 0 0; }
 .briefing h4 { font-size:12px; font-weight:650; color:var(--muted); margin-top:24px; }
 .next-check { background:#f2f6ff; border-left:3px solid var(--accent); padding:16px 18px 7px; margin:24px 0; }
 .next-check h4 { color:var(--accent); margin-top:0; }
@@ -296,6 +301,25 @@ tbody tr:hover { background:#fafbfe; }
 .triage-kind.changed { background:#fff7e4; color:#8a6419; }
 .triage-kind.recurring { background:#edf4ff; color:#315f9d; }
 .triage-open { color:var(--accent); font-size:12px; font-weight:650; }
+.related-activity { margin:0 0 28px; border:1px solid #d9e0ea; background:#fff; }
+.related-activity-head { display:flex; align-items:start; justify-content:space-between; gap:18px; padding:14px 16px; border-bottom:1px solid #e5eaf0; }
+.related-activity-head h2 { margin:0; font-size:14px; font-weight:650; }
+.related-activity-head p { margin:4px 0 0; color:var(--muted); font-size:12px; }
+.related-activity-head > span { color:#315f9d; background:#edf4ff; padding:3px 6px; font-size:10px; font-weight:700; white-space:nowrap; }
+.related-group { display:grid; grid-template-columns:minmax(230px,.85fr) minmax(0,1.55fr); gap:18px; padding:14px 16px; border-bottom:1px solid #e5eaf0; }
+.related-group:last-child { border-bottom:0; }
+.related-group-main { display:grid; align-content:start; gap:4px; min-width:0; }
+.related-reference { color:#4d6178; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:11px; font-weight:650; }
+.related-group-main strong { font-size:13px; line-height:1.4; }
+.related-group-main small { color:var(--muted); font-size:11px; overflow-wrap:anywhere; }
+.related-group-episodes { display:grid; gap:7px; align-content:start; }
+.related-group-episodes > span { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:8px; align-items:center; }
+.related-open, .related-separate { min-height:0; padding:0; border:0; background:transparent; box-shadow:none; font-size:11px; }
+.related-open { color:var(--accent); font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-weight:700; text-align:left; }
+.related-open:hover { text-decoration:underline; filter:none; }
+.related-group-episodes small { color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.related-separate { color:#65778b; font-weight:600; }
+.related-separate:hover { color:var(--ink); text-decoration:underline; filter:none; }
 .queue-filters { display:grid; grid-template-columns:repeat(4,minmax(120px,1fr)) minmax(150px,1.4fr) auto; align-items:end; gap:10px; padding:0 0 16px; border-bottom:1px solid var(--line); margin-bottom:0; }
 .queue-filters label { display:grid; gap:5px; min-width:0; }
 .queue-filters label > span { color:var(--muted); font-size:11px; font-weight:650; }
@@ -345,6 +369,7 @@ tbody tr:hover { background:#fafbfe; }
   .triage-list { grid-template-columns:1fr; }
   .triage-item { min-height:0; border-right:0; border-bottom:1px solid #e5eaf0; }
   .triage-item:last-child { border-bottom:0; }
+  .related-group { grid-template-columns:1fr; gap:12px; }
   .queue-filters { grid-template-columns:repeat(3,minmax(120px,1fr)); }
   .queue-search { grid-column:span 2; }
   .pattern-row { grid-template-columns:1fr; gap:16px; }
@@ -401,6 +426,9 @@ tbody tr:hover { background:#fafbfe; }
   .connection-settings > .sheet { padding-left:0; }
   .coverage-section .sheet-head { flex-wrap:wrap; }
   .triage-head { align-items:start; flex-direction:column; gap:4px; }
+  .related-activity-head { align-items:start; flex-direction:column; gap:8px; }
+  .related-group-episodes > span { grid-template-columns:auto minmax(0,1fr); }
+  .related-separate { grid-column:1/-1; justify-self:start; }
   .queue-filters { grid-template-columns:1fr 1fr; padding-bottom:14px; }
   .queue-search { grid-column:1/-1; }
   .queue-filters .filter-clear { grid-column:span 2; }
