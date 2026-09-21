@@ -108,6 +108,8 @@ class InvestigationTools:
         "dependency_evidence": "Follow one declared same-namespace Service from workload_state.declared_dependencies; inspect one selected pod's incident logs, metrics and current config. Corroborate the dependency with application evidence. args: {service: declared name, terms?: up to 3 literal log terms}",
         "review_omitted": "Inspect candidate evidence excluded from the initial selection, including possible counterevidence. args: {terms?: [text]}",
         "historical_episode": "Read one retained, deterministic recurrence candidate. Earlier assessments are hypotheses; compare their captured evidence with this episode. args: {episode_id: supplied candidate}",
+        "alert_rule_logic": "Read the retained/live definitions for the episode's named alert rules. Explains detection logic, not root cause. args: {}",
+        "scrape_discovery": "Compare Prometheus active/dropped target discovery with read-only ServiceMonitor/PodMonitor selectors and current Kubernetes labels. args: {}",
     }
 
     def __init__(
@@ -126,6 +128,10 @@ class InvestigationTools:
         self.window_end = min(datetime.now(timezone.utc), max(stamp(entry["capsule"]["case"]["window"]["end"]) for entry in entries))
         self.window_start = max(self.window_start, self.window_end - timedelta(minutes=30))
         self.focus_time = max((stamp(item["incident"]["started_at"]) for item in entries if item["incident"].get("started_at")), default=self.window_start)
+        self.alert_names = {
+            str(alert.get("name") or alert.get("alertname") or "")
+            for entry in entries for alert in entry["report"].get("fault_alerts", [])
+        } - {""}
 
     def _adapters(self):
         config = self.sources.configuration()
@@ -175,6 +181,49 @@ class InvestigationTools:
                 "limitation": "This is a prior captured episode, not proof of the same cause. Its assessment is a historical hypothesis and must be checked against its cited evidence.",
             })
         prometheus, opensearch, kubernetes = self._adapters()
+        if name == "alert_rule_logic":
+            retained = []
+            for entry in self.entries:
+                for alert in entry["report"].get("fault_alerts", [])[:8]:
+                    rule = alert.get("rule") if isinstance(alert.get("rule"), dict) else {}
+                    if rule:
+                        retained.append({"name": alert.get("name"), "rule": rule, "incident_id": entry["incident"]["incident_id"]})
+            current = {}
+            try:
+                rules = prometheus.alert_rules()
+                current = {name: rules[name] for name in self.alert_names if name in rules}
+            except (RuntimeError, OSError, ValueError):
+                current = {}
+            return scrub({
+                "source": "Prometheus alert rules",
+                "alert_names": sorted(self.alert_names),
+                "retained_definitions": retained[:12],
+                "current_definitions": current,
+                "limitation": "A rule explains when Prometheus detects a condition; it does not establish the underlying cause. Current definitions can differ from incident-time rules.",
+            })
+        if name == "scrape_discovery":
+            targets = prometheus.scrape_targets(self.namespace, set(self.pods))
+            monitors = kubernetes.monitoring_resources({self.namespace})
+            services = kubernetes.list_services(self.namespace)
+            current_pods = [item for item in kubernetes.list_pods({self.namespace}) if item.get("workload") == self.workload or item["name"] in self.pods]
+            selections = []
+            for monitor in monitors:
+                labels = monitor.get("match_labels", {})
+                if monitor["kind"] == "ServiceMonitor":
+                    matched = [service["name"] for service in services if all(service.get("labels", {}).get(key) == value for key, value in labels.items())]
+                    selections.append({"monitor": monitor, "matched_services": matched, "matched_pods": []})
+                else:
+                    matched = [pod["name"] for pod in current_pods if all(pod.get("labels", {}).get(key) == value for key, value in labels.items())]
+                    selections.append({"monitor": monitor, "matched_services": [], "matched_pods": matched})
+            return scrub({
+                "source": "Prometheus target discovery + Kubernetes monitoring resources",
+                "scope": {"namespace": self.namespace, "pods": self.pods, "workload": self.workload},
+                "active_targets": targets["active"],
+                "dropped_targets": targets["dropped"],
+                "monitor_selection": selections,
+                "current_pod_labels": [{"pod": item["name"], "labels": item.get("labels", {})} for item in current_pods[:12]],
+                "limitation": "ServiceMonitor selectors apply to Service labels, while PodMonitor selectors apply to Pod labels. Absence from this bounded view may reflect a different namespace, relabeling, RBAC or target filtering; it is not proof of a typo.",
+            })
         if name == "workload_state":
             pods = [item for item in kubernetes.list_pods({self.namespace})
                     if item["name"] in self.pods or item.get("workload") == self.workload][:4]

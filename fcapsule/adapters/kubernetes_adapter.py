@@ -131,6 +131,67 @@ class KubernetesAdapter:
                        and all(pod.get("labels", {}).get(key) == value for key, value in selector.items())),
                       key=lambda pod: (not pod.get("ready", False), pod["name"]))
 
+    def list_services(self, namespace: str) -> list[dict[str, Any]]:
+        payload = self.transport.request(f"/api/v1/namespaces/{namespace}/services")
+        result = []
+        for item in payload.get("items", [])[:200]:
+            metadata = item.get("metadata", {}) if isinstance(item.get("metadata"), dict) else {}
+            spec = item.get("spec", {}) if isinstance(item.get("spec"), dict) else {}
+            name = str(metadata.get("name") or "")
+            if not name:
+                continue
+            result.append(
+                {
+                    "name": name,
+                    "namespace": namespace,
+                    "labels": {str(key): str(value) for key, value in (metadata.get("labels") or {}).items()},
+                    "selector": {str(key): str(value) for key, value in (spec.get("selector") or {}).items()},
+                    "ports": [
+                        {"name": port.get("name"), "port": port.get("port"), "target_port": port.get("targetPort")}
+                        for port in spec.get("ports", [])[:12] if isinstance(port, dict)
+                    ],
+                }
+            )
+        return result
+
+    def monitoring_resources(self, namespaces: set[str]) -> list[dict[str, Any]]:
+        """Read bounded Prometheus-operator selectors without changing cluster state."""
+
+        resources = []
+        for plural, kind, endpoint_key in (
+            ("servicemonitors", "ServiceMonitor", "endpoints"),
+            ("podmonitors", "PodMonitor", "podMetricsEndpoints"),
+        ):
+            payload = self.transport.request(f"/apis/monitoring.coreos.com/v1/{plural}")
+            for item in payload.get("items", [])[:200]:
+                metadata = item.get("metadata", {}) if isinstance(item.get("metadata"), dict) else {}
+                spec = item.get("spec", {}) if isinstance(item.get("spec"), dict) else {}
+                monitor_namespace = str(metadata.get("namespace") or "default")
+                selector = spec.get("selector", {}) if isinstance(spec.get("selector"), dict) else {}
+                labels = selector.get("matchLabels", {}) if isinstance(selector.get("matchLabels"), dict) else {}
+                namespace_selector = spec.get("namespaceSelector", {}) if isinstance(spec.get("namespaceSelector"), dict) else {}
+                selected = namespace_selector.get("matchNames") if isinstance(namespace_selector.get("matchNames"), list) else [monitor_namespace]
+                selected = [str(value) for value in selected]
+                if not set(selected).intersection(namespaces):
+                    continue
+                endpoints = []
+                for endpoint in spec.get(endpoint_key, [])[:12]:
+                    if not isinstance(endpoint, dict):
+                        continue
+                    endpoints.append({key: endpoint.get(key) for key in ("port", "targetPort", "path", "interval", "scheme") if endpoint.get(key) is not None})
+                resources.append(
+                    {
+                        "kind": kind,
+                        "name": str(metadata.get("name") or "unknown"),
+                        "namespace": monitor_namespace,
+                        "target_namespaces": selected,
+                        "match_labels": {str(key): str(value) for key, value in labels.items()},
+                        "endpoints": endpoints,
+                        "resource_version": metadata.get("resourceVersion"),
+                    }
+                )
+        return resources[:80]
+
     def configuration_snapshot(self, pod: dict[str, Any]) -> list[dict[str, Any]]:
         namespace = str(pod["namespace"])
         names = _referenced_configmaps(pod.get("raw_spec", {}))

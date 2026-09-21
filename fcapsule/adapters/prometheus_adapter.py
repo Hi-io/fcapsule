@@ -84,6 +84,47 @@ class PrometheusAdapter:
             )
         return alerts
 
+    def scrape_targets(self, namespace: str, pods: set[str] | None = None) -> dict[str, list[dict[str, Any]]]:
+        """Return a bounded, label-only view of Prometheus target discovery.
+
+        `up == 0` describes a contacted target. A dropped target or the absence of
+        a discovered target describes a different failure mode, so both remain
+        explicit rather than being collapsed into one health flag.
+        """
+
+        data = self._api("/api/v1/targets") or {}
+        expected = pods or set()
+
+        def normalized(item: dict[str, Any], state: str) -> dict[str, Any] | None:
+            labels = item.get("labels") if isinstance(item.get("labels"), dict) else {}
+            discovered = item.get("discoveredLabels") if isinstance(item.get("discoveredLabels"), dict) else {}
+            combined = {str(key): str(value) for key, value in {**discovered, **labels}.items()}
+            target_namespace = combined.get("namespace") or combined.get("__meta_kubernetes_namespace") or ""
+            pod = combined.get("pod") or combined.get("__meta_kubernetes_pod_name") or ""
+            service = combined.get("service") or combined.get("__meta_kubernetes_service_name") or ""
+            if target_namespace != namespace and pod not in expected:
+                return None
+            return {
+                "state": state,
+                "health": str(item.get("health") or "unknown"),
+                "last_error": str(item.get("lastError") or "")[:400],
+                "scrape_pool": str(item.get("scrapePool") or ""),
+                "job": str(labels.get("job") or combined.get("job") or ""),
+                "namespace": target_namespace,
+                "pod": pod,
+                "service": service,
+                "labels": {key: value for key, value in combined.items() if key in {
+                    "namespace", "pod", "service", "job", "instance", "__meta_kubernetes_namespace",
+                    "__meta_kubernetes_pod_name", "__meta_kubernetes_service_name", "__meta_kubernetes_service_label_fcapsule_io_app_metrics",
+                }},
+            }
+
+        active = [value for item in data.get("activeTargets", []) if isinstance(item, dict)
+                  if (value := normalized(item, "active")) is not None][:40]
+        dropped = [value for item in data.get("droppedTargets", []) if isinstance(item, dict)
+                   if (value := normalized(item, "dropped")) is not None][:40]
+        return {"active": active, "dropped": dropped}
+
     def alert_rules(self) -> dict[str, dict[str, Any]]:
         """Return Prometheus alert definitions keyed by alert name."""
 

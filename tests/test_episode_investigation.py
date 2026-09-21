@@ -271,6 +271,44 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertEqual(self.logs.collect_logs.call_args.kwargs, {"limit": 300, "terms": ["decoder"], "focus": self.kit.focus_time})
         self.assertEqual(self.logs.collect_logs.call_args.args[:2], ("ns", "worker-1"))
 
+    def test_scrape_discovery_explains_the_selection_chain_without_claiming_a_typo(self):
+        self.prom.scrape_targets.return_value = {
+            "active": [{"state": "active", "health": "down", "pod": "worker-1", "service": "worker"}],
+            "dropped": [{"state": "dropped", "pod": "worker-2", "service": "worker"}],
+        }
+        self.kube.monitoring_resources.return_value = [
+            {"kind": "ServiceMonitor", "name": "worker", "match_labels": {"metrics": "enabled"}},
+            {"kind": "PodMonitor", "name": "worker-pods", "match_labels": {"metrics": "pod-enabled"}},
+        ]
+        self.kube.list_services.return_value = [
+            {"name": "worker", "labels": {"metrics": "enabled"}, "selector": {"app": "worker"}},
+            {"name": "other", "labels": {"metrics": "disabled"}, "selector": {}},
+        ]
+        self.kube.list_pods.return_value = [
+            {"name": "worker-1", "workload": "worker", "labels": {"metrics": "pod-enabled"}},
+            {"name": "worker-2", "workload": "worker", "labels": {"metrics": "misspelled"}},
+        ]
+
+        result = self.kit.execute("scrape_discovery", {})
+
+        self.assertEqual(result["active_targets"][0]["health"], "down")
+        self.assertEqual(result["dropped_targets"][0]["state"], "dropped")
+        self.assertEqual(result["monitor_selection"][0]["matched_services"], ["worker"])
+        self.assertEqual(result["monitor_selection"][1]["matched_pods"], ["worker-1"])
+        self.assertIn("ServiceMonitor selectors apply to Service labels", result["limitation"])
+
+    def test_alert_rule_logic_keeps_detection_separate_from_root_cause(self):
+        self.entries[0]["report"]["fault_alerts"] = [{
+            "name": "WorkerMissingMetrics", "rule": {"query": "absent_over_time(up{job=\"worker\"}[5m])"},
+        }]
+        self.kit.alert_names = {"WorkerMissingMetrics"}
+        self.prom.alert_rules.return_value = {"WorkerMissingMetrics": {"query": "absent_over_time(up{job=\"worker\"}[5m])"}}
+
+        result = self.kit.execute("alert_rule_logic", {})
+
+        self.assertEqual(result["current_definitions"]["WorkerMissingMetrics"]["query"], "absent_over_time(up{job=\"worker\"}[5m])")
+        self.assertIn("does not establish the underlying cause", result["limitation"])
+
     def test_dependency_checks_require_a_declared_service(self):
         self.kube.list_pods.return_value = [{"name": "worker-1", "workload": "worker"}]
         self.kube.declared_services.return_value = [{"service": "inventory", "namespace": "ns"}]

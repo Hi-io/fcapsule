@@ -134,6 +134,43 @@ class LiveSourceTests(unittest.TestCase):
         self.assertEqual(len(metrics), 8)
         self.assertEqual(metrics[0]["labels"]["pod"], "api-1")
 
+    def test_prometheus_target_discovery_keeps_dropped_and_down_distinct(self):
+        adapter = PrometheusAdapter("http://prometheus")
+        adapter.transport = FakeTransport(
+            {
+                "/api/v1/targets": {
+                    "status": "success",
+                    "data": {
+                        "activeTargets": [
+                            {
+                                "health": "down",
+                                "lastError": "dial tcp: connect: connection refused",
+                                "scrapePool": "serviceMonitor/shop/api/0",
+                                "labels": {"namespace": "shop", "pod": "api-1", "service": "api", "job": "api"},
+                            },
+                            {"health": "up", "labels": {"namespace": "other", "pod": "other-1"}},
+                        ],
+                        "droppedTargets": [
+                            {
+                                "discoveredLabels": {
+                                    "__meta_kubernetes_namespace": "shop",
+                                    "__meta_kubernetes_pod_name": "api-2",
+                                    "__meta_kubernetes_service_name": "api",
+                                }
+                            }
+                        ],
+                    },
+                }
+            }
+        )
+
+        targets = adapter.scrape_targets("shop", {"api-1", "api-2"})
+
+        self.assertEqual(targets["active"][0]["health"], "down")
+        self.assertIn("connection refused", targets["active"][0]["last_error"])
+        self.assertEqual(targets["dropped"][0]["state"], "dropped")
+        self.assertEqual(targets["dropped"][0]["pod"], "api-2")
+
     def test_opensearch_adapter_maps_filebeat_fields(self):
         adapter = OpenSearchAdapter("http://opensearch")
         adapter.transport = FakeTransport(
@@ -215,6 +252,39 @@ class LiveSourceTests(unittest.TestCase):
         snapshot = adapter.configuration_snapshot(pod)
         self.assertEqual(snapshot[1]["data"]["API_TOKEN"], "<redacted>")
         self.assertEqual(snapshot[1]["data"]["MODE"], "production")
+
+    def test_kubernetes_monitoring_resources_keep_service_and_pod_selectors_separate(self):
+        adapter = KubernetesAdapter("http://kubernetes")
+        adapter.transport = FakeTransport(
+            {
+                "/apis/monitoring.coreos.com/v1/servicemonitors": {
+                    "items": [{
+                        "metadata": {"name": "api", "namespace": "monitoring", "resourceVersion": "12"},
+                        "spec": {
+                            "namespaceSelector": {"matchNames": ["shop"]},
+                            "selector": {"matchLabels": {"metrics": "enabled"}},
+                            "endpoints": [{"port": "metrics", "path": "/metrics", "interval": "30s"}],
+                        },
+                    }]
+                },
+                "/apis/monitoring.coreos.com/v1/podmonitors": {
+                    "items": [{
+                        "metadata": {"name": "worker", "namespace": "monitoring"},
+                        "spec": {
+                            "namespaceSelector": {"matchNames": ["shop"]},
+                            "selector": {"matchLabels": {"metrics": "pod-enabled"}},
+                            "podMetricsEndpoints": [{"port": "metrics"}],
+                        },
+                    }]
+                },
+            }
+        )
+
+        monitors = adapter.monitoring_resources({"shop"})
+
+        self.assertEqual([item["kind"] for item in monitors], ["ServiceMonitor", "PodMonitor"])
+        self.assertEqual(monitors[0]["match_labels"], {"metrics": "enabled"})
+        self.assertEqual(monitors[1]["match_labels"], {"metrics": "pod-enabled"})
 
     def test_source_configuration_is_validated_and_persisted(self):
         with tempfile.TemporaryDirectory() as directory:
