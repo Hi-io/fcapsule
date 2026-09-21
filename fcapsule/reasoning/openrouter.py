@@ -11,10 +11,12 @@ import base64
 import io
 import json
 import os
+import struct
 import time
 import urllib.error
 import urllib.request
 import wave
+import zlib
 from typing import Any
 
 from fcapsule.env import load_env_file
@@ -24,10 +26,27 @@ class OpenRouterError(RuntimeError):
     """A provider failure whose text is safe to show as an operational status."""
 
 
-_PIXEL_PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/"
-    "6v4jLQAAAABJRU5ErkJggg=="
-)
+def _canary_png() -> bytes:
+    """Build a valid 32px RGB image accepted by stricter vision providers."""
+
+    width = height = 32
+    raw = b"".join(b"\x00" + b"\x2f\x6f\x5f" * width for _ in range(height))
+
+    def chunk(kind: bytes, value: bytes) -> bytes:
+        return struct.pack(">I", len(value)) + kind + value + struct.pack(">I", zlib.crc32(kind + value) & 0xFFFFFFFF)
+
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+
+
+_CANARY_PNG = _canary_png()
+_AUDIO_FORMATS = {
+    "audio/wav": "wav",
+    "audio/mpeg": "mp3",
+    "audio/ogg": "ogg",
+    "audio/webm": "webm",
+    "audio/mp4": "m4a",
+    "audio/x-m4a": "m4a",
+}
 
 
 class OpenRouterClient:
@@ -127,8 +146,11 @@ class OpenRouterClient:
             raise OpenRouterError("Unsupported audio format; use WAV, MP3, OGG, WebM, or M4A")
         request: dict[str, Any] = {
             "model": model,
-            "input_audio": {"data": base64.b64encode(audio).decode("ascii"), "mime_type": mime_type},
-            "response_format": "verbose_json",
+            "input_audio": {"data": base64.b64encode(audio).decode("ascii"), "format": _AUDIO_FORMATS[mime_type]},
+            # Plain JSON is supported by more transcription providers than the
+            # optional timestamp-rich format. Segments are supplementary evidence,
+            # not a precondition for an operator-provided transcript.
+            "response_format": "json",
         }
         if language in {"en", "es"}:
             request["language"] = language
@@ -147,7 +169,7 @@ class OpenRouterClient:
         }
 
     def validate_vision(self, model: str) -> dict[str, Any]:
-        response = self.visual_extract(_PIXEL_PNG, "image/png", model, max_tokens=128)
+        response = self.visual_extract(_CANARY_PNG, "image/png", model, max_tokens=128)
         return {"model": model, "usage": response["usage"], "latency_seconds": response["latency_seconds"]}
 
     def validate_asr(self, model: str) -> dict[str, Any]:
@@ -165,9 +187,9 @@ class OpenRouterClient:
                 "model": model,
                 "input_audio": {
                     "data": base64.b64encode(buffer.getvalue()).decode("ascii"),
-                    "mime_type": "audio/wav",
+                    "format": "wav",
                 },
-                "response_format": "verbose_json",
+                "response_format": "json",
             },
         )
         # Silence can legitimately yield an empty transcript. A successful typed
