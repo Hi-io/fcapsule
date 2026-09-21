@@ -55,6 +55,7 @@ class FCAPSuleHTTPServer(ThreadingHTTPServer):
         self.control_plane.investigator.stopping = True
         self.control_plane.stop_live_monitoring()
         self.control_plane.briefing_executor.shutdown(wait=False, cancel_futures=True)
+        self.control_plane.evidence.shutdown()
         super().server_close()
 
 
@@ -81,10 +82,12 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encoded)
 
-    def _payload(self) -> dict[str, Any]:
+    def _payload(self, maximum_bytes: int = 512 * 1024) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
         if not length:
             return {}
+        if length < 0 or length > maximum_bytes:
+            raise ValueError("Request body exceeds the permitted size")
         value = json.loads(self.rfile.read(length))
         if not isinstance(value, dict):
             raise ValueError("JSON body must be an object")
@@ -125,11 +128,36 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
         if path == "/api/settings/ai":
             self._json(self.server.control_plane.ai_configuration())
             return
+        if path == "/api/settings/media":
+            self._json(self.server.control_plane.media_configuration())
+            return
         if path == "/api/settings/general":
             self._json(self.server.control_plane.general_configuration())
             return
         if path == "/api/settings/sources":
             self._json(self.server.control_plane.source_configuration())
+            return
+        if path.startswith("/api/episodes/") and path.endswith("/evidence"):
+            episode_id = unquote(path.removeprefix("/api/episodes/").removesuffix("/evidence").rstrip("/"))
+            if not self.server.control_plane.store.get_episode(episode_id):
+                self._json({"error": "Episode not found"}, HTTPStatus.NOT_FOUND)
+            else:
+                self._json(self.server.control_plane.evidence.list(episode_id))
+            return
+        if path.startswith("/api/evidence/") and path.endswith("/file"):
+            attachment_id = unquote(path.removeprefix("/api/evidence/").removesuffix("/file").rstrip("/"))
+            asset = self.server.control_plane.evidence.file(attachment_id)
+            if not asset:
+                self._json({"error": "Evidence file not found"}, HTTPStatus.NOT_FOUND)
+            else:
+                file_path, mime_type = asset
+                body = file_path.read_bytes()
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", mime_type)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
             return
         if path.startswith("/api/incidents/") and path.endswith("/report"):
             incident_id = unquote(path.removeprefix("/api/incidents/").removesuffix("/report").rstrip("/"))
@@ -186,6 +214,15 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             if path == "/api/settings/ai":
                 self._json(self.server.control_plane.update_ai_configuration(self._payload()))
                 return
+            if path == "/api/settings/ai/validate":
+                self._json(self.server.control_plane.validate_ai_configuration())
+                return
+            if path == "/api/settings/media":
+                self._json(self.server.control_plane.update_media_configuration(self._payload()))
+                return
+            if path == "/api/settings/media/validate":
+                self._json(self.server.control_plane.validate_media_configuration())
+                return
             if path == "/api/settings/general":
                 self._json(self.server.control_plane.update_general_configuration(self._payload()))
                 return
@@ -208,9 +245,21 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
                 status = HTTPStatus.ACCEPTED if result.get("status") in {"queued", "running"} else HTTPStatus.OK
                 self._json(result, status)
                 return
+            if path.startswith("/api/episodes/") and path.endswith("/investigation/update"):
+                episode_id = unquote(path.removeprefix("/api/episodes/").removesuffix("/investigation/update").rstrip("/"))
+                self._json(self.server.control_plane.update_investigation_with_evidence(episode_id), HTTPStatus.ACCEPTED)
+                return
             if path.startswith("/api/episodes/") and path.endswith("/investigation"):
                 episode_id = unquote(path.removeprefix("/api/episodes/").removesuffix("/investigation").rstrip("/"))
                 self._json(self.server.control_plane.investigator.start(episode_id, retry=True), HTTPStatus.ACCEPTED)
+                return
+            if path.startswith("/api/episodes/") and path.endswith("/evidence"):
+                episode_id = unquote(path.removeprefix("/api/episodes/").removesuffix("/evidence").rstrip("/"))
+                self._json(self.server.control_plane.submit_evidence(episode_id, self._payload(12 * 1024 * 1024)), HTTPStatus.ACCEPTED)
+                return
+            if path.startswith("/api/evidence/") and path.endswith("/correction"):
+                attachment_id = unquote(path.removeprefix("/api/evidence/").removesuffix("/correction").rstrip("/"))
+                self._json(self.server.control_plane.correct_evidence(attachment_id, self._payload()))
                 return
             if path.startswith("/api/incidents/") and path.endswith("/archive"):
                 incident_id = unquote(path.removeprefix("/api/incidents/").removesuffix("/archive").rstrip("/"))
@@ -238,6 +287,11 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             if path.startswith("/api/episodes/"):
                 episode_id = unquote(path.removeprefix("/api/episodes/").rstrip("/"))
                 self.server.control_plane.delete_episode(episode_id)
+                self._json({"ok": True})
+                return
+            if path.startswith("/api/evidence/"):
+                attachment_id = unquote(path.removeprefix("/api/evidence/").rstrip("/"))
+                self.server.control_plane.remove_evidence(attachment_id)
                 self._json({"ok": True})
                 return
             if path.startswith("/api/incidents/"):

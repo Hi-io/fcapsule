@@ -68,5 +68,11 @@ def write_env_value(path: str | Path, key: str, value: str) -> Path:
     if not written:
         updated.append(replacement)
     env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+    try:
+        # Restrictive where the filesystem supports POSIX permissions. Windows
+        # ACLs remain the controlling boundary on native Windows volumes.
+        env_path.chmod(0o600)
+    except OSError:
+        pass
     os.environ[key] = value
     return env_path

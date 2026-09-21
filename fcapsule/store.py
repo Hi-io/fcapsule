@@ -167,6 +167,43 @@ class FCAPSuleStore:
                     updated_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS evidence_attachments (
+                    attachment_id TEXT PRIMARY KEY,
+                    episode_id TEXT NOT NULL REFERENCES incident_episodes(episode_id) ON DELETE CASCADE,
+                    kind TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    mime_type TEXT NOT NULL,
+                    storage_path TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    observed_at TEXT,
+                    context_note TEXT NOT NULL DEFAULT '',
+                    source_redacted INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL,
+                    extraction TEXT NOT NULL DEFAULT '{}',
+                    correction TEXT NOT NULL DEFAULT '',
+                    provider TEXT,
+                    model TEXT,
+                    usage TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS investigation_revisions (
+                    revision_id TEXT PRIMARY KEY,
+                    episode_id TEXT NOT NULL REFERENCES incident_episodes(episode_id) ON DELETE CASCADE,
+                    parent_revision_id TEXT,
+                    reason TEXT NOT NULL,
+                    source_mode TEXT NOT NULL DEFAULT 'live_sources',
+                    input_fingerprint TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    evidence_manifest TEXT NOT NULL DEFAULT '[]',
+                    state_path TEXT NOT NULL,
+                    summary TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    completed_at TEXT
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_incidents_app_time
                     ON incidents(app_id, started_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_capsules_app_time
@@ -175,6 +212,10 @@ class FCAPSuleStore:
                     ON incident_episodes(app_id, last_activity_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_episode_incidents_episode
                     ON episode_incidents(episode_id);
+                CREATE INDEX IF NOT EXISTS idx_evidence_attachments_episode
+                    ON evidence_attachments(episode_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_investigation_revisions_episode
+                    ON investigation_revisions(episode_id, created_at DESC);
                 """
             )
             incident_columns = {
@@ -787,6 +828,148 @@ class FCAPSuleStore:
             "name": str(result.get("resource_name") or ""),
         }
         return result
+
+    def record_evidence_attachment(self, payload: dict[str, Any]) -> dict[str, Any]:
+        kind = str(payload.get("kind") or "")
+        if kind not in {"image", "audio"}:
+            raise ValueError("Evidence attachment kind must be image or audio")
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO evidence_attachments
+                    (attachment_id, episode_id, kind, filename, mime_type, storage_path, size_bytes, sha256,
+                     observed_at, context_note, source_redacted, status, extraction, correction, provider,
+                     model, usage, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(payload["attachment_id"]), str(payload["episode_id"]), kind,
+                    str(payload["filename"]), str(payload["mime_type"]), str(payload["storage_path"]),
+                    int(payload["size_bytes"]), str(payload["sha256"]), payload.get("observed_at"),
+                    str(payload.get("context_note") or "")[:1000], int(bool(payload.get("source_redacted"))),
+                    str(payload.get("status") or "queued"), _json(payload.get("extraction") or {}),
+                    str(payload.get("correction") or "")[:2000], payload.get("provider"), payload.get("model"),
+                    _json(payload.get("usage") or {}), now, now,
+                ),
+            )
+        return self.get_evidence_attachment(str(payload["attachment_id"])) or {}
+
+    @staticmethod
+    def _attachment_row(row: sqlite3.Row) -> dict[str, Any]:
+        result = dict(row)
+        result["source_redacted"] = bool(result.get("source_redacted"))
+        result["extraction"] = _decode(result.get("extraction"), {})
+        result["usage"] = _decode(result.get("usage"), {})
+        return result
+
+    def get_evidence_attachment(self, attachment_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM evidence_attachments WHERE attachment_id = ?", (attachment_id,)
+            ).fetchone()
+        return self._attachment_row(row) if row else None
+
+    def list_evidence_attachments(self, episode_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM evidence_attachments WHERE episode_id = ? ORDER BY created_at DESC", (episode_id,)
+            ).fetchall()
+        return [self._attachment_row(row) for row in rows]
+
+    def update_evidence_attachment(
+        self,
+        attachment_id: str,
+        *,
+        status: str | None = None,
+        extraction: dict[str, Any] | None = None,
+        correction: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        usage: dict[str, Any] | None = None,
+        observed_at: str | None = None,
+        context_note: str | None = None,
+    ) -> dict[str, Any]:
+        current = self.get_evidence_attachment(attachment_id)
+        if not current:
+            raise KeyError(f"Unknown evidence attachment: {attachment_id}")
+        values = {
+            "status": status if status is not None else current["status"],
+            "extraction": _json(extraction if extraction is not None else current["extraction"]),
+            "correction": str(correction if correction is not None else current["correction"])[:2000],
+            "provider": provider if provider is not None else current["provider"],
+            "model": model if model is not None else current["model"],
+            "usage": _json(usage if usage is not None else current["usage"]),
+            "observed_at": observed_at if observed_at is not None else current["observed_at"],
+            "context_note": str(context_note if context_note is not None else current["context_note"])[:1000],
+            "updated_at": utc_now(),
+            "attachment_id": attachment_id,
+        }
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE evidence_attachments
+                SET status = :status, extraction = :extraction, correction = :correction, provider = :provider,
+                    model = :model, usage = :usage, observed_at = :observed_at, context_note = :context_note,
+                    updated_at = :updated_at
+                WHERE attachment_id = :attachment_id
+                """,
+                values,
+            )
+        return self.get_evidence_attachment(attachment_id) or {}
+
+    def delete_evidence_attachment(self, attachment_id: str) -> dict[str, Any]:
+        current = self.get_evidence_attachment(attachment_id)
+        if not current:
+            raise KeyError(f"Unknown evidence attachment: {attachment_id}")
+        with self._connect() as connection:
+            connection.execute("DELETE FROM evidence_attachments WHERE attachment_id = ?", (attachment_id,))
+        return current
+
+    @staticmethod
+    def _revision_row(row: sqlite3.Row) -> dict[str, Any]:
+        result = dict(row)
+        result["evidence_manifest"] = _decode(result.get("evidence_manifest"), [])
+        result["summary"] = _decode(result.get("summary"), {})
+        return result
+
+    def record_investigation_revision(self, payload: dict[str, Any]) -> dict[str, Any]:
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO investigation_revisions
+                    (revision_id, episode_id, parent_revision_id, reason, source_mode, input_fingerprint,
+                     status, evidence_manifest, state_path, summary, created_at, completed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(revision_id) DO UPDATE SET
+                    status=excluded.status, evidence_manifest=excluded.evidence_manifest,
+                    state_path=excluded.state_path, summary=excluded.summary, completed_at=excluded.completed_at
+                """,
+                (
+                    str(payload["revision_id"]), str(payload["episode_id"]), payload.get("parent_revision_id"),
+                    str(payload.get("reason") or "initial_capture"), str(payload.get("source_mode") or "live_sources"),
+                    str(payload.get("input_fingerprint") or ""), str(payload.get("status") or "queued"),
+                    _json(payload.get("evidence_manifest") or []), str(payload["state_path"]),
+                    _json(payload.get("summary") or {}), payload.get("created_at") or now,
+                    payload.get("completed_at"),
+                ),
+            )
+        return self.get_investigation_revision(str(payload["revision_id"])) or {}
+
+    def get_investigation_revision(self, revision_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM investigation_revisions WHERE revision_id = ?", (revision_id,)
+            ).fetchone()
+        return self._revision_row(row) if row else None
+
+    def list_investigation_revisions(self, episode_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM investigation_revisions WHERE episode_id = ? ORDER BY created_at DESC", (episode_id,)
+            ).fetchall()
+        return [self._revision_row(row) for row in rows]
 
     def record_capsule(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self._connect() as connection:

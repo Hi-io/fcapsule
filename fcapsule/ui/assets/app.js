@@ -80,6 +80,11 @@ function setSystem(state) {
 }
 
 function status(value) { return `<span class="status ${safe(value)}">${safe(value)}</span>`; }
+function capability(capability) {
+  const item = capability || {status:'not_configured'};
+  const labels = {ready:'Ready',not_configured:'Not configured',not_validated:'Needs validation',validating:'Validating',invalid_credentials:'Credential rejected',insufficient_credit:'Credit unavailable',unsupported_model:'Unsupported model',temporarily_unavailable:'Temporarily unavailable'};
+  return `<span class="capability ${safe(item.status)}" title="${safe(item.message || '')}">${safe(labels[item.status] || item.status)}</span>`;
+}
 function sources(config) {
   const active = value => ['connected','observed','available'].includes(value);
   const names = {faults:'Alerts',metrics:'Metrics',logs:'Logs',configuration:'Config',traces:'Traces'};
@@ -201,6 +206,9 @@ function renderConsole(state) {
   document.querySelectorAll('[data-build-capsule]').forEach(button => button.addEventListener('click', () => buildCapsule(button.dataset.buildCapsule)));
   document.querySelectorAll('[data-ai-briefing]').forEach(button => button.addEventListener('click', () => generateAiBriefing(button.dataset.aiBriefing)));
   document.querySelectorAll('[data-investigate]').forEach(button => button.addEventListener('click', () => startInvestigation(button.dataset.investigate)));
+  document.querySelectorAll('[data-add-evidence]').forEach(button => button.addEventListener('click', () => showEvidenceDialog(button.dataset.addEvidence)));
+  document.querySelectorAll('[data-update-evidence-investigation]').forEach(button => button.addEventListener('click', () => updateWithEvidence(button.dataset.updateEvidenceInvestigation)));
+  document.querySelectorAll('[data-correct-evidence]').forEach(button => button.addEventListener('click', () => correctEvidence(button.dataset.correctEvidence)));
   document.querySelectorAll('[data-copy-incident-link]').forEach(button => button.addEventListener('click', () => copyIncidentLink(button)));
   document.querySelectorAll('[data-investigation-ref]').forEach(button => button.addEventListener('click', () => {
     reportTab = 'evidence';
@@ -266,24 +274,35 @@ function renderTargets(state) {
 
 function renderSettings(state) {
   const ai = state.ai;
+  const media = state.media || {provider:'openrouter',api_key_configured:false,vision:{model:'',capability:{}},audio:{model:'',capability:{}}};
   const options = ai.models.map(item => `<option value="${safe(item.model_id)}">${safe(item.model_id)}</option>`).join('');
-  const keyState = ai.api_key_configured ? 'Automatic analysis enabled' : 'Provider key required';
+  const keyState = capability(ai.capability);
   app.innerHTML = `
-    <div class="page-head"><div><div class="eyebrow">Runtime configuration</div><h1>Settings</h1><p>Manage retention and automatic incident analysis.</p></div></div>
+    <div class="page-head"><div><div class="eyebrow">Runtime configuration</div><h1>Settings</h1><p>Retention, investigation limits, and optional evidence models.</p></div></div>
     <div class="settings-layout"><section class="sheet"><div class="sheet-head"><h2>${icon('archive')}Incident lifecycle</h2><span class="queue-note">Automatic cleanup</span></div><div class="sheet-body">
       <div class="field"><label for="retention-days">Incident retention (days)</label><input id="retention-days" type="number" min="1" max="3650" value="${safe(state.settings.incident_retention_days)}"><small>Active and archived incidents older than this are permanently removed with their managed reports and capsules. Default: 30 days.</small></div>
       ${window.generalSettingsNotice ? `<p class="notice">${safe(window.generalSettingsNotice)}</p>` : ''}
       <div class="actions"><button id="save-general-settings">Save retention</button></div>
-    </div></section><section class="sheet"><div class="sheet-head"><h2>${icon('activity')}Episode investigation</h2><span class="queue-note">${safe(keyState)}</span></div><div class="sheet-body">
+    </div></section><section class="sheet"><div class="sheet-head"><h2>${icon('activity')}Episode investigation</h2>${keyState}</div><div class="sheet-body">
       <div class="field"><label for="ai-provider">Provider</label><input id="ai-provider" value="DeepSeek-compatible" disabled></div>
       <div class="field"><label for="ai-model">Model ID</label><input id="ai-model" list="ai-model-options" value="${safe(ai.model)}"><datalist id="ai-model-options">${options}</datalist><small>Configured models are available here; a compatible model ID may also be entered.</small></div>
-      <div class="field"><label for="ai-max-tokens">Maximum completion tokens per call</label><input id="ai-max-tokens" type="number" min="256" max="16000" value="${safe(ai.max_tokens)}"></div>
-      <div class="field"><label for="ai-key">API key</label><input id="ai-key" type="password" autocomplete="new-password" placeholder="${ai.api_key_configured ? 'Leave blank to keep the saved key' : 'Paste a key to enable briefings'}"><small>Stored locally. New reports are analysed automatically when a key is configured.</small></div>
+      <div class="settings-number-grid"><div class="field"><label for="ai-max-tokens">Output per call</label><input id="ai-max-tokens" type="number" min="256" max="6000" value="${safe(ai.max_tokens)}"></div><div class="field"><label for="ai-total-tokens">Investigation budget</label><input id="ai-total-tokens" type="number" min="4000" max="100000" value="${safe(ai.max_total_tokens)}"></div><div class="field"><label for="ai-prompt-tokens">Prompt budget</label><input id="ai-prompt-tokens" type="number" min="1200" max="12000" value="${safe(ai.max_prompt_tokens)}"></div><div class="field"><label for="ai-max-checks">Additional checks</label><input id="ai-max-checks" type="number" min="0" max="4" value="${safe(ai.max_checks)}"></div></div>
+      <div class="field"><label for="ai-key">API key</label><input id="ai-key" type="password" autocomplete="new-password" placeholder="${ai.api_key_configured ? 'Leave blank to keep the saved key' : 'Paste a key to enable investigation'}"><small>New credentials are checked before they replace a working local credential.</small></div>
       ${window.settingsNotice ? `<p class="notice">${safe(window.settingsNotice)}</p>` : ''}
-      <div class="actions"><button id="save-ai-settings">Save AI settings</button></div>
+      <div class="actions"><button id="save-ai-settings">Save investigation settings</button><button class="secondary" id="validate-ai-settings">Validate model</button></div>
+    </div></section><section class="sheet"><div class="sheet-head"><h2>${icon('file-code-2')}Evidence models</h2>${capability(media.core_investigator?.capability)}</div><div class="sheet-body">
+      <div class="model-state"><span>Image extraction ${capability(media.vision?.capability)}</span><span>Audio transcription ${capability(media.audio?.capability)}</span></div>
+      <div class="field"><label for="media-key">OpenRouter API key</label><input id="media-key" type="password" autocomplete="new-password" placeholder="${media.api_key_configured ? 'Leave blank to keep the saved key' : 'Paste an optional key'}"><small>Image and audio evidence remain unavailable until the core investigator and the selected specialist are validated.</small></div>
+      <div class="field"><label for="vision-model">Image model</label><input id="vision-model" value="${safe(media.vision?.model)}"></div>
+      <div class="field"><label for="asr-model">Audio model</label><input id="asr-model" value="${safe(media.audio?.model)}"></div>
+      ${window.mediaSettingsNotice ? `<p class="notice">${safe(window.mediaSettingsNotice)}</p>` : ''}
+      <div class="actions"><button id="save-media-settings">Validate and save media</button><button class="secondary" id="validate-media-settings">Recheck media</button></div>
     </div></section></div>`;
   document.querySelector('#save-general-settings').addEventListener('click', saveGeneralSettings);
   document.querySelector('#save-ai-settings').addEventListener('click', saveAiSettings);
+  document.querySelector('#validate-ai-settings').addEventListener('click', validateAiSettings);
+  document.querySelector('#save-media-settings').addEventListener('click', saveMediaSettings);
+  document.querySelector('#validate-media-settings').addEventListener('click', validateMediaSettings);
 }
 
 function applicationTable(items) {
@@ -444,14 +463,129 @@ async function buildCapsule(id) {
   await refresh();
 }
 
+function attachmentSummary(item) {
+  const extraction = item.extraction || {};
+  if (item.kind === 'audio') return extraction.transcript || extraction.limitation || 'Transcription pending.';
+  const first = extraction.observations?.[0]?.fact || extraction.visible_text?.[0];
+  return first || extraction.limitation || 'Visual extraction pending.';
+}
+
+function mediaEvidencePanel(payload) {
+  const episodeId = selectedEpisodeId || payload.investigation?.episode_id;
+  const items = payload.media_evidence || [];
+  const ready = items.some(item => item.status === 'ready');
+  const rows = items.map(item => `<article class="media-evidence-row"><div><strong>${safe(item.filename)}</strong><small>${safe(item.kind)} · ${safe(item.status)}${item.observed_at ? ' · observed ' + safe(formatDate(item.observed_at)) : ''}</small><p>${safe(attachmentSummary(item))}</p></div><div class="media-evidence-actions"><a class="secondary button-link" href="${safe(item.artifact_url)}" target="_blank" rel="noopener">View</a>${item.status === 'ready' ? `<button class="secondary" data-correct-evidence="${safe(item.attachment_id)}">Correct</button>` : ''}</div></article>`).join('');
+  const revision = payload.investigation_revisions || [];
+  const history = revision.length > 1 ? disclosure('assessment-history', 'Assessment history', revision.map(item=>`<div class="revision-row"><span>${safe(item.reason.replaceAll('_',' '))}</span><strong>${safe(item.summary?.summary || item.status.replaceAll('_',' '))}</strong><small>${safe(formatDate(item.completed_at || item.created_at))}</small></div>`).join(''), revision.length) : '';
+  return `<section class="media-evidence"><div class="section-heading"><h3>Additional evidence</h3><div class="row-actions"><button class="secondary" data-add-evidence="${safe(episodeId || '')}">Add evidence</button>${ready ? `<button data-update-evidence-investigation="${safe(episodeId || '')}">Update investigation</button>` : ''}</div></div>${rows || '<p class="queue-note">No operator-supplied image or audio evidence.</p>'}${history}</section>`;
+}
+
+function fileToBase64(file) {
+  return file.arrayBuffer().then(buffer => {
+    const data = new Uint8Array(buffer); let text = '';
+    for (let index = 0; index < data.length; index += 0x8000) text += String.fromCharCode(...data.subarray(index, index + 0x8000));
+    return btoa(text);
+  });
+}
+
+function showEvidenceDialog(episodeId) {
+  if (!episodeId) return;
+  let state = {file:null, stream:null, recorder:null, objectUrl:null};
+  const dialog = document.createElement('dialog');
+  dialog.className = 'evidence-dialog';
+  dialog.innerHTML = `<form method="dialog"><header><div><h2>Add evidence</h2><p>Image or short audio from the investigation.</p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header><div class="dialog-body"><div class="field"><label for="evidence-file">File</label><input id="evidence-file" type="file" accept="image/png,image/jpeg,image/webp,audio/wav,audio/mpeg,audio/ogg,audio/webm,audio/mp4,audio/x-m4a"><small>Images up to 6 MiB. Audio up to 8 MiB.</small></div><div class="record-row"><button class="secondary" type="button" id="record-evidence">Record audio</button><span id="record-status" class="queue-note"></span></div><div id="evidence-preview" class="evidence-preview" hidden></div><div class="field"><label for="evidence-observed-at">Observed at</label><input id="evidence-observed-at" type="datetime-local"><small>Leave blank when the time is not known.</small></div><div class="field"><label for="evidence-note">Context</label><input id="evidence-note" maxlength="1000" placeholder="Optional note for the investigation"></div><label class="toggle"><input id="evidence-redacted" type="checkbox">This copy has been redacted where needed</label><p id="evidence-error" class="notice" hidden></p></div><footer><button class="secondary" value="cancel">Cancel</button><button type="button" id="submit-evidence" disabled>Analyze evidence</button></footer></form>`;
+  document.body.append(dialog);
+  const fileInput = dialog.querySelector('#evidence-file'); const preview = dialog.querySelector('#evidence-preview');
+  const error = dialog.querySelector('#evidence-error'); const submit = dialog.querySelector('#submit-evidence'); const record = dialog.querySelector('#record-evidence'); const recordStatus = dialog.querySelector('#record-status');
+  const stopTracks = () => { state.stream?.getTracks().forEach(track => track.stop()); state.stream = null; state.recorder = null; };
+  const setFile = file => {
+    if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
+    state.file = file || null; preview.hidden = !file; preview.innerHTML = '';
+    if (file) { state.objectUrl = URL.createObjectURL(file); preview.innerHTML = file.type.startsWith('image/') ? `<img src="${safe(state.objectUrl)}" alt="Selected evidence preview">` : `<audio controls src="${safe(state.objectUrl)}"></audio><span>${safe(file.name)} · ${bytes(file.size)}</span>`; }
+    submit.disabled = !state.file;
+  };
+  fileInput.addEventListener('change', () => setFile(fileInput.files?.[0]));
+  record.addEventListener('click', async () => {
+    if (state.recorder?.state === 'recording') { state.recorder.stop(); return; }
+    try {
+      if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) throw new Error('Recording is unavailable in this browser context.');
+      state.stream = await navigator.mediaDevices.getUserMedia({audio:true}); const mime = ['audio/webm','audio/ogg'].find(value => MediaRecorder.isTypeSupported(value)) || '';
+      const chunks = []; state.recorder = new MediaRecorder(state.stream, mime ? {mimeType:mime} : undefined);
+      state.recorder.addEventListener('dataavailable', event => { if (event.data.size) chunks.push(event.data); });
+      state.recorder.addEventListener('stop', () => { const type = state.recorder?.mimeType || mime || 'audio/webm'; setFile(new File([new Blob(chunks,{type})], 'operator-observation.webm', {type})); stopTracks(); record.textContent = 'Record audio'; recordStatus.textContent = 'Recording ready.'; });
+      state.recorder.start(); record.textContent = 'Stop recording'; recordStatus.textContent = 'Recording…';
+    } catch (exception) { recordStatus.textContent = exception.message || 'Unable to start recording.'; stopTracks(); }
+  });
+  submit.addEventListener('click', async () => {
+    if (!state.file) return; submit.disabled = true; error.hidden = true;
+    try {
+      const kind = state.file.type.startsWith('image/') ? 'image' : state.file.type.startsWith('audio/') ? 'audio' : '';
+      if (!kind) throw new Error('Choose an image or audio file.');
+      const localTime = dialog.querySelector('#evidence-observed-at').value;
+      const payload = {kind, filename:state.file.name, content_base64:await fileToBase64(state.file), observed_at:localTime ? new Date(localTime).toISOString() : '', context_note:dialog.querySelector('#evidence-note').value, source_redacted:dialog.querySelector('#evidence-redacted').checked};
+      const response = await fetch('/api/episodes/' + encodeURIComponent(episodeId) + '/evidence', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}); const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Unable to submit evidence.');
+      if (selectedReport) selectedReport.media_evidence = [result, ...(selectedReport.media_evidence || [])];
+      dialog.close(); renderPreservingFocus(() => renderConsole(lastState)); await refresh();
+    } catch (exception) { error.textContent = exception.message || 'Unable to submit evidence.'; error.hidden = false; submit.disabled = false; }
+  });
+  dialog.addEventListener('close', () => { stopTracks(); if (state.objectUrl) URL.revokeObjectURL(state.objectUrl); dialog.remove(); });
+  dialog.showModal();
+}
+
+async function updateWithEvidence(episodeId) {
+  const response = await fetch('/api/episodes/' + encodeURIComponent(episodeId) + '/investigation/update', {method:'POST'}); const result = await response.json();
+  if (!response.ok) { alert(result.error || 'Unable to update investigation.'); return; }
+  if (selectedReport) { selectedReport.investigation = result; renderPreservingFocus(() => renderConsole(lastState)); }
+}
+
+async function correctEvidence(attachmentId) {
+  const correction = window.prompt('Correction or missing context');
+  if (correction === null) return;
+  const response = await fetch('/api/evidence/' + encodeURIComponent(attachmentId) + '/correction', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({correction})}); const result = await response.json();
+  if (!response.ok) { alert(result.error || 'Unable to save correction.'); return; }
+  if (selectedReport) { selectedReport.media_evidence = (selectedReport.media_evidence || []).map(item=>item.attachment_id === attachmentId ? result : item); renderPreservingFocus(() => renderConsole(lastState)); }
+}
+
 async function saveAiSettings() {
-  const payload = {model:document.querySelector('#ai-model').value, max_tokens:Number(document.querySelector('#ai-max-tokens').value), api_key:document.querySelector('#ai-key').value};
+  const payload = {model:document.querySelector('#ai-model').value, max_tokens:Number(document.querySelector('#ai-max-tokens').value), max_total_tokens:Number(document.querySelector('#ai-total-tokens').value), max_prompt_tokens:Number(document.querySelector('#ai-prompt-tokens').value), max_checks:Number(document.querySelector('#ai-max-checks').value), api_key:document.querySelector('#ai-key').value};
   const response = await fetch('/api/settings/ai', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
   const result = await response.json();
   if (!response.ok) { alert(result.error || 'Unable to save settings'); return; }
   window.settingsNotice = 'Settings saved locally.';
   lastState.ai = result;
   renderSettings(lastState);
+}
+
+async function validateAiSettings() {
+  const button = document.querySelector('#validate-ai-settings'); button.disabled = true;
+  try {
+    const response = await fetch('/api/settings/ai/validate', {method:'POST'}); const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Unable to validate the model');
+    lastState.ai = result; window.settingsNotice = result.capability?.status === 'ready' ? 'Core model validated.' : (result.capability?.message || 'Validation did not complete.');
+  } catch (error) { window.settingsNotice = error.message || 'Unable to validate the model.'; }
+  finally { renderSettings(lastState); }
+}
+
+async function saveMediaSettings() {
+  const button = document.querySelector('#save-media-settings'); button.disabled = true;
+  const payload = {vision_model:document.querySelector('#vision-model').value, asr_model:document.querySelector('#asr-model').value, api_key:document.querySelector('#media-key').value};
+  try {
+    const response = await fetch('/api/settings/media', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}); const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Unable to save media settings');
+    lastState.media = result; window.mediaSettingsNotice = 'Media settings saved locally.';
+  } catch (error) { window.mediaSettingsNotice = error.message || 'Unable to save media settings.'; }
+  finally { renderSettings(lastState); }
+}
+
+async function validateMediaSettings() {
+  const button = document.querySelector('#validate-media-settings'); button.disabled = true;
+  try {
+    const response = await fetch('/api/settings/media/validate', {method:'POST'}); const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Unable to validate media models');
+    lastState.media = result; window.mediaSettingsNotice = 'Media validation finished.';
+  } catch (error) { window.mediaSettingsNotice = error.message || 'Unable to validate media models.'; }
+  finally { renderSettings(lastState); }
 }
 
 async function saveGeneralSettings() {
@@ -614,9 +748,10 @@ function investigationResult(result = {}, checkId = '') {
 function investigationEvidence(run = {}) {
   const cited = new Set([...(run.assessment?.evidence_ids || []), ...(run.assessment?.hypotheses || []).flatMap(item=>item.evidence_ids), ...(run.assessment?.connections || []).flatMap(item=>item.evidence_ids), ...(run.assessment?.historical_comparison?.evidence_ids || [])]);
   const checks = (run.checks || []).map(item=>disclosure('agent-' + item.id,item.question,'<p>' + safe(item.distinguishes) + '</p><p class="queue-note">' + formatDate(item.started_at) + ' · ' + safe(item.status) + '</p>' + investigationResult(item.result,item.id),item.id)).join('');
+  const exampleText = examples => examples.map(item => typeof item === 'string' ? item : JSON.stringify(item)).join('\n');
   const evidence = (run.context?.evidence || []).filter(item=>cited.has(item.id)).map(item=>disclosure('agent-' + item.id, item.domain === 'log_template' ? logLabel(item.title) : item.title,
     '<p>' + safe(item.summary) + '</p><p class="queue-note">' + safe(item.domain) + ' · ' + formatDate(item.time_range?.start) + '</p>' +
-    (item.examples?.length ? '<pre class="log-lines">' + safe(item.examples.join('\n')) + '</pre>' : '') +
+    (item.examples?.length ? '<pre class="log-lines">' + safe(exampleText(item.examples)) + '</pre>' : '') +
     (item.configuration || item.alert ? '<pre class="log-lines">' + safe(JSON.stringify(item.configuration || item.alert,null,2)) + '</pre>' : '') +
     '<small>Captured in ' + (item.provenance || []).map(ref=>safe(ref.incident_id)).join(', ') + '</small>')).join('');
   return disclosure('agent-evidence','Investigation evidence',checks + evidence || '<p>No investigation evidence yet.</p>', (run.checks?.length || 0) + (run.context?.evidence || []).filter(item=>cited.has(item.id)).length);
@@ -703,7 +838,7 @@ function reportPanel(payload) {
   let content;
   if (reportTab === 'evidence') content = investigationEvidence(ai || {}) + '<h3 class="capture-heading">Selected alert capture</h3>' + evidencePanel(report);
   else if (reportTab === 'timeline') content = timelinePanel(report) + investigationTimeline(ai || {});
-  else content = '<div class="overview-layout"><div>' + briefingPanel(payload) + fallback + '</div>' + investigationProgress(ai || {}) + '</div>';
+  else content = '<div class="overview-layout"><div>' + briefingPanel(payload) + fallback + mediaEvidencePanel(payload) + '</div>' + investigationProgress(ai || {}) + '</div>';
   return '<section id="incident-report"><div class="report-navigation"><div role="tablist" aria-label="Investigation views">' +
     tabs.map(name=>'<button id="tab-' + name + '" role="tab" data-report-tab="' + name + '" aria-selected="' + (name === reportTab) + '" aria-controls="investigation-panel" tabindex="' + (name === reportTab ? 0 : -1) + '">' + name[0].toUpperCase() + name.slice(1) + '</button>').join('') +
     '</div>' + exports + '</div><div id="investigation-panel" role="tabpanel" aria-labelledby="tab-' + reportTab + '" tabindex="0">' + content + '</div><div class="report-technical">' + diagnostics + '</div></section>';

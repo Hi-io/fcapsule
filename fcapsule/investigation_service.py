@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -21,10 +22,55 @@ class InvestigationService:
     def path(self, episode_id: str) -> Path:
         return self.plane.state_dir / "investigations" / (hashlib.sha256(episode_id.encode()).hexdigest() + ".json")
 
+    def revision_path(self, episode_id: str, revision_id: str) -> Path:
+        directory = self.plane.state_dir / "investigations" / hashlib.sha256(episode_id.encode()).hexdigest()
+        return directory / (hashlib.sha256(revision_id.encode()).hexdigest() + ".json")
+
     def read(self, episode_id: str) -> dict[str, Any]:
         path = self.path(episode_id)
         return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {
             "episode_id": episode_id, "status": "not_started", "checks": [], "assessment": None}
+
+    def revisions(self, episode_id: str) -> list[dict[str, Any]]:
+        return self.plane.store.list_investigation_revisions(episode_id)
+
+    def _record_revision(self, state: dict[str, Any]) -> None:
+        revision_id = str(state.get("revision_id") or "")
+        episode_id = str(state.get("episode_id") or "")
+        if not revision_id or not episode_id:
+            return
+        path = self.revision_path(episode_id, revision_id)
+        self.plane._write_briefing_state(path, state)
+        assessment = state.get("assessment") if isinstance(state.get("assessment"), dict) else {}
+        self.plane.store.record_investigation_revision(
+            {
+                "revision_id": revision_id,
+                "episode_id": episode_id,
+                "parent_revision_id": state.get("parent_revision_id"),
+                "reason": state.get("revision_reason", "initial_capture"),
+                "source_mode": state.get("source_mode", "live_sources"),
+                "input_fingerprint": state.get("input_fingerprint", ""),
+                "status": state.get("status", "queued"),
+                "evidence_manifest": state.get("evidence_manifest", []),
+                "state_path": str(path),
+                "summary": {key: assessment.get(key) for key in ("summary", "likely_mechanism", "uncertainty") if assessment.get(key)},
+                "created_at": state.get("queued_at") or state.get("started_at") or now(),
+                "completed_at": state.get("finished_at") if state.get("status") in {"ready", "incomplete", "not_configured"} else None,
+            }
+        )
+
+    def _write_revision_exports(self, episode_id: str) -> None:
+        episode = self.plane.store.get_episode(episode_id)
+        if not episode:
+            return
+        history = {"episode_id": episode_id, "generated_at": now(), "revisions": self.revisions(episode_id)}
+        for signal in episode["signals"]:
+            record = self.plane.store.get_capsule_for_incident(str(signal["incident_id"]))
+            if not record:
+                continue
+            root = Path(record["output_dir"])
+            self.plane._write_briefing_state(root / "investigation_history.json", history)
+            create_archive(root, str(signal["incident_id"]))
 
     def for_incident(self, incident_id: str) -> dict[str, Any] | None:
         episode = self.plane.store.episode_for_incident(incident_id)
@@ -88,15 +134,19 @@ class InvestigationService:
         return candidates
 
     @staticmethod
-    def fingerprint(entries) -> str:
-        return hashlib.sha256(json.dumps([[item["incident"]["incident_id"], item["report"]] for item in entries],
-                                          sort_keys=True).encode()).hexdigest()
+    def fingerprint(entries, evidence_manifest: list[dict[str, Any]] | None = None) -> str:
+        payload = {
+            "reports": [[item["incident"]["incident_id"], item["report"]] for item in entries],
+            "attachments": evidence_manifest or [],
+        }
+        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
     def start_by_incident(self, incident_id: str) -> dict[str, Any]:
         episode = self.plane.store.episode_for_incident(incident_id)
         return self.start(episode["episode_id"]) if episode else {}
 
-    def start(self, episode_id: str, retry: bool = False) -> dict[str, Any]:
+    def start(self, episode_id: str, retry: bool = False, reason: str = "initial_capture",
+              source_mode: str = "live_sources") -> dict[str, Any]:
         with self.plane.briefing_lock:
             episode = self.plane.store.get_episode(episode_id)
             if not episode:
@@ -106,15 +156,19 @@ class InvestigationService:
             entries = self.entries(episode)
             if not entries:
                 raise ValueError("Build at least one report before starting an investigation")
-            fingerprint = self.fingerprint(entries)
+            evidence_manifest = self.plane.evidence.manifest(episode_id)
+            fingerprint = self.fingerprint(entries, evidence_manifest)
             previous = self.read(episode_id)
             if any(call.get("status") == "running" for call in previous.get("calls", [])):
                 previous.setdefault("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})["complete"] = False
             if not retry and previous.get("input_fingerprint") == fingerprint and previous.get("status") in {"ready", "incomplete"}:
                 return previous
-            state = {"version": "1", "episode_id": episode_id, "status": "queued", "queued_at": now(),
+            revision_id = f"revision-{uuid.uuid4().hex}"
+            state = {"version": "1", "episode_id": episode_id, "revision_id": revision_id,
+                     "parent_revision_id": previous.get("revision_id"), "revision_reason": reason,
+                     "source_mode": source_mode, "status": "queued", "queued_at": now(),
                      "input_fingerprint": fingerprint, "checks": [], "assessment": None,
-                     "attempt": previous.get("attempt", 0) + 1}
+                     "attempt": previous.get("attempt", 0) + 1, "evidence_manifest": evidence_manifest}
             history = list(previous.get("previous_runs", []))
             if previous.get("started_at"):
                 history.append({key: previous.get(key) for key in ("attempt", "started_at", "finished_at", "status", "usage", "assessment", "checks", "calls", "draft_assessment", "review", "policy_version")})
@@ -131,6 +185,7 @@ class InvestigationService:
             elif not retry and len(entries) < min(12, len(episode["signals"])):
                 state.update(status="waiting", message="Waiting for the episode's reports to finish.")
             self.plane._write_briefing_state(self.path(episode_id), state)
+            self._record_revision(state)
             if state["status"] == "queued":
                 self.jobs.add(episode_id)
                 self.plane.briefing_executor.submit(self._run, episode_id, state)
@@ -162,8 +217,10 @@ class InvestigationService:
                 return
             entries = self.entries(episode)
             original_ids = {item["incident"]["incident_id"] for item in entries}
-            input_fingerprint = self.fingerprint(entries)
+            evidence_manifest = self.plane.evidence.manifest(episode_id)
+            input_fingerprint = self.fingerprint(entries, evidence_manifest)
             context = episode_context(episode, entries)
+            context["evidence"].extend(self.plane.evidence.model_evidence(episode_id))
             historical = self.historical_candidates(episode)
             context["historical_candidates"] = [
                 {key: item.get(key) for key in ("episode_id", "reference", "title", "started_at", "ended_at", "status", "resource")}
@@ -173,6 +230,11 @@ class InvestigationService:
             application = self.plane.store.get_application(episode["app_id"])
             kit = InvestigationTools(entries, application or {}, self.plane.live_sources, historical)
             config = self.plane.ai_configuration()
+            context["investigation_limits"] = {
+                "max_checks": config["max_checks"],
+                "max_total_tokens": config["max_total_tokens"],
+                "max_prompt_tokens": config["max_prompt_tokens"],
+            }
 
             def publish(state):
                 with self.plane.briefing_lock:
@@ -180,13 +242,18 @@ class InvestigationService:
                     if self.stopping or not current or not original_ids.issubset({item["incident_id"] for item in current["signals"]}):
                         raise RuntimeError("Investigation cancelled after shutdown or membership deletion")
                     state.update(input_fingerprint=input_fingerprint, attempt=queued["attempt"],
-                                 lifetime_usage=queued.get("lifetime_usage", {}), previous_runs=queued.get("previous_runs", []))
+                                 lifetime_usage=queued.get("lifetime_usage", {}), previous_runs=queued.get("previous_runs", []),
+                                 revision_id=queued.get("revision_id"), parent_revision_id=queued.get("parent_revision_id"),
+                                 revision_reason=queued.get("revision_reason"), source_mode=queued.get("source_mode"),
+                                 evidence_manifest=evidence_manifest)
                     self.plane._write_briefing_state(self.path(episode_id), state)
+                    self._record_revision(state)
                     if state["status"] in {"ready", "incomplete"}:
                         for entry in entries:
                             root = Path(entry["record"]["output_dir"])
                             self.plane._write_briefing_state(root / "episode_investigation.json", state)
                             create_archive(root, entry["incident"]["incident_id"])
+                        self._write_revision_exports(episode_id)
 
             run_investigation(context, kit, config["model"], config["max_tokens"], publish)
         except Exception as error:
@@ -197,11 +264,14 @@ class InvestigationService:
                     state.update(status="incomplete", finished_at=now(), error_type=type(error).__name__,
                                  message="Investigation interrupted. Retained evidence is available; retry is explicit.")
                     self.plane._write_briefing_state(self.path(episode_id), state)
+                    self._record_revision(state)
+                    self._write_revision_exports(episode_id)
         finally:
             with self.plane.briefing_lock:
                 self.jobs.discard(episode_id)
                 current = self.plane.store.get_episode(episode_id)
                 if current and not self.stopping and original_ids.issubset({item["incident_id"] for item in current["signals"]}):
                     fresh = self.entries(current)
-                    if fresh and self.fingerprint(fresh) != input_fingerprint:
+                    fresh_manifest = self.plane.evidence.manifest(episode_id)
+                    if fresh and self.fingerprint(fresh, fresh_manifest) != input_fingerprint:
                         self.start(episode_id)

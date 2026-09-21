@@ -18,6 +18,8 @@ def create_archive(output_dir: Path, case_id: str) -> Path:
         "incident_report.json",
         "ai_briefing.json",
         "episode_investigation.json",
+        "investigation_history.json",
+        "evidence_manifest.json",
         "dashboard.html",
     )
     with NamedTemporaryFile(dir=output_dir, suffix=".zip.tmp", delete=False) as temporary:

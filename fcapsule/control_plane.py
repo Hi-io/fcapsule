@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import threading
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from fcapsule.env import load_env_file, write_env_value
+from fcapsule.evidence_service import EvidenceService
 from fcapsule.incident_report import build_incident_report
 from fcapsule.io.archive_writer import create_archive
 from fcapsule.io.case_loader import load_case
@@ -21,6 +23,8 @@ from fcapsule.live_sources import LiveSourceCoordinator
 from fcapsule.investigation_service import InvestigationService
 from fcapsule.pipeline import investigate_case
 from fcapsule.reasoning.incident_briefing import generate_incident_briefing
+from fcapsule.reasoning.llm_client import ChatRequest, DeepSeekChatClient, LLMUnavailableError
+from fcapsule.reasoning.openrouter import OpenRouterClient, OpenRouterError
 from fcapsule.store import FCAPSuleStore, utc_now
 from fcapsule.ui.dashboard import render_dashboard
 
@@ -66,6 +70,38 @@ def _resource_identity(
     return {"kind": "application", "name": fallback, "alert_identity": alert_name}
 
 
+MEDIA_DEFAULTS = {
+    "vision_model": "qwen/qwen3-vl-8b-instruct",
+    "asr_model": "qwen/qwen3-asr-0.6b",
+}
+
+
+def _bounded_int(value: Any, default: int, minimum: int, maximum: int) -> int:
+    try:
+        return min(maximum, max(minimum, int(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _credential_fingerprint(value: str | None) -> str:
+    """Track a credential version without persisting or returning the credential."""
+
+    if not value:
+        return ""
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
+
+
+def _capability_status(error: Exception) -> str:
+    text = str(error).lower()
+    if "401" in text or "403" in text or "invalid api" in text or "invalid key" in text:
+        return "invalid_credentials"
+    if "402" in text or "insufficient" in text or "credit" in text or "balance" in text:
+        return "insufficient_credit"
+    if "404" in text or "unsupported" in text or "not found" in text or "model" in text:
+        return "unsupported_model"
+    return "temporarily_unavailable"
+
+
 class ControlPlane:
     """Thread-safe coordinator shared by the API and operator console."""
 
@@ -80,6 +116,7 @@ class ControlPlane:
         self.briefing_lock = threading.RLock()
         self.briefing_jobs: set[str] = set()
         self.briefing_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="fcapsule-briefing")
+        self.evidence = EvidenceService(self)
         self.investigator = InvestigationService(self)
         self.running = False
         self.active_job: str | None = None
@@ -143,55 +180,208 @@ class ControlPlane:
     def _empty_phases() -> dict[str, dict[str, Any]]:
         return {"capsule": {"status": "waiting", "message": "Waiting"}}
 
+    def _capability(self, setting_key: str, credential: str | None, model: str) -> dict[str, Any]:
+        """Return a capability state only when it matches the active key/model pair."""
+
+        if not credential:
+            return {"status": "not_configured", "last_checked_at": None, "message": "No local credential is configured."}
+        raw = self.store.get_setting(setting_key, "") or ""
+        try:
+            saved = json.loads(raw)
+        except json.JSONDecodeError:
+            saved = {}
+        if not isinstance(saved, dict) or saved.get("credential_fingerprint") != _credential_fingerprint(credential) or saved.get("model") != model:
+            return {"status": "not_validated", "last_checked_at": None, "message": "Validate this credential and model before enabling the capability."}
+        return {
+            "status": str(saved.get("status") or "not_validated"),
+            "last_checked_at": saved.get("last_checked_at"),
+            "message": str(saved.get("message") or ""),
+            "usage": saved.get("usage") if isinstance(saved.get("usage"), dict) else {},
+        }
+
+    def _set_capability(self, setting_key: str, credential: str, model: str, status: str, message: str, usage: dict[str, Any] | None = None) -> dict[str, Any]:
+        value = {
+            "credential_fingerprint": _credential_fingerprint(credential),
+            "model": model,
+            "status": status,
+            "message": message[:300],
+            "last_checked_at": utc_now(),
+            "usage": usage or {},
+        }
+        self.store.set_setting(setting_key, json.dumps(value, ensure_ascii=True, separators=(",", ":")))
+        return self._capability(setting_key, credential, model)
+
     def ai_configuration(self) -> dict[str, Any]:
-        """Return local AI settings without ever returning the credential."""
+        """Return local AI settings without ever returning a credential."""
 
         profiles = self.store.list_model_profiles()
         default = next((item for item in profiles if item["model_id"] == "deepseek-v4-pro"), profiles[0])
         model = self.store.get_setting("ai_active_model", str(default["model_id"])) or str(default["model_id"])
-        try:
-            max_tokens = int(self.store.get_setting("ai_max_tokens", str(default["max_tokens"])) or default["max_tokens"])
-        except ValueError:
-            max_tokens = int(default["max_tokens"])
+        max_tokens = _bounded_int(self.store.get_setting("ai_max_tokens", str(default["max_tokens"])), int(default["max_tokens"]), 256, 6000)
+        maximum_total_tokens = _bounded_int(self.store.get_setting("ai_max_total_tokens", "18000"), 18000, 4000, 100000)
+        maximum_prompt_tokens = _bounded_int(self.store.get_setting("ai_max_prompt_tokens", "2600"), 2600, 1200, 12000)
+        maximum_checks = _bounded_int(self.store.get_setting("ai_max_checks", "2"), 2, 0, 4)
+        credential = os.environ.get("DEEPSEEK_API_KEY")
         return {
             "provider": "deepseek",
             "model": model,
             "max_tokens": max_tokens,
-            "api_key_configured": bool(os.environ.get("DEEPSEEK_API_KEY")),
+            "max_total_tokens": maximum_total_tokens,
+            "max_prompt_tokens": maximum_prompt_tokens,
+            "max_checks": maximum_checks,
+            "api_key_configured": bool(credential),
+            "capability": self._capability("ai_core_capability", credential, model),
             "models": profiles,
             "config_path": str(self.ai_config_path),
         }
 
+    def media_configuration(self) -> dict[str, Any]:
+        """Expose selected specialist models and validation states without secrets."""
+
+        vision_model = self.store.get_setting("media_vision_model", MEDIA_DEFAULTS["vision_model"]) or MEDIA_DEFAULTS["vision_model"]
+        asr_model = self.store.get_setting("media_asr_model", MEDIA_DEFAULTS["asr_model"]) or MEDIA_DEFAULTS["asr_model"]
+        credential = os.environ.get("OPENROUTER_API_KEY")
+        core = self.ai_configuration()["capability"]
+        return {
+            "provider": "openrouter",
+            "api_key_configured": bool(credential),
+            "vision": {"model": vision_model, "capability": self._capability("media_vision_capability", credential, vision_model)},
+            "audio": {"model": asr_model, "capability": self._capability("media_audio_capability", credential, asr_model)},
+            "core_investigator": {"model": self.ai_configuration()["model"], "capability": core},
+        }
+
+    def media_submission_allowed(self, kind: str) -> tuple[bool, str]:
+        media = self.media_configuration()
+        core_status = media["core_investigator"]["capability"]["status"]
+        specialist = media.get(kind, {}).get("capability", {}).get("status")
+        if core_status != "ready":
+            return False, "Validate the core investigator before adding media evidence."
+        if specialist != "ready":
+            return False, f"Validate the selected {kind} model before adding media evidence."
+        return True, ""
+
+    def _validate_core(self, model: str, credential: str) -> dict[str, Any]:
+        try:
+            result = DeepSeekChatClient(api_key=credential, timeout_seconds=35).chat(
+                ChatRequest(
+                    model=model,
+                    messages=[{"role": "user", "content": "Return the JSON object {\"status\":\"ok\"}."}],
+                    max_tokens=96,
+                    temperature=0,
+                    json_output=True,
+                )
+            )
+            if not str(result.get("content", "")).strip():
+                raise LLMUnavailableError("Provider returned no usable validation output")
+        except (LLMUnavailableError, OSError, ValueError) as error:
+            return self._set_capability("ai_core_capability", credential, model, _capability_status(error), str(error))
+        return self._set_capability("ai_core_capability", credential, model, "ready", "Core model accepted a bounded JSON canary.", result.get("usage"))
+
+    def validate_ai_configuration(self) -> dict[str, Any]:
+        config = self.ai_configuration()
+        credential = os.environ.get("DEEPSEEK_API_KEY")
+        if not credential:
+            return config
+        self._validate_core(str(config["model"]), credential)
+        self._persist_ai_settings()
+        return self.ai_configuration()
+
     def _persist_ai_settings(self) -> None:
         config = self.ai_configuration()
-        # The local config makes the selected runtime explicit; the secret stays in .env only.
+        media = self.media_configuration()
+        # The local config makes active runtime choices explicit; secrets stay in .env only.
         write_json(
             self.ai_config_path,
             {
                 "provider": config["provider"],
                 "model": config["model"],
                 "max_tokens": config["max_tokens"],
+                "max_total_tokens": config["max_total_tokens"],
+                "max_prompt_tokens": config["max_prompt_tokens"],
+                "max_checks": config["max_checks"],
+                "media": {"provider": media["provider"], "vision_model": media["vision"]["model"], "asr_model": media["audio"]["model"]},
             },
         )
 
     def update_ai_configuration(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Update a supported model selection and optionally save a local API key."""
+        """Update bounded investigator settings; verify a replacement key before saving it."""
 
-        model = str(payload.get("model", "")).strip()
+        current = self.ai_configuration()
+        model = str(payload.get("model", current["model"])).strip()
         if not model or any(character.isspace() for character in model):
             raise ValueError("Model ID must be a non-empty identifier without spaces")
-        max_tokens = int(payload.get("max_tokens", 1500))
+        max_tokens = _bounded_int(payload.get("max_tokens", current["max_tokens"]), current["max_tokens"], 256, 6000)
+        maximum_total_tokens = _bounded_int(payload.get("max_total_tokens", current["max_total_tokens"]), current["max_total_tokens"], 4000, 100000)
+        maximum_prompt_tokens = _bounded_int(payload.get("max_prompt_tokens", current["max_prompt_tokens"]), current["max_prompt_tokens"], 1200, 12000)
+        maximum_checks = _bounded_int(payload.get("max_checks", current["max_checks"]), current["max_checks"], 0, 4)
         api_key = str(payload.get("api_key", "")).strip()
         if api_key and len(api_key) < 12:
             raise ValueError("API key appears too short")
+        if api_key:
+            validation = self._validate_core(model, api_key)
+            if validation["status"] != "ready":
+                raise ValueError(f"Replacement credential was not saved: {validation['message']}")
+            write_env_value(self.state_dir / ".env", "DEEPSEEK_API_KEY", api_key)
         self.store.upsert_model_profile(model, "deepseek", True, max_tokens)
         self.store.set_setting("ai_active_model", model)
         self.store.set_setting("ai_max_tokens", str(max_tokens))
-        if api_key:
-            write_env_value(self.state_dir / ".env", "DEEPSEEK_API_KEY", api_key)
+        self.store.set_setting("ai_max_total_tokens", str(maximum_total_tokens))
+        self.store.set_setting("ai_max_prompt_tokens", str(maximum_prompt_tokens))
+        self.store.set_setting("ai_max_checks", str(maximum_checks))
+        if not api_key and model != current["model"]:
+            self.store.set_setting("ai_core_capability", "")
         self._persist_ai_settings()
         self.investigator.resume()
         return self.ai_configuration()
+
+    def update_media_configuration(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Save selected specialist models and validate a candidate key before persisting it."""
+
+        current = self.media_configuration()
+        vision_model = str(payload.get("vision_model", current["vision"]["model"])).strip()
+        asr_model = str(payload.get("asr_model", current["audio"]["model"])).strip()
+        if not vision_model or not asr_model or any(character.isspace() for character in (vision_model, asr_model)):
+            raise ValueError("Media model IDs must be non-empty identifiers without spaces")
+        candidate = str(payload.get("api_key", "")).strip()
+        if candidate and len(candidate) < 12:
+            raise ValueError("API key appears too short")
+        self.store.set_setting("media_vision_model", vision_model)
+        self.store.set_setting("media_asr_model", asr_model)
+        if not candidate and (vision_model != current["vision"]["model"] or asr_model != current["audio"]["model"]):
+            self.store.set_setting("media_vision_capability", "")
+            self.store.set_setting("media_audio_capability", "")
+        if candidate:
+            result = self._validate_media(vision_model, asr_model, candidate)
+            if not any(item["capability"]["status"] == "ready" for item in (result["vision"], result["audio"])):
+                raise ValueError("Replacement credential was not saved because no media capability could be validated")
+            write_env_value(self.state_dir / ".env", "OPENROUTER_API_KEY", candidate)
+        self._persist_ai_settings()
+        return self.media_configuration()
+
+    def _validate_media(self, vision_model: str, asr_model: str, credential: str) -> dict[str, Any]:
+        client = OpenRouterClient(api_key=credential, timeout_seconds=45)
+        for setting, model, operation, label in (
+            ("media_vision_capability", vision_model, client.validate_vision, "Image model accepted a minimal visual canary."),
+            ("media_audio_capability", asr_model, client.validate_asr, "Audio model accepted a minimal audio canary."),
+        ):
+            try:
+                result = operation(model)
+                self._set_capability(setting, credential, model, "ready", label, result.get("usage"))
+            except (OpenRouterError, OSError, ValueError) as error:
+                self._set_capability(setting, credential, model, _capability_status(error), str(error))
+        return {
+            "vision": {"model": vision_model, "capability": self._capability("media_vision_capability", credential, vision_model)},
+            "audio": {"model": asr_model, "capability": self._capability("media_audio_capability", credential, asr_model)},
+        }
+
+    def validate_media_configuration(self) -> dict[str, Any]:
+        config = self.media_configuration()
+        credential = os.environ.get("OPENROUTER_API_KEY")
+        if not credential:
+            return config
+        self._validate_media(str(config["vision"]["model"]), str(config["audio"]["model"]), credential)
+        self._persist_ai_settings()
+        return self.media_configuration()
 
     def general_configuration(self) -> dict[str, Any]:
         try:
@@ -207,6 +397,47 @@ class ControlPlane:
         self.store.set_setting("incident_retention_days", str(retention_days))
         self.purge_expired_incidents(force=True)
         return self.general_configuration()
+
+    def submit_evidence(self, episode_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        attachment = self.evidence.submit(episode_id, payload)
+        self.refresh_evidence_exports(episode_id)
+        return attachment
+
+    def correct_evidence(self, attachment_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        attachment = self.evidence.correct(attachment_id, payload)
+        record = self.store.get_evidence_attachment(attachment_id)
+        if record:
+            self.refresh_evidence_exports(str(record["episode_id"]))
+        return attachment
+
+    def remove_evidence(self, attachment_id: str) -> None:
+        record = self.store.get_evidence_attachment(attachment_id)
+        if not record:
+            raise KeyError("Evidence attachment not found")
+        episode_id = str(record["episode_id"])
+        self.evidence.remove(attachment_id)
+        self.refresh_evidence_exports(episode_id)
+
+    def refresh_evidence_exports(self, episode_id: str) -> None:
+        """Update manifests only; raw uploaded media is never added to the default archive."""
+
+        manifest = self.evidence.manifest(episode_id)
+        episode = self.store.get_episode(episode_id)
+        if not episode:
+            return
+        for signal in episode["signals"]:
+            record = self.store.get_capsule_for_incident(str(signal["incident_id"]))
+            if not record:
+                continue
+            root = Path(record["output_dir"])
+            write_json(root / "evidence_manifest.json", {"episode_id": episode_id, "generated_at": utc_now(), "attachments": manifest})
+            create_archive(root, str(signal["incident_id"]))
+
+    def update_investigation_with_evidence(self, episode_id: str) -> dict[str, Any]:
+        ready = [item for item in self.store.list_evidence_attachments(episode_id) if item["status"] == "ready"]
+        if not ready:
+            raise ValueError("No processed evidence is ready to update this investigation")
+        return self.investigator.start(episode_id, retry=True, reason="evidence_added")
 
     def set_incident_archived(self, incident_id: str, archived: bool) -> dict[str, Any]:
         incident = self.store.set_incident_archived(incident_id, archived)
@@ -226,6 +457,8 @@ class ControlPlane:
         incident_ids = self.store.episode_incident_ids(episode_id)
         if not incident_ids:
             raise KeyError(f"Unknown episode: {episode_id}")
+        for attachment in self.store.list_evidence_attachments(episode_id):
+            self.evidence.remove(str(attachment["attachment_id"]))
         for incident_id in incident_ids:
             self.delete_incident(incident_id)
 
@@ -236,6 +469,9 @@ class ControlPlane:
         capsule = self.store.get_capsule_for_incident(incident_id)
         episode = self.store.episode_for_incident(incident_id)
         with self.briefing_lock:
+            if episode and len(self.store.episode_incident_ids(str(episode["episode_id"]))) == 1:
+                for attachment in self.store.list_evidence_attachments(str(episode["episode_id"])):
+                    self.evidence.remove(str(attachment["attachment_id"]))
             self.store.delete_incident(incident_id)
             self._remove_managed_tree(incident.get("case_dir"))
             if capsule:
@@ -542,6 +778,7 @@ class ControlPlane:
                 "phases": json.loads(json.dumps(self.phases)),
                 "live": json.loads(json.dumps(self.live)),
                 "ai": self.ai_configuration(),
+                "media": self.media_configuration(),
                 "settings": self.general_configuration(),
                 "sources": json.loads(json.dumps(self.source_state)),
             }
@@ -635,6 +872,8 @@ class ControlPlane:
         archive_path = Path(capsule_record["archive_path"])
         retention_days = self.general_configuration()["incident_retention_days"]
         expires_at = datetime.fromisoformat(incident["created_at"].replace("Z", "+00:00")) + timedelta(days=retention_days)
+        episode = self.store.episode_for_incident(incident_id)
+        episode_id = str(episode["episode_id"]) if episode else None
         return {
             "incident": incident,
             "record": capsule_record,
@@ -648,6 +887,8 @@ class ControlPlane:
             },
             "ai_briefing": json.loads(briefing_path.read_text(encoding="utf-8")) if briefing_path.is_file() else None,
             "investigation": self.investigator.for_incident(incident_id),
+            "media_evidence": self.evidence.list(episode_id) if episode_id else [],
+            "investigation_revisions": self.investigator.revisions(episode_id) if episode_id else [],
         }
 
     def start_ai_briefing(self, incident_id: str, retry: bool = False) -> dict[str, Any]:
