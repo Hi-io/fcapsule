@@ -173,7 +173,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
     if max_prompt_tokens < 1200 or max_prompt_tokens > 12000:
         raise ValueError("max_prompt_tokens must be between 1200 and 12000")
     state = {"version": "1", "episode_id": context["episode_id"], "status": "running", "started_at": now(),
-              "policy_version": "episode-investigation-1.10", "max_completion_tokens_per_call": max_tokens,
+              "policy_version": "episode-investigation-1.11", "max_completion_tokens_per_call": max_tokens,
              "model": model, "context": context, "checks": [], "calls": [], "assessment": None,
              "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
              "token_budget": {"maximum_total_tokens": max_total_tokens, "maximum_prompt_tokens": max_prompt_tokens,
@@ -356,6 +356,14 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             if name not in tools.CATALOG or not isinstance(arguments, dict):
                 raise ValueError("Unrecognized check")
             if json.dumps([name, arguments], sort_keys=True) in seen:
+                if validation_feedback is None and turn < max_checks:
+                    call["validation_error"] = "Selected check has already completed"
+                    validation_feedback = {
+                        "error": "The requested check has already completed. Reuse its retained observation.",
+                        "instruction": "Do not repeat completed checks. Finish with the available evidence and cite the relevant E/Q references.",
+                    }
+                    publish(state)
+                    continue
                 raise ValueError("Repeated check would not add observations")
             question, distinguishes = decision.get("question"), decision.get("distinguishes")
             if any(not isinstance(text, str) or not 1 <= len(text) <= 400 for text in (question, distinguishes)):

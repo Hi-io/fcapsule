@@ -276,6 +276,22 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual([item["tool"] for item in state["checks"]], ["workload_state", "scrape_discovery"])
         self.assertTrue(all(item["automatic_preservation"] for item in state["checks"]))
 
+    def test_repeated_automatic_check_uses_the_reserved_final_decision(self):
+        self.context.update(
+            live_capture=True,
+            evidence=[{"id": "E1", "domain": "log_template"}],
+            alerts=[{"incident_id": "one", "labels": {"target_service": "app-metrics"}}],
+        )
+        repeated = {
+            "action": "check", "tool": "scrape_discovery", "arguments": {},
+            "question": "Which selector missed the target?", "distinguishes": "A discovery failure or workload failure",
+        }
+        state, client = self.run_case([repeated, {"action": "finish", "assessment": assessment("Q002")}], max_checks=1)
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(len(state["checks"]), 2)
+        self.assertEqual(client.requests[0].reasoning_effort, "none")
+        self.assertEqual(state["calls"][0]["validation_error"], "Selected check has already completed")
+
 
 class InvestigationToolTests(unittest.TestCase):
     def setUp(self):

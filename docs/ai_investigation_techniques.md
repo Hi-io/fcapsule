@@ -57,6 +57,12 @@ bounded tool catalogue, preserved observations and evidence review provide the
 guardrails, while this avoids consuming a response budget before the model emits a
 usable decision. The final review follows the same rule.
 
+If a model requests an already-completed automatic or model-selected check, FCAPSule
+records the protocol correction and uses the next already-budgeted decision turn to
+finish from the retained observation. It does not execute the source query twice or
+expand the call budget. A second invalid repeat remains incomplete rather than being
+silently repaired.
+
 The evidence reference space distinguishes initial capture records (`E...`) from
 executed checks (`Q001`, `Q002`, etc.). Failed checks cannot be cited as successful
 observations. A successful empty query is still an observation of that bounded
@@ -313,7 +319,7 @@ solely because sampled memory is low. These interpretations follow the
 and [Kubernetes resource behavior](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/).
 They constrain interpretation, not the observed outcome of any particular case.
 
-Policy `episode-investigation-1.10` uses structured output without hidden reasoning
+Policy `episode-investigation-1.11` uses structured output without hidden reasoning
 effort for both investigation and the already reserved final review. Explicit byte
 conversion, component-versus-total memory and termination-versus-alert time checks
 remain in the review instruction. A bounded, cited historical comparison is required
