@@ -196,7 +196,9 @@ class LiveSourceCoordinator:
             ):
                 continue
             service_candidates: list[dict[str, Any]] | None = None
-            service_name = str(labels.get("service", "")).strip()
+            service_name = str(
+                labels.get("target_service") or labels.get("kubernetes_service") or labels.get("service", "")
+            ).strip()
             if service_name:
                 try:
                     # A target-discovery alert is often scoped to a Service rather than a

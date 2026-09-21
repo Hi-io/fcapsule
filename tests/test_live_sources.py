@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from fcapsule.adapters.kubernetes_adapter import KubernetesAdapter
 from fcapsule.adapters.opensearch_adapter import OpenSearchAdapter
@@ -74,6 +75,56 @@ class LiveSourceTests(unittest.TestCase):
         self.assertIsNone(
             _resolve_alert_pod(orders + [unrelated], "shop", {"service": "shared"}, orders + [unrelated])
         )
+
+    def test_live_capture_resolves_target_service_before_logical_service_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            coordinator = LiveSourceCoordinator(FCAPSuleStore(state / "state.db"), state)
+            coordinator.update_configuration(
+                {
+                    "prometheus_url": "http://prometheus:9090",
+                    "opensearch_url": "http://opensearch:9200",
+                    "opensearch_index": "k8s-logs-*",
+                    "cluster_name": "cluster-a",
+                    "namespaces": ["shop"],
+                }
+            )
+            pod = {
+                "name": "orders-1",
+                "namespace": "shop",
+                "workload": "orders-api",
+                "labels": {"app.kubernetes.io/name": "orders-api"},
+                "ready": True,
+                "phase": "Running",
+            }
+            prometheus, opensearch, kubernetes = Mock(), Mock(), Mock()
+            coordinator.adapters = Mock(return_value=(prometheus, opensearch, kubernetes))
+            coordinator.test_connections = Mock(
+                return_value={"targets": {name: {"ok": True} for name in ("prometheus", "opensearch", "kubernetes")}}
+            )
+            kubernetes.list_pods.return_value = [pod]
+            prometheus.pod_inventory.return_value = {}
+            opensearch.pod_log_counts.return_value = {}
+            prometheus.active_alerts.return_value = [
+                {
+                    "alertname": "MetricsDiscoveryMissing",
+                    "status": "firing",
+                    "startsAt": "2026-09-22T00:00:00Z",
+                    "labels": {
+                        "namespace": "shop",
+                        "service": "orders-api",
+                        "target_service": "lab-app-metrics",
+                    },
+                }
+            ]
+            prometheus.alert_rules.return_value = {}
+            kubernetes.service_pods.return_value = [pod]
+
+            with patch.object(coordinator, "_capture_case", return_value=state / "case"):
+                result = coordinator.synchronize()
+
+            kubernetes.service_pods.assert_called_once_with("shop", "lab-app-metrics", [pod])
+            self.assertEqual(len(result["captured"]), 1)
 
     def test_prometheus_adapter_normalizes_inventory_alerts_and_ranges(self):
         adapter = PrometheusAdapter("http://prometheus")
