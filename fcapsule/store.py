@@ -25,6 +25,16 @@ EPISODE_JOIN_MINUTES = 15
 SEVERITY_RANK = {"info": 0, "warning": 1, "critical": 2}
 
 
+class _ClosingConnection(sqlite3.Connection):
+    """Commit or roll back like sqlite, then release the database handle promptly."""
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> bool:
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -67,7 +77,7 @@ class FCAPSuleStore:
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=15)
+        connection = sqlite3.connect(self.path, timeout=15, factory=_ClosingConnection)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA journal_mode = WAL")

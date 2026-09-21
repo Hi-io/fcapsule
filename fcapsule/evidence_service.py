@@ -111,8 +111,10 @@ class EvidenceService:
         self.root.mkdir(parents=True, exist_ok=True)
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="fcapsule-evidence")
 
-    def shutdown(self) -> None:
-        self.executor.shutdown(wait=False, cancel_futures=True)
+    def shutdown(self, wait: bool = True) -> None:
+        """Stop media work; callers that need immediate process shutdown may opt out of waiting."""
+
+        self.executor.shutdown(wait=wait, cancel_futures=True)
 
     def _public(self, record: dict[str, Any]) -> dict[str, Any]:
         result = {key: value for key, value in record.items() if key != "storage_path"}

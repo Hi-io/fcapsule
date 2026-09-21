@@ -129,6 +129,11 @@ class InvestigationService:
                 )
             prior_run = self.read(str(prior["episode_id"]))
             assessment = prior_run.get("assessment") or {}
+            prior_hypothesis = {
+                key: assessment.get(key)
+                for key in ("summary", "likely_mechanism", "uncertainty")
+                if assessment.get(key)
+            }
             candidates.append(
                 {
                     "episode_id": prior["episode_id"],
@@ -138,11 +143,10 @@ class InvestigationService:
                     "ended_at": prior.get("ended_at"),
                     "status": prior["status"],
                     "resource": prior.get("resource"),
-                    "assessment": {
-                        key: assessment.get(key)
-                        for key in ("summary", "likely_mechanism", "uncertainty")
-                        if assessment.get(key)
-                    },
+                    "prior_hypothesis": (
+                        {"provenance": "Earlier model output; not independent evidence and not citable.", **prior_hypothesis}
+                        if prior_hypothesis else {}
+                    ),
                     "captured_evidence": evidence,
                 }
             )

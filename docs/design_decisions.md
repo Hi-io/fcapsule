@@ -52,3 +52,22 @@ A current report is served from retained JSON rather than reopening the original
 ## No Autonomous Remediation
 
 FCAPSule produces evidence and next checks. System changes require a separate, explicitly authorized control boundary.
+
+## Evidence Specialists Are Opt-In
+
+The core investigator works on retained text and structured operational evidence. A
+vision specialist and an audio transcription specialist can enrich an already
+captured episode only when an operator supplies a file and each required capability
+has been validated. This keeps screenshots and spoken observations out of automatic
+collection, preserves an explicit provenance boundary, and avoids spending specialist
+model calls on routine incidents.
+
+## Numerical Specialist Deferred Until It Demonstrates Incremental Value
+
+Performance-management data is currently summarized by deterministic range queries,
+baseline comparison, units-aware presentation, and bounded trend samples before the
+core investigator sees it. A separate pretrained numerical/time-series model is not
+enabled merely to add another model. It will be introduced only after a controlled
+evaluation shows that it improves useful discrimination over these summaries for the
+same incidents, without unacceptable latency or operational cost. This preserves a
+clear product boundary while leaving room for an evidence-backed specialist later.

@@ -75,7 +75,8 @@ time correlation: episodes remain independently auditable and are never merged.
 The model must inspect exactly one supplied candidate before it can publish an
 assessment for a recurring episode. The `historical_episode` tool returns a
 bounded prior report excerpt, selected configuration/log/alert observations, and
-the prior assessment only as a historical hypothesis. It cannot fetch arbitrary
+an optional `prior_hypothesis` explicitly marked as earlier model output. That prose
+is not independent evidence and cannot be cited. The tool cannot fetch arbitrary
 old incidents or query new sources. The final comparison must cite the returned
 observation and classify the result as `similar_mechanism`,
 `changed_or_different`, or `insufficient_evidence`.
@@ -140,7 +141,7 @@ retained termination and may have been replaced by a later restart.
 | `database_pressure` | Three MySQL-exporter connection/limit expressions plus `mysql_up` reachability in the episode namespace | Four series per expression; labels retained; no inferred dependency from namespace proximity |
 | `dependency_evidence` | One selector-backed Service explicitly declared by the affected workload's endpoint environment configuration | Same namespace; one current pod; 200 log lines, fixed resource metrics and eight configuration records; no arbitrary endpoints |
 | `review_omitted` | Stored, unselected log templates | Twelve returned candidates; no network access |
-| `historical_episode` | One of up to three deterministic retained recurrence candidates | No source query; bounded saved alert/configuration/log observations; prior assessment is labeled a historical hypothesis |
+| `historical_episode` | One of up to three deterministic retained recurrence candidates | No source query; bounded saved alert/configuration/log observations; any `prior_hypothesis` is labeled non-citable earlier model output |
 
 Namespace-level MySQL metrics are context, not automatic attribution to a database
 dependency. The tool does not connect directly to MySQL or issue SQL. Configuration
@@ -285,7 +286,7 @@ solely because sampled memory is low. These interpretations follow the
 and [Kubernetes resource behavior](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/).
 They constrain interpretation, not the observed outcome of any particular case.
 
-Policy `episode-investigation-1.8` uses low reasoning effort for the already reserved
+Policy `episode-investigation-1.9` uses low reasoning effort for the already reserved
 final review, with explicit byte conversion, component-versus-total memory and
 termination-versus-alert time checks. It additionally requires a bounded, cited
 historical comparison when a deterministic recurrence candidate exists. This

@@ -55,7 +55,7 @@ class FCAPSuleHTTPServer(ThreadingHTTPServer):
         self.control_plane.investigator.stopping = True
         self.control_plane.stop_live_monitoring()
         self.control_plane.briefing_executor.shutdown(wait=False, cancel_futures=True)
-        self.control_plane.evidence.shutdown()
+        self.control_plane.evidence.shutdown(wait=False)
         super().server_close()
 
 

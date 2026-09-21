@@ -143,3 +143,28 @@ test('agent event times remain separate from the historical incident sequence', 
   assert.match(html,/analysis-time/);
   assert.match(html,/Assessment saved/);
 });
+
+test('historical model prose is labelled as a hypothesis rather than evidence', () => {
+  const render = helper('investigationResult','investigationEvidence', {
+    safe:value=>String(value ?? ''), formatDate:value=>value, disclosure:(id,title,body)=>title+body,
+  });
+  const html = render({episode:{reference:'EP-OLD',title:'Earlier episode',started_at:'earlier',status:'resolved',prior_hypothesis:{summary:'A prior model suspected connection pressure.'},captured_evidence:[{}]}});
+  assert.match(html,/Earlier hypothesis, not proof/);
+  assert.match(html,/A prior model suspected connection pressure/);
+});
+
+test('media upload is enabled only when the core and matching specialist are ready', () => {
+  const availability = helper('mediaEvidenceAvailability', 'mediaEvidencePanel', {});
+  const imageOnly = availability({
+    core_investigator:{capability:{status:'ready'}},
+    vision:{capability:{status:'ready'}}, audio:{capability:{status:'not_validated'}},
+  });
+  assert.equal(imageOnly.image, true);
+  assert.equal(imageOnly.audio, false);
+  const disabled = availability({
+    core_investigator:{capability:{status:'not_validated'}},
+    vision:{capability:{status:'ready'}}, audio:{capability:{status:'ready'}},
+  });
+  assert.equal(disabled.image, false);
+  assert.equal(disabled.audio, false);
+});

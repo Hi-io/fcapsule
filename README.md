@@ -13,7 +13,7 @@ FCAPSule provides one control plane with four operator views:
 - **Operations** (`/console`) groups related firing alerts into expandable incident episodes. A compact triage strip highlights only active, recurring, or materially changed retained work. Overview presents one evidence-seeking AI investigation per episode, a concrete next action and check progress. Evidence and Timeline expose observations and the agent's activity separately from historical events. Reports and capsules can be exported.
 - **Targets** (`/targets`) configures and tests Prometheus, OpenSearch, and Kubernetes API access, controls namespace scope and polling, and shows coverage for currently observed applications.
 - **Patterns** (`/patterns`) provides historical recurrence context for matching application/resource/alert episodes while keeping each incident independently auditable.
-- **Settings** (`/settings`) controls incident retention, the investigation model and completion budget per call. With a provider key configured, new reports trigger background episode investigation. Retention defaults to 30 days. The key remains local in `.env` and is never returned through the console or stored in SQLite.
+- **Settings** (`/settings`) controls incident retention, the investigation model and completion budget per call, plus optional image/audio evidence specialists. With a provider key configured, new reports trigger background episode investigation. Retention defaults to 30 days. Keys remain local in `.env` and are never returned through the console or stored in SQLite.
 
 The CLI remains fully usable without the web application.
 
@@ -31,8 +31,10 @@ The project uses the word *domain* for telemetry families with different data sh
 | Topology and configuration | service relationships and runtime changes | cross-source entity alignment and dependency context |
 | On-demand traces | optional case metadata | retain declared availability and source retention; a live trace-backend adapter is not implemented |
 | AI reasoning | selected evidence and bounded read-only tool observations | competing explanations, alert relationships, reference comparisons and cited next actions |
+| Optional visual evidence | operator-supplied dashboard or incident image | bounded visual extraction, clearly separated from source telemetry |
+| Optional audio evidence | operator-supplied voice observation | bounded transcription, clearly separated from source telemetry |
 
-These are operational modalities, not media modalities. FCAPSule does not generate or process images to satisfy multidomain behavior.
+Telemetry remains the core of FCAPSule. Image and audio are optional, manually supplied evidence modalities: FCAPSule never captures them automatically, and keeps them disabled until both the core investigator and the relevant specialist model have passed a bounded validation. They enrich a retained episode; they do not replace fault, performance, log, or configuration evidence. See [optional multimodal evidence](docs/multimodal_evidence.md) for the evidence lifecycle and evaluation boundary.
 
 ## Quickstart
 
@@ -118,7 +120,7 @@ python3 -m fcapsule.cli compare-llms \
   --models deepseek-v4-flash deepseek-v4-pro
 ```
 
-Model comparison is an offline evaluation workflow, not an operator dashboard. The evidence report is built deterministically. With a key configured, a background investigator preserves mutable workload state and lets the model select up to four bounded checks before concluding. Tools can query resource history, literal log matches, peer/preceding-window comparisons, namespace-scoped database metrics, explicitly declared same-namespace dependencies and unselected retained log candidates. For an exact retained recurrence candidate, it can also inspect one bounded prior episode and publish a cited comparison; that remains support for responder memory, not proof of a common cause. Valid evidence references and uncertainty are required, but citation checks do not prove the explanation. No remediation or application replication is executed. See [AI investigation techniques](docs/ai_investigation_techniques.md) for scope, budgets and limitations.
+Model comparison is an offline evaluation workflow, not an operator dashboard. The evidence report is built deterministically. With a key configured, a background investigator preserves mutable workload state, runs one model-selected bounded check by default, then concludes and verifies a cited assessment. Operators can raise the model-selected check limit to four when an episode warrants it. Tools can query resource history, literal log matches, peer/preceding-window comparisons, namespace-scoped database metrics, explicitly declared same-namespace dependencies and unselected retained log candidates. For an exact retained recurrence candidate, it can also inspect one bounded prior episode and publish a cited comparison; any earlier model hypothesis is labeled non-evidence. Valid evidence references and uncertainty are required, but citation checks do not prove the explanation. No remediation or application replication is executed. See [AI investigation techniques](docs/ai_investigation_techniques.md) for scope, budgets and limitations.
 
 Re-score stored responses after a rubric change without making provider calls:
 

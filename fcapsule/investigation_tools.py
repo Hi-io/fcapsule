@@ -178,7 +178,7 @@ class InvestigationTools:
             return scrub({
                 "source": "Retained FCAPSule historical episode",
                 "episode": candidate,
-                "limitation": "This is a prior captured episode, not proof of the same cause. Its assessment is a historical hypothesis and must be checked against its cited evidence.",
+                "limitation": "This is a prior captured episode, not proof of the same cause. Any prior_hypothesis is earlier model output, not independent evidence and not citable. Compare only its retained observations.",
             })
         prometheus, opensearch, kubernetes = self._adapters()
         if name == "alert_rule_logic":

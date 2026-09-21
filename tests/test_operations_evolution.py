@@ -114,13 +114,17 @@ class OperationsEvolutionTests(unittest.TestCase):
             }],
             {"namespace": "commerce"},
             {},
-            [{"episode_id": "episode-prior", "reference": "EP-12345678", "captured_evidence": []}],
+            [{"episode_id": "episode-prior", "reference": "EP-12345678", "captured_evidence": [],
+              "prior_hypothesis": {"summary": "Earlier explanation", "provenance": "Earlier model output; not independent evidence and not citable."}}],
         )
 
         result = tools.execute("historical_episode", {"episode_id": "episode-prior"})
 
         self.assertEqual(result["source"], "Retained FCAPSule historical episode")
         self.assertEqual(result["episode"]["reference"], "EP-12345678")
+        self.assertIn("prior_hypothesis", result["episode"])
+        self.assertNotIn("assessment", result["episode"])
+        self.assertIn("not citable", result["limitation"])
         with self.assertRaises(ValueError):
             tools.execute("historical_episode", {"episode_id": "unrelated-episode"})
 

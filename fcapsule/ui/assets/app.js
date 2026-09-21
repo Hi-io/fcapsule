@@ -307,7 +307,7 @@ function renderSettings(state) {
       <div class="field"><label for="ai-key">API key</label><input id="ai-key" type="password" autocomplete="new-password" placeholder="${ai.api_key_configured ? 'Leave blank to keep the saved key' : 'Paste a key to enable investigation'}"><small>New credentials are checked before they replace a working local credential.</small></div>
       ${window.settingsNotice ? `<p class="notice">${safe(window.settingsNotice)}</p>` : ''}
       <div class="actions"><button id="save-ai-settings">Save investigation settings</button><button class="secondary" id="validate-ai-settings">Validate model</button></div>
-    </div></section><section class="sheet"><div class="sheet-head"><h2>${icon('file-code-2')}Evidence models</h2>${capability(media.core_investigator?.capability)}</div><div class="sheet-body">
+    </div></section><section id="evidence-models" class="sheet"><div class="sheet-head"><h2>${icon('file-code-2')}Evidence models</h2>${capability(media.core_investigator?.capability)}</div><div class="sheet-body">
       <div class="model-state"><span>Image extraction ${capability(media.vision?.capability)}</span><span>Audio transcription ${capability(media.audio?.capability)}</span></div>
       <div class="field"><label for="media-key">OpenRouter API key</label><input id="media-key" type="password" autocomplete="new-password" placeholder="${media.api_key_configured ? 'Leave blank to keep the saved key' : 'Paste an optional key'}"><small>Image and audio evidence remain unavailable until the core investigator and the selected specialist are validated.</small></div>
       <div class="field"><label for="vision-model">Image model</label><input id="vision-model" value="${safe(media.vision?.model)}"></div>
@@ -487,14 +487,30 @@ function attachmentSummary(item) {
   return first || extraction.limitation || 'Visual extraction pending.';
 }
 
+function mediaEvidenceAvailability(media) {
+  const config = media || (typeof lastState === 'object' ? lastState?.media : null) || {};
+  const coreReady = config.core_investigator?.capability?.status === 'ready';
+  return {
+    image: coreReady && config.vision?.capability?.status === 'ready',
+    audio: coreReady && config.audio?.capability?.status === 'ready',
+  };
+}
+
 function mediaEvidencePanel(payload) {
   const episodeId = selectedEpisodeId || payload.investigation?.episode_id;
   const items = payload.media_evidence || [];
   const ready = items.some(item => item.status === 'ready');
+  const available = mediaEvidenceAvailability();
+  const addControl = available.image || available.audio
+    ? `<button class="secondary" data-add-evidence="${safe(episodeId || '')}">Add evidence</button>`
+    : '<a class="secondary button-link" href="/settings#evidence-models">Set up evidence models</a>';
   const rows = items.map(item => `<article class="media-evidence-row"><div><strong>${safe(item.filename)}</strong><small>${safe(item.kind)} · ${safe(item.status)}${item.observed_at ? ' · observed ' + safe(formatDate(item.observed_at)) : ''}</small><p>${safe(attachmentSummary(item))}</p></div><div class="media-evidence-actions"><a class="secondary button-link" href="${safe(item.artifact_url)}" target="_blank" rel="noopener">View</a>${item.status === 'ready' ? `<button class="secondary" data-correct-evidence="${safe(item.attachment_id)}">Correct</button>` : ''}</div></article>`).join('');
   const revision = payload.investigation_revisions || [];
   const history = revision.length > 1 ? disclosure('assessment-history', 'Assessment history', revision.map(item=>`<div class="revision-row"><span>${safe(item.reason.replaceAll('_',' '))}</span><strong>${safe(item.summary?.summary || item.status.replaceAll('_',' '))}</strong><small>${safe(formatDate(item.completed_at || item.created_at))}</small></div>`).join(''), revision.length) : '';
-  return `<section class="media-evidence"><div class="section-heading"><h3>Additional evidence</h3><div class="row-actions"><button class="secondary" data-add-evidence="${safe(episodeId || '')}">Add evidence</button>${ready ? `<button data-update-evidence-investigation="${safe(episodeId || '')}">Update investigation</button>` : ''}</div></div>${rows || '<p class="queue-note">No operator-supplied image or audio evidence.</p>'}${history}</section>`;
+  const empty = available.image || available.audio
+    ? 'No operator-supplied image or audio evidence.'
+    : 'Optional image and audio evidence is not enabled.';
+  return `<section class="media-evidence"><div class="section-heading"><h3>Additional evidence</h3><div class="row-actions">${addControl}${ready ? `<button data-update-evidence-investigation="${safe(episodeId || '')}">Update investigation</button>` : ''}</div></div>${rows || '<p class="queue-note">' + empty + '</p>'}${history}</section>`;
 }
 
 function sourceReviewPanel(payload) {
@@ -503,7 +519,11 @@ function sourceReviewPanel(payload) {
   const reviews = payload.source_disconnected_reviews || [];
   const rows = reviews.slice(0, 3).map(item => {
     const result = item.result || {};
-    return `<article class="source-review-row"><div><strong>${safe(item.question)}</strong><small>${safe(String(item.status || '').replaceAll('_',' '))} · ${safe(formatDate(item.completed_at || item.created_at))}</small>${result.answer ? `<p>${safe(result.answer)}</p><p class="queue-note">${safe(String(result.sufficiency || '').replaceAll('_',' '))} · ${safe(result.missing_discriminator || '')}</p>` : ''}</div></article>`;
+    const usage = item.usage || {};
+    const tokenText = Number.isFinite(Number(usage.total_tokens)) && Number(usage.total_tokens) > 0
+      ? ' · ' + (usage.complete === false ? 'at least ' : '') + Number(usage.total_tokens).toLocaleString('en') + ' tokens'
+      : '';
+    return `<article class="source-review-row"><div><strong>${safe(item.question)}</strong><small>${safe(String(item.status || '').replaceAll('_',' '))} · ${safe(formatDate(item.completed_at || item.created_at))}${tokenText}</small>${result.answer ? `<p>${safe(result.answer)}</p><p class="queue-note">${safe(String(result.sufficiency || '').replaceAll('_',' '))} · ${safe(result.missing_discriminator || '')}</p>` : ''}</div></article>`;
   }).join('');
   const body = '<p class="queue-note">Ask a narrow question from preserved records only. Live sources are not queried.</p><button class="secondary" data-source-review="' + safe(episodeId) + '">Ask retained-capsule question</button>' + (rows ? '<div class="source-review-list">' + rows + '</div>' : '');
   return disclosure('source-disconnected-review', 'Retained-capsule review', body, reviews.length || '');
@@ -519,10 +539,20 @@ function fileToBase64(file) {
 
 function showEvidenceDialog(episodeId) {
   if (!episodeId) return;
+  const available = mediaEvidenceAvailability();
+  if (!available.image && !available.audio) {
+    location.assign('/settings#evidence-models');
+    return;
+  }
+  const accepted = [
+    ...(available.image ? ['image/png,image/jpeg,image/webp'] : []),
+    ...(available.audio ? ['audio/wav,audio/mpeg,audio/ogg,audio/webm,audio/mp4,audio/x-m4a'] : []),
+  ].join(',');
+  const typeLabel = available.image && available.audio ? 'Image or short audio from the investigation.' : available.image ? 'Image from the investigation.' : 'Short audio from the investigation.';
   let state = {file:null, stream:null, recorder:null, objectUrl:null};
   const dialog = document.createElement('dialog');
   dialog.className = 'evidence-dialog';
-  dialog.innerHTML = `<form method="dialog"><header><div><h2>Add evidence</h2><p>Image or short audio from the investigation.</p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header><div class="dialog-body"><div class="field"><label for="evidence-file">File</label><input id="evidence-file" type="file" accept="image/png,image/jpeg,image/webp,audio/wav,audio/mpeg,audio/ogg,audio/webm,audio/mp4,audio/x-m4a"><small>Images up to 6 MiB. Audio up to 8 MiB.</small></div><div class="record-row"><button class="secondary" type="button" id="record-evidence">Record audio</button><span id="record-status" class="queue-note"></span></div><div id="evidence-preview" class="evidence-preview" hidden></div><div class="field"><label for="evidence-observed-at">Observed at</label><input id="evidence-observed-at" type="datetime-local"><small>Leave blank when the time is not known.</small></div><div class="field"><label for="evidence-note">Context</label><input id="evidence-note" maxlength="1000" placeholder="Optional note for the investigation"></div><label class="toggle"><input id="evidence-redacted" type="checkbox">This copy has been redacted where needed</label><p id="evidence-error" class="notice" hidden></p></div><footer><button class="secondary" value="cancel">Cancel</button><button type="button" id="submit-evidence" disabled>Analyze evidence</button></footer></form>`;
+  dialog.innerHTML = `<form method="dialog"><header><div><h2>Add evidence</h2><p>${typeLabel}</p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header><div class="dialog-body"><div class="field"><label for="evidence-file">File</label><input id="evidence-file" type="file" accept="${accepted}"><small>${available.image ? 'Images up to 6 MiB. ' : ''}${available.audio ? 'Audio up to 8 MiB.' : ''}</small></div>${available.audio ? '<div class="record-row"><button class="secondary" type="button" id="record-evidence">Record audio</button><span id="record-status" class="queue-note"></span></div>' : ''}<div id="evidence-preview" class="evidence-preview" hidden></div><div class="field"><label for="evidence-observed-at">Observed at</label><input id="evidence-observed-at" type="datetime-local"><small>Leave blank when the time is not known.</small></div><div class="field"><label for="evidence-note">Context</label><input id="evidence-note" maxlength="1000" placeholder="Optional note for the investigation"></div><label class="toggle"><input id="evidence-redacted" type="checkbox">This copy has been redacted where needed</label><p id="evidence-error" class="notice" hidden></p></div><footer><button class="secondary" value="cancel">Cancel</button><button type="button" id="submit-evidence" disabled>Analyze evidence</button></footer></form>`;
   document.body.append(dialog);
   const fileInput = dialog.querySelector('#evidence-file'); const preview = dialog.querySelector('#evidence-preview');
   const error = dialog.querySelector('#evidence-error'); const submit = dialog.querySelector('#submit-evidence'); const record = dialog.querySelector('#record-evidence'); const recordStatus = dialog.querySelector('#record-status');
@@ -534,7 +564,7 @@ function showEvidenceDialog(episodeId) {
     submit.disabled = !state.file;
   };
   fileInput.addEventListener('change', () => setFile(fileInput.files?.[0]));
-  record.addEventListener('click', async () => {
+  record?.addEventListener('click', async () => {
     if (state.recorder?.state === 'recording') { state.recorder.stop(); return; }
     try {
       if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) throw new Error('Recording is unavailable in this browser context.');
@@ -550,6 +580,7 @@ function showEvidenceDialog(episodeId) {
     try {
       const kind = state.file.type.startsWith('image/') ? 'image' : state.file.type.startsWith('audio/') ? 'audio' : '';
       if (!kind) throw new Error('Choose an image or audio file.');
+      if ((kind === 'image' && !available.image) || (kind === 'audio' && !available.audio)) throw new Error('This evidence type is not enabled. Validate its model in Settings.');
       const localTime = dialog.querySelector('#evidence-observed-at').value;
       const payload = {kind, filename:state.file.name, content_base64:await fileToBase64(state.file), observed_at:localTime ? new Date(localTime).toISOString() : '', context_note:dialog.querySelector('#evidence-note').value, source_redacted:dialog.querySelector('#evidence-redacted').checked};
       const response = await fetch('/api/episodes/' + encodeURIComponent(episodeId) + '/evidence', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}); const result = await response.json();
@@ -788,8 +819,9 @@ function investigationResult(result = {}, checkId = '') {
     (item.container_states || []).map(container=>'<p>' + safe(container.name) + ': ' + safe(container.restart_count) + ' restarts' + (container.last_state?.terminated ? ' · ' + safe(container.last_state.terminated.reason) + ' · exit ' + safe(container.last_state.terminated.exitCode) + ' · ' + formatDate(container.last_state.terminated.finishedAt) : '') + '</p>').join('') + '</li>').join('') + '</ul>';
   if (result.episode) {
     const historic = result.episode;
+    const prior = historic.prior_hypothesis || historic.assessment || {};
     body += '<section class="historical-observation"><span class="incident-reference">' + safe(historic.reference || historic.episode_id) + '</span><strong>' + safe(historic.title) + '</strong><small>' + formatDate(historic.started_at) + ' · ' + safe(historic.status) + '</small>' +
-      (historic.assessment?.summary ? '<p>' + safe(historic.assessment.summary) + '</p>' : '<p>No validated earlier assessment was retained.</p>') +
+      (prior.summary ? '<p><span class="text-label">Earlier hypothesis, not proof</span>' + safe(prior.summary) + '</p>' : '<p>No earlier model hypothesis was retained.</p>') +
       '<small>' + safe((historic.captured_evidence || []).length) + ' retained incident capture(s) available for comparison.</small></section>';
   }
   if (!series.length && !patterns.length && !configs.length) body += '<p>No observations returned.</p>';

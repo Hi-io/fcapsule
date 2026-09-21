@@ -98,11 +98,14 @@ The Deployment references an optional Secret named `fcapsule-secrets`. Create or
 kubectl create secret generic fcapsule-secrets \
   -n fcapsule \
   --from-literal=DEEPSEEK_API_KEY='<value>' \
+  --from-literal=OPENROUTER_API_KEY='<optional-value>' \
   --dry-run=client -o yaml | kubectl apply -f -
 kubectl rollout restart deployment/fcapsule -n fcapsule
 ```
 
 The console reports only whether a key is configured. A replacement entered in Settings is written to `/var/lib/fcapsule/.env`, never SQLite or the API response.
+
+`OPENROUTER_API_KEY` is optional. It enables only manually supplied image/audio evidence after the core investigator and relevant specialist model pass their own small validation checks. It is not required for normal alert, metric, log, or configuration capture.
 
 ## RBAC and Configuration Evidence
 
