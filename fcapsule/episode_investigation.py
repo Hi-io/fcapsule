@@ -31,6 +31,7 @@ def validate_assessment(
     evidence_ids: set[str],
     incident_ids: set[str],
     historical_episode_ids: set[str] | None = None,
+    require_connections: bool | None = None,
 ) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("Missing assessment")
@@ -64,7 +65,7 @@ def validate_assessment(
     connections = value.get("connections", [])
     if not isinstance(connections, list) or len(connections) > 6:
         raise ValueError("Invalid alert connections")
-    if len(incident_ids) > 1 and not connections:
+    if (len(incident_ids) > 1 if require_connections is None else require_connections) and not connections:
         raise ValueError("Multi-alert episodes require an explicit relationship assessment")
     result["connections"] = []
     for item in connections:
@@ -172,7 +173,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
     if max_prompt_tokens < 1200 or max_prompt_tokens > 12000:
         raise ValueError("max_prompt_tokens must be between 1200 and 12000")
     state = {"version": "1", "episode_id": context["episode_id"], "status": "running", "started_at": now(),
-              "policy_version": "episode-investigation-1.9", "max_completion_tokens_per_call": max_tokens,
+              "policy_version": "episode-investigation-1.10", "max_completion_tokens_per_call": max_tokens,
              "model": model, "context": context, "checks": [], "calls": [], "assessment": None,
              "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
              "token_budget": {"maximum_total_tokens": max_total_tokens, "maximum_prompt_tokens": max_prompt_tokens,
@@ -285,6 +286,14 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             "A selector or target-discovery failure versus an unhealthy application workload.",
             True,
         )
+    # Repeated evaluations of the same alert are recurrence evidence, not a
+    # causal relationship. Only distinct alert identities need an explicit edge.
+    alert_identities = {
+        str(alert.get("alert_identity") or alert.get("alertname") or alert.get("title")
+            or alert.get("summary") or alert.get("incident_id"))
+        for alert in context["alerts"]
+    }
+    require_connections = len(alert_identities) > 1
     try:
         client = client or DeepSeekChatClient(timeout_seconds=90)
         for turn in range(max_checks + 1):
@@ -301,7 +310,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             publish(state)
             response, call = request_model(
                 payload,
-                "none" if validation_feedback or turn == max_checks else "low",
+                "none",
                 "investigation",
                 900 if turn == max_checks else 640,
             )
@@ -320,8 +329,9 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                         raise ValueError("Inspect one retained historical candidate before concluding this recurring episode")
                     candidate = assessment_payload(decision, call)
                     state["assessment"] = validate_assessment(candidate, set(visible_evidence_ids),
-                                                               {item["incident_id"] for item in context["alerts"]},
-                                                               {item["episode_id"] for item in context.get("historical_candidates", [])})
+                                                                {item["incident_id"] for item in context["alerts"]},
+                                                                {item["episode_id"] for item in context.get("historical_candidates", [])},
+                                                                require_connections=require_connections)
             except ValueError as error:
                 call["validation_error"] = str(error)[:240]
                 refs = candidate.get("evidence_ids") if isinstance(candidate, dict) else None
@@ -369,6 +379,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 review_assessment_payload(decision, call), set(visible_evidence_ids),
                 {item["incident_id"] for item in context["alerts"]},
                 {item["episode_id"] for item in context.get("historical_candidates", [])},
+                require_connections=require_connections,
             )
             state.update(assessment=reviewed, status="ready", review={"status": "completed", "changed": reviewed != draft,
                          "schema_repair": review_candidate is not None,

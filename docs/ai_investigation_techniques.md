@@ -28,7 +28,9 @@ reports outside that bound remain accessible; the bound is declared to the model
 The LLM receives alert identities, retained alert conditions when available, selected
 logs, metric findings and configuration. A multi-alert assessment must describe at
 least one relationship: `possibly_related`, `same_symptom` or
-`no_link_established`. Group membership is not evidence of a shared cause.
+`no_link_established`, but only when the episode contains distinct alert identities.
+Repeated occurrences of one alert are recurrence evidence, not artificial causal
+edges. Group membership is not evidence of a shared cause.
 
 The output has one episode-level summary, likely mechanism, next action, expected
 finding, uncertainty, one to three competing hypotheses and cited relationships.
@@ -49,6 +51,11 @@ observation to the next call. It does not request or retain private model reason
 This follows the action/observation pattern described in [ReAct](https://react-lm.github.io/).
 The implementation uses structured JSON decisions with a fixed dispatch table,
 not unrestricted function execution or a generic shell agent.
+
+Investigation decisions use structured output without hidden reasoning effort. The
+bounded tool catalogue, preserved observations and evidence review provide the
+guardrails, while this avoids consuming a response budget before the model emits a
+usable decision. The final review follows the same rule.
 
 The evidence reference space distinguishes initial capture records (`E...`) from
 executed checks (`Q001`, `Q002`, etc.). Failed checks cannot be cited as successful
@@ -235,10 +242,11 @@ provider calls. Operators can raise the number of model-selected checks to four,
 maximum of six calls. The default per-investigation reserve is 12,000 tokens and the
 default full-request input cap is 2,100 tokens. The latter includes system instructions,
 the tool catalogue, citation IDs and selected evidence; it is not merely a cap on log
-text. The completion limit in Settings applies per call. Calls request JSON output and
-low reasoning effort. One schema repair can use a remaining call with reasoning
-disabled; it does not increase the total call budget. Final evidence review also
-disables private reasoning output. These controls follow the [DeepSeek API contract](https://api-docs.deepseek.com/api/create-chat-completion/).
+text. The completion limit in Settings applies per call. Calls request JSON output
+with reasoning disabled: the evidence contract, bounded dispatch table and final
+review are the safety controls, rather than hidden deliberation that can consume an
+entire response allowance. One schema repair uses a remaining reserved call; it does
+not increase the total call budget. These controls follow the [DeepSeek API contract](https://api-docs.deepseek.com/api/create-chat-completion/).
 
 Before each request, FCAPSule reserves its estimated full input plus the allowed
 completion. A missing provider usage field therefore cannot create further unreserved
@@ -305,15 +313,16 @@ solely because sampled memory is low. These interpretations follow the
 and [Kubernetes resource behavior](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/).
 They constrain interpretation, not the observed outcome of any particular case.
 
-Policy `episode-investigation-1.9` uses low reasoning effort for the already reserved
-final review, with explicit byte conversion, component-versus-total memory and
-termination-versus-alert time checks. It additionally requires a bounded, cited
-historical comparison when a deterministic recurrence candidate exists. This
-replaced a non-reasoning review after a real investigation repeated a false
-below-limit memory comparison. The review has the same call and completion budget;
-latency and reasoning-token consumption can increase. It is still model-assisted
-consistency review, not a deterministic numerical validator. Original and revised
-assessments must both remain in evaluation records, including unsuccessful corrections.
+Policy `episode-investigation-1.10` uses structured output without hidden reasoning
+effort for both investigation and the already reserved final review. Explicit byte
+conversion, component-versus-total memory and termination-versus-alert time checks
+remain in the review instruction. A bounded, cited historical comparison is required
+when a deterministic recurrence candidate exists. Repeated occurrences of the same
+alert are retained as recurrence evidence, while relationship fields are required only
+for distinct alert identities. The review has the same call and completion budget and
+is still model-assisted consistency review, not a deterministic numerical validator.
+Original and revised assessments must both remain in evaluation records, including
+unsuccessful corrections.
 
 Telemetry is treated as untrusted input, and the prompt explicitly rejects
 instructions embedded in it. Server-side tool dispatch restricts actions even if a

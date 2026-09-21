@@ -81,6 +81,9 @@ def episode_context(episode: dict[str, Any], entries: list[dict[str, Any]]) -> d
         discovery_labels = _discovery_labels(report)
         if discovery_labels:
             alert_context["labels"] = discovery_labels
+        alert_identity = _alert_identity(report)
+        if alert_identity:
+            alert_context["alert_identity"] = alert_identity
         alerts.append(alert_context)
         for item in report.get("supporting_evidence", []):
             identity = [item.get("type"), item.get("title"), item.get("summary"), item.get("time_range"), item.get("linked_entities"), item.get("configuration")]
@@ -116,6 +119,16 @@ def _discovery_labels(report: dict[str, Any]) -> dict[str, str]:
         if retained:
             return retained
     return {}
+
+
+def _alert_identity(report: dict[str, Any]) -> str:
+    """Return the retained rule identity without deriving one from prose."""
+
+    for alert in report.get("fault_alerts", []):
+        name = alert.get("name")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    return ""
 
 
 class InvestigationTools:

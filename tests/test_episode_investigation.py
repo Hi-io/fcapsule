@@ -95,7 +95,7 @@ class InvestigationEngineTests(unittest.TestCase):
                                        {"action": "finish", "assessment": assessment()}])
         self.assertEqual(state["status"], "ready")
         self.assertEqual(len(client.requests), 4)
-        self.assertEqual(client.requests[0].reasoning_effort, "low")
+        self.assertEqual(client.requests[0].reasoning_effort, "none")
         self.assertEqual(client.requests[2].reasoning_effort, "none")
         self.assertTrue(client.requests[1].json_output)
         self.assertIn("validation_error", state["calls"][1])
@@ -244,6 +244,15 @@ class InvestigationEngineTests(unittest.TestCase):
     def test_multi_alert_relationships_are_explicit(self):
         with self.assertRaises(ValueError):
             validate_assessment(assessment(), {"Q001"}, {"one", "two"})
+
+    def test_repeated_alert_identity_does_not_require_an_artificial_relationship(self):
+        self.context["alerts"] = [
+            {"incident_id": "one", "alert_identity": "TargetMissing"},
+            {"incident_id": "two", "alert_identity": "TargetMissing"},
+        ]
+        state, _ = self.run_case([{"action": "finish", "assessment": assessment()}], max_checks=0)
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["assessment"]["connections"], [])
         value = assessment()
         value["connections"] = [{"from": "one", "to": "two", "relationship": "no_link_established", "reason": "Timing only", "evidence_ids": ["Q001"]}]
         self.assertEqual(len(validate_assessment(value, {"Q001"}, {"one", "two"})["connections"]), 1)
@@ -434,6 +443,7 @@ class InvestigationToolTests(unittest.TestCase):
         context = episode_context({"episode_id": "episode"}, self.entries)
 
         self.assertEqual(context["alerts"][0]["labels"], {"target_service": "app-metrics", "target_workload": "orders-api"})
+        self.assertEqual(context["alerts"][0]["alert_identity"], "MetricsMissing")
 
     def test_diagnostic_codes_survive_reduction_and_secrets_do_not(self):
         self.assertNotEqual(template_for_message('exit_code=137 job=19'), template_for_message('exit_code=1 job=20'))
