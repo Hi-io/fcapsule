@@ -195,7 +195,16 @@ class LiveSourceCoordinator:
                 or (namespaces and namespace not in namespaces)
             ):
                 continue
-            pod = _resolve_alert_pod(pods, namespace, labels)
+            service_candidates: list[dict[str, Any]] | None = None
+            service_name = str(labels.get("service", "")).strip()
+            if service_name:
+                try:
+                    # A target-discovery alert is often scoped to a Service rather than a
+                    # single pod. Resolve it through the Service selector, not its name.
+                    service_candidates = kubernetes.service_pods(namespace, service_name, pods)
+                except (ValueError, OSError, RuntimeError):
+                    service_candidates = []
+            pod = _resolve_alert_pod(pods, namespace, labels, service_candidates)
             if pod is None or not alert.get("startsAt"):
                 continue
             incident_id = _incident_id(alert, namespace, pod["name"])
@@ -312,7 +321,12 @@ def _incident_id(alert: dict[str, Any], namespace: str, pod: str) -> str:
     return f"incident-{timestamp}-{_slug(str(alert['alertname']))}-{digest}"
 
 
-def _resolve_alert_pod(pods: list[dict[str, Any]], namespace: str, labels: dict[str, Any]) -> dict[str, Any] | None:
+def _resolve_alert_pod(
+    pods: list[dict[str, Any]],
+    namespace: str,
+    labels: dict[str, Any],
+    service_candidates: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
     pod_name = str(labels.get("pod", ""))
     if pod_name:
         return next((item for item in pods if item["namespace"] == namespace and item["name"] == pod_name), None)
@@ -323,6 +337,20 @@ def _resolve_alert_pod(pods: list[dict[str, Any]], namespace: str, labels: dict[
     if workload_name:
         matches = [item for item in pods if item["namespace"] == namespace and item.get("workload") == workload_name]
         return matches[0] if len(matches) == 1 else None
+    service_name = str(labels.get("service", "")).strip()
+    if service_name:
+        # ``None`` keeps this helper useful for offline captures. Live collection passes
+        # selector-backed candidates, including an explicit empty list when none match.
+        candidates = service_candidates
+        if candidates is None:
+            candidates = [
+                item for item in pods
+                if item["namespace"] == namespace and item.get("workload") == service_name
+            ]
+        workloads = {str(item.get("workload", "")) for item in candidates}
+        if len(workloads) == 1 and workloads != {""}:
+            return sorted(candidates, key=lambda item: (not item.get("ready", False), item["name"]))[0]
+        return None
     namespace_pods = [item for item in pods if item["namespace"] == namespace]
     return namespace_pods[0] if len(namespace_pods) == 1 else None
 

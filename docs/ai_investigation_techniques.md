@@ -65,6 +65,15 @@ of inside it, only that known layout mismatch is normalized and recorded in the
 call audit. Conflicting values are rejected. The original response is retained,
 and all content, bounds and reference validations still apply.
 
+#### Service-Scoped Discovery Alerts
+
+Some Prometheus alerts describe a missing target and therefore identify a
+Kubernetes `Service`, not a particular pod. During live capture FCAPSule resolves
+that identity through the Service's selector. It proceeds only when the selected
+pods belong to one workload, preserving an unambiguous anchor for the capsule.
+An empty selector result or a Service spanning workloads remains an explicit
+limitation; FCAPSule does not guess from a matching name or text similarity.
+
 ### 3. Bounded Historical Recurrence Comparison
 
 When retained episode metadata has the same application, affected resource and

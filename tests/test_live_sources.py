@@ -60,6 +60,21 @@ class LiveSourceTests(unittest.TestCase):
         self.assertEqual(_resolve_alert_pod(pods, "shop", {"deployment": "api"}), pods[0])
         self.assertEqual(_resolve_alert_pod(pods, "shop", {}), pods[0])
 
+    def test_service_scoped_alert_uses_one_selector_backed_workload(self):
+        orders = [
+            {"namespace": "shop", "name": "orders-1", "workload": "orders", "ready": False},
+            {"namespace": "shop", "name": "orders-2", "workload": "orders", "ready": True},
+        ]
+        unrelated = {"namespace": "shop", "name": "inventory-1", "workload": "inventory", "ready": True}
+
+        self.assertEqual(
+            _resolve_alert_pod(orders + [unrelated], "shop", {"service": "orders"}, orders),
+            orders[1],
+        )
+        self.assertIsNone(
+            _resolve_alert_pod(orders + [unrelated], "shop", {"service": "shared"}, orders + [unrelated])
+        )
+
     def test_prometheus_adapter_normalizes_inventory_alerts_and_ranges(self):
         adapter = PrometheusAdapter("http://prometheus")
         adapter.transport = FakeTransport(
