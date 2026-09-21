@@ -272,6 +272,19 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
 
     check("workload_state", {}, "What termination state and resource limits can still be preserved?",
           "Runtime termination versus application failure; snapshot may be newer than the incident.", True)
+    discovery_capture = any(
+        isinstance(alert.get("labels"), dict)
+        and any(alert["labels"].get(key) for key in ("target_service", "kubernetes_service", "target_workload"))
+        for alert in context["alerts"]
+    )
+    if discovery_capture:
+        check(
+            "scrape_discovery",
+            {},
+            "Which monitoring selector and target state explain the missing telemetry?",
+            "A selector or target-discovery failure versus an unhealthy application workload.",
+            True,
+        )
     try:
         client = client or DeepSeekChatClient(timeout_seconds=90)
         for turn in range(max_checks + 1):
@@ -299,7 +312,9 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 if decision.get("action") == "finish":
                     if max_checks > 0 and len(state["checks"]) < 2:
                         raise ValueError("Run one discriminating check beyond automatic preservation before concluding")
-                    if context.get("live_capture") and any(item.get("domain") == "log_template" for item in context["evidence"]) and not any(item["tool"] == "search_logs" for item in state["checks"]):
+                    if (context.get("live_capture") and not discovery_capture
+                            and any(item.get("domain") == "log_template" for item in context["evidence"])
+                            and not any(item["tool"] == "search_logs" for item in state["checks"])):
                         raise ValueError("Search source logs for a discriminating observation before concluding this live episode")
                     if context.get("historical_candidates") and not any(item["tool"] == "historical_episode" for item in state["checks"]):
                         raise ValueError("Inspect one retained historical candidate before concluding this recurring episode")

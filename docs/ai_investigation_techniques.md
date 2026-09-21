@@ -78,6 +78,12 @@ selector and proceeds only when the selected pods belong to one workload. An emp
 selector result or a Service spanning workloads remains an explicit limitation;
 FCAPSule does not guess from a matching name or text similarity.
 
+When a retained alert contains one of these explicit discovery identities,
+FCAPSule preserves a bounded `scrape_discovery` observation before asking the
+model to choose more work. This makes the selector/target chain available even
+when application logs are routine, and prevents an irrelevant log search from
+blocking a conclusion about observability coverage.
+
 ### 3. Bounded Historical Recurrence Comparison
 
 When retained episode metadata has the same application, affected resource and

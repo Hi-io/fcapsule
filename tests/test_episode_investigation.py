@@ -254,6 +254,19 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(state["status"], "incomplete")
         self.assertIn("Search source logs", state["validation_error"])
 
+    def test_discovery_capture_preserves_selector_evidence_before_concluding(self):
+        self.context.update(
+            live_capture=True,
+            evidence=[{"id": "E1", "domain": "log_template"}],
+            alerts=[{"incident_id": "one", "labels": {"target_service": "app-metrics", "target_workload": "worker"}}],
+        )
+
+        state, _ = self.run_case([{"action": "finish", "assessment": assessment("Q002")}], max_checks=0)
+
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual([item["tool"] for item in state["checks"]], ["workload_state", "scrape_discovery"])
+        self.assertTrue(all(item["automatic_preservation"] for item in state["checks"]))
+
 
 class InvestigationToolTests(unittest.TestCase):
     def setUp(self):
