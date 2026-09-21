@@ -28,5 +28,6 @@
 - [Product evolution review](product_review.md): includes explicitly historical scenarios.
 - [Evaluation protocol](../EVALUATION_PLAN.md), [model comparison](llm_comparison.md) and [reasoning contracts](../PROMPTS.md)
 - [Historical evaluation record](evaluation_record.md): previously recorded measurements, not current production performance or a general model ranking.
+- [Live integration validation](live_validation.md): one controlled Kubernetes discovery-failure run with bounded-token results and recovery checks.
 
 For current behavior, use operating guides and source/tests first. Historical results and aspirational research requirements do not override the implemented product contract.

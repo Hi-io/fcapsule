@@ -194,4 +194,5 @@ Start with the [documentation index](docs/README.md), which separates current op
 - `docs/design_decisions.md`: important design decisions and tradeoffs.
 - `docs/production_product_requirements.md`: operator-first product requirements and acceptance criteria.
 - `docs/llm_comparison.md`: model profiles, prompts, and scoring.
+- `docs/live_validation.md`: controlled live Kubernetes discovery-failure validation and token-accounting result.
 - `ROADMAP.md`: remaining work toward distributed operation.
