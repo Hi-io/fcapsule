@@ -244,6 +244,9 @@ class InvestigationEngineTests(unittest.TestCase):
     def test_multi_alert_relationships_are_explicit(self):
         with self.assertRaises(ValueError):
             validate_assessment(assessment(), {"Q001"}, {"one", "two"})
+        value = assessment()
+        value["connections"] = [{"from": "one", "to": "two", "relationship": "no_link_established", "reason": "Timing only", "evidence_ids": ["Q001"]}]
+        self.assertEqual(len(validate_assessment(value, {"Q001"}, {"one", "two"})["connections"]), 1)
 
     def test_repeated_alert_identity_does_not_require_an_artificial_relationship(self):
         self.context["alerts"] = [
@@ -253,9 +256,6 @@ class InvestigationEngineTests(unittest.TestCase):
         state, _ = self.run_case([{"action": "finish", "assessment": assessment()}], max_checks=0)
         self.assertEqual(state["status"], "ready")
         self.assertEqual(state["assessment"]["connections"], [])
-        value = assessment()
-        value["connections"] = [{"from": "one", "to": "two", "relationship": "no_link_established", "reason": "Timing only", "evidence_ids": ["Q001"]}]
-        self.assertEqual(len(validate_assessment(value, {"Q001"}, {"one", "two"})["connections"]), 1)
 
     def test_live_log_query_is_not_delegated_back_without_attempt(self):
         self.context.update(live_capture=True, evidence=[{"id": "E1", "domain": "log_template"}])
