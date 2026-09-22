@@ -348,6 +348,8 @@ class InvestigationService:
                 if record:
                     root = Path(record["output_dir"])
                     (root / "episode_investigation.json").unlink(missing_ok=True)
+                    (root / "investigation_history.json").unlink(missing_ok=True)
+                    (root / "investigation_revisions.json").unlink(missing_ok=True)
                     create_archive(root, signal["incident_id"])
 
     def _run(self, episode_id: str, queued: dict[str, Any]) -> None:

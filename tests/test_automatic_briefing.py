@@ -123,7 +123,9 @@ class AutomaticInvestigationTests(unittest.TestCase):
             for record in (first, second):
                 with ZipFile(record["archive_path"]) as archive:
                     self.assertIn("episode_investigation.json", archive.namelist())
+                    self.assertIn("investigation_revisions.json", archive.namelist())
             self.control.delete_incident(self.id)
             self.assertEqual(self.control.investigator.read(self.episode_id)["status"], "not_started")
             with ZipFile(second["archive_path"]) as archive:
                 self.assertNotIn("episode_investigation.json", archive.namelist())
+                self.assertNotIn("investigation_revisions.json", archive.namelist())
