@@ -49,6 +49,38 @@ class ContextBudgetTests(unittest.TestCase):
         self.assertIn("Q1", visible)
         self.assertNotIn("Q2", visible)
 
+    def test_compaction_prioritizes_error_signals_and_keeps_required_observations(self):
+        context = {"episode_id": "episode-logs", "evidence": [{"id": "E1", "summary": "Crash loop alert"}], "alerts": []}
+        checks = [
+            {
+                "id": "Q1", "tool": "workload_state", "status": "completed", "required_observation": True,
+                "result": {"source": "Kubernetes API", "observations": [{
+                    "kind": "PodSpec", "name": "worker", "phase": "Running", "ready": False,
+                    "resources": [{"name": "worker", "limits": {"memory": "160Mi"}}],
+                    "container_states": [{"name": "worker", "restart_count": 4,
+                                          "last_state": {"terminated": {"reason": "Error", "exitCode": 1}}}],
+                }]},
+            },
+            {
+                "id": "Q2", "tool": "search_logs", "status": "completed", "required_observation": True,
+                "result": {"source": "OpenSearch", "scanned_lines": 101, "matching_patterns": 2, "patterns": [
+                    {"pattern": "Worker scheduler heartbeat", "count": 100,
+                     "examples": [{"level": "INFO", "message": "Worker scheduler heartbeat"}]},
+                    {"pattern": "Import decoder rejected document", "count": 1,
+                     "examples": [{"message": json.dumps({"level": "ERROR", "message": "Import decoder rejected document", "error": "Only base64 data is allowed"})}]},
+                ]},
+            },
+        ]
+
+        compact, visible = compact_for_model(context, checks, max_prompt_tokens=1800)
+
+        self.assertIn("Q1", visible)
+        self.assertIn("Q2", visible)
+        log_check = next(item for item in compact["prior_checks"] if item["id"] == "Q2")
+        signal = log_check["observation"]["top_signal"]
+        self.assertEqual(signal["level"], "ERROR")
+        self.assertEqual(signal["error"], "Only base64 data is allowed")
+
     def test_revision_priority_keeps_new_operator_evidence_visible(self):
         context = {
             "episode_id": "episode-3",

@@ -78,12 +78,97 @@ def _evidence_item(item: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in values.items() if value not in (None, "", [], {})}
 
 
+def _pattern_priority(item: dict[str, Any]) -> tuple[int, int, int]:
+    """Promote failure signatures above frequent healthy heartbeat templates."""
+
+    text = json.dumps(item, ensure_ascii=True, default=str).casefold()
+    failure_markers = (
+        "critical", "fatal", "error", "exception", "traceback", "panic", "failed",
+        "failure", "refused", "timeout", "oom", "crash", "sqlstate", "errno", "exit_code",
+    )
+    try:
+        count = int(item.get("count", 0))
+    except (TypeError, ValueError):
+        count = 0
+    return (int(any(marker in text for marker in failure_markers)), int(bool(item.get("fields"))), count)
+
+
+def _log_example(item: dict[str, Any]) -> dict[str, Any] | str | None:
+    """Extract the semantic portion of structured logs before applying a character cap."""
+
+    examples = item.get("examples") or []
+    example = examples[0] if examples else None
+    if not isinstance(example, dict):
+        return _short(example, 220) if example else None
+    message = str(example.get("message", ""))
+    try:
+        structured = json.loads(message)
+    except (TypeError, ValueError):
+        structured = None
+    if isinstance(structured, dict):
+        values = {key: structured.get(key) for key in (
+            "level", "message", "error", "error_type", "reason", "exit_code", "errno",
+            "sqlstate", "mysql_error_code", "status_code", "disposition", "payload_encoding",
+        )}
+        return {key: _short(value, 180) for key, value in values.items() if value not in (None, "")}
+    return {
+        "level": example.get("level"),
+        "message": _short(message, 220),
+    }
+
+
+def _log_observation(result: dict[str, Any]) -> dict[str, Any]:
+    """Keep a small, failure-first ledger from a bounded log query."""
+
+    patterns = [item for item in result.get("patterns", []) if isinstance(item, dict)]
+    patterns.sort(key=_pattern_priority, reverse=True)
+    primary = patterns[0] if patterns else {}
+    values = {
+        "matching_patterns": result.get("matching_patterns"),
+        "top_signal": _log_example(primary) if primary else None,
+        "occurrences": primary.get("count") if primary else None,
+        "sampled": True,
+    }
+    return {key: value for key, value in values.items() if value not in (None, "", [], {})}
+
+
+def _workload_observation(result: dict[str, Any]) -> dict[str, Any]:
+    """Preserve the termination and resource facts needed to avoid re-querying it."""
+
+    workloads = []
+    for item in result.get("observations", []):
+        if not isinstance(item, dict) or item.get("kind") != "PodSpec":
+            continue
+        resource = next((row for row in item.get("resources", []) if isinstance(row, dict)), {})
+        state = next((row for row in item.get("container_states", []) if isinstance(row, dict)), {})
+        terminated = state.get("last_state", {}).get("terminated", {}) if isinstance(state.get("last_state"), dict) else {}
+        workloads.append({
+            "ready": item.get("ready"),
+            "limits": resource.get("limits"),
+            "last_termination": {"reason": terminated.get("reason"), "exit_code": terminated.get("exitCode")},
+            "restart_count": state.get("restart_count"),
+        })
+    values = {
+        "declared_dependencies": [item.get("service") for item in result.get("declared_dependencies", [])
+                                  if isinstance(item, dict) and item.get("service")][:4],
+        "workloads": workloads,
+    }
+    return {key: value for key, value in values.items() if value not in (None, "", [], {})}
+
+
 def _check_item(check: dict[str, Any], latest: bool) -> dict[str, Any]:
-    result = _bounded(check.get("result"), max_items=8 if latest else 4)
+    raw_result = check.get("result") if isinstance(check.get("result"), dict) else {}
+    if check.get("tool") == "search_logs":
+        result = _log_observation(raw_result)
+    elif check.get("tool") == "workload_state":
+        result = _workload_observation(raw_result)
+    else:
+        result = _bounded(raw_result, max_items=8 if latest else 4)
     return {
         "id": check.get("id"),
         "tool": check.get("tool"),
         "status": check.get("status"),
+        "required_observation": bool(check.get("required_observation")),
         "question": _short(check.get("question"), 180),
         "distinguishes": _short(check.get("distinguishes"), 220),
         "observation": result,
@@ -158,8 +243,19 @@ def compact_for_model(
         if len(payload["evidence"]) > 3:
             payload["evidence"].pop()
             visible_ids = refresh_visible_ids()
-        elif len(payload["prior_checks"]) > 1:
-            payload["prior_checks"].pop(0)
+        elif len(payload["evidence"]) > 1 and len(payload["prior_checks"]) > 1 and all(
+            item.get("required_observation") for item in payload["prior_checks"]
+        ):
+            # Source reads are fresher and more discriminating than lower-priority
+            # retained summaries. Keep their structured form before trimming it.
+            payload["evidence"].pop()
+            visible_ids = refresh_visible_ids()
+        elif len(payload["prior_checks"]) > 1 and any(
+            not item.get("required_observation") for item in payload["prior_checks"]
+        ):
+            removable = next(index for index, item in enumerate(payload["prior_checks"])
+                             if not item.get("required_observation"))
+            payload["prior_checks"].pop(removable)
             visible_ids = refresh_visible_ids()
         elif payload.get("impact"):
             payload["impact"] = []
@@ -173,6 +269,12 @@ def compact_for_model(
             for item in payload["evidence"]:
                 item["summary"] = _short(item.get("summary"), 140)
                 item["title"] = _short(item.get("title"), 100)
+        elif any(item.get("question") or item.get("distinguishes") for item in payload["prior_checks"]):
+            # The tool name and compact observation remain; trim metadata before
+            # discarding a required observation's diagnostic signal.
+            for item in payload["prior_checks"]:
+                item.pop("question", None)
+                item.pop("distinguishes", None)
         elif any(
             item.get("observation")
             and (not isinstance(item.get("observation"), str) or len(item["observation"]) > 180)

@@ -232,6 +232,9 @@ class InvestigationEngineTests(unittest.TestCase):
         state, client = self.run_case([{"action": "finish", "assessment": assessment()}], max_checks=0)
         self.assertEqual(state["status"], "ready")
         self.assertEqual(client.requests[0].reasoning_effort, "none")
+        payload = json.loads(client.requests[0].messages[1]["content"])
+        self.assertEqual(payload["tools"], {})
+        self.assertEqual(payload["allowed_pods"], [])
 
     def test_full_request_including_instructions_and_catalogue_fits_the_input_cap(self):
         self.context["evidence"] = [

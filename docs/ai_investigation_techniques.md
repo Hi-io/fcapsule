@@ -264,7 +264,10 @@ Operators can raise the number of optional model-selected checks to four, for a 
 of seven calls when a repair is needed. The default per-investigation reserve is 12,000 tokens and the
 default full-request input cap is 2,100 tokens. The latter includes system instructions,
 the tool catalogue, citation IDs and selected evidence; it is not merely a cap on log
-text. The completion limit in Settings applies per call. Calls request JSON output
+text. Log-query compaction ranks failure signatures above frequent healthy heartbeats,
+and retains the compact termination, limit and declared-dependency facts from required
+observations before lower-priority retained summaries. A forced final assessment omits
+the unused tool catalogue. The completion limit in Settings applies per call. Calls request JSON output
 with reasoning disabled: the evidence contract, bounded dispatch table and final
 review are the safety controls, rather than hidden deliberation that can consume an
 entire response allowance. One schema repair is permitted only after the final review;
@@ -377,7 +380,7 @@ remain required. See [data privacy](data_privacy.md).
 Tests cover scope/argument rejection, missing sources, peer fallback, diagnostic
 code preservation, recurrence-candidate bounds, usage accounting, invalid citations,
 provider failure, bounded calls, full-request compaction, missing provider usage,
-background progress, restart recovery and deletion races. These tests do
+failure-signal preservation, background progress, restart recovery and deletion races. These tests do
 not establish general root-cause accuracy. Evaluation should compare the former
 single-call briefing and the new investigator on the same incidents, recording
 discriminating observations found, unsupported claims, operator usefulness,

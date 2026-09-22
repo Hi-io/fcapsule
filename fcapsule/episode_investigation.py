@@ -385,7 +385,8 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 state["status"] = "incomplete"
                 state["message"] = "Investigation time budget reached. Checks are retained."
                 break
-            payload, visible_evidence_ids = compact_payload({"allowed_pods": tools.pods, "tools": tools.CATALOG,
+            tools_for_turn = tools.CATALOG if turn < max_checks else {}
+            payload, visible_evidence_ids = compact_payload({"allowed_pods": tools.pods if tools_for_turn else [], "tools": tools_for_turn,
                        "remaining_optional_checks": max_checks - turn,
                        "available_evidence_ids": [], "validation_feedback": validation_feedback,
                        "instruction": (
