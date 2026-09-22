@@ -548,6 +548,24 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertEqual(len(context["evidence"]), 1)
         self.assertEqual(len(context["evidence"][0]["provenance"]), 2)
 
+    def test_episode_context_prioritizes_the_current_primary_incident(self):
+        earlier = copy.deepcopy(self.entries[0])
+        earlier["incident"]["incident_id"] = "earlier"
+        earlier["incident"]["started_at"] = "2026-09-20T12:00:00Z"
+        current = copy.deepcopy(self.entries[0])
+        current["incident"]["incident_id"] = "current"
+        current["incident"]["started_at"] = "2026-09-20T12:08:00Z"
+        current["report"]["supporting_evidence"] = [{
+            "evidence_id": "current-log", "type": "log_template", "title": "Current failure marker",
+            "summary": "The newly captured diagnostic error.", "time_range": {}, "representative_lines": [],
+        }]
+
+        context = episode_context({"episode_id": "episode", "primary_incident_id": "current"}, [earlier, current])
+
+        self.assertEqual(context["alerts"][0]["incident_id"], "current")
+        self.assertEqual(context["evidence"][0]["title"], "Current failure marker")
+        self.assertIn(context["evidence"][0]["id"], context["priority_evidence_ids"])
+
     def test_active_alert_does_not_inherit_legacy_capture_window_end(self):
         self.entries[0]["incident"].update(status="firing", ended_at="2026-09-20T12:10:00Z")
         context = episode_context({"episode_id": "episode"}, self.entries)

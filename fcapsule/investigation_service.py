@@ -367,7 +367,10 @@ class InvestigationService:
             media_evidence = self.plane.evidence.model_evidence(episode_id)
             context["evidence"].extend(media_evidence)
             if queued.get("revision_reason") == "evidence_added":
-                context["priority_evidence_ids"] = [item["id"] for item in media_evidence]
+                context["priority_evidence_ids"] = list(dict.fromkeys([
+                    *(context.get("priority_evidence_ids") or []),
+                    *(item["id"] for item in media_evidence),
+                ]))
             historical = self.historical_candidates(episode)
             context["historical_candidates"] = [
                 {key: item.get(key) for key in ("episode_id", "reference", "title", "started_at", "ended_at", "status", "resource")}

@@ -72,7 +72,15 @@ def log_patterns(logs: list[dict[str, Any]], terms: list[str] | None = None) -> 
 def episode_context(episode: dict[str, Any], entries: list[dict[str, Any]]) -> dict[str, Any]:
     evidence: dict[str, dict[str, Any]] = {}
     alerts = []
-    for entry in entries:
+    # A recurrence can reopen a retained operator episode. Put the primary
+    # incident first so bounded context selection investigates its latest
+    # evidence; older member reports are still available as non-current context.
+    primary_incident_id = str(episode.get("primary_incident_id") or "")
+    ordered_entries = sorted(
+        entries,
+        key=lambda entry: str(entry["incident"].get("incident_id")) != primary_incident_id,
+    )
+    for entry in ordered_entries:
         report = entry["report"]
         incident_id = entry["incident"]["incident_id"]
         alert_context = {**report["incident"], "incident_id": incident_id,
@@ -95,11 +103,20 @@ def episode_context(episode: dict[str, Any], entries: list[dict[str, Any]]) -> d
                     "alert": next((alert for alert in report.get("fault_alerts", []) if alert.get("evidence_id") == item["evidence_id"]), None),
                     "provenance": []}
             evidence[ref]["provenance"].append({"incident_id": incident_id, "evidence_id": item["evidence_id"]})
+    ordered_evidence = list(evidence.values())
+    priority_evidence_ids = []
+    if primary_incident_id:
+        for item in ordered_evidence:
+            if any(provenance.get("incident_id") == primary_incident_id for provenance in item["provenance"]):
+                item["revision_priority"] = True
+                priority_evidence_ids.append(item["id"])
+    ordered_evidence.sort(key=lambda item: not item.get("revision_priority", False))
+    alerts.sort(key=lambda item: str(item.get("incident_id")) != primary_incident_id)
     return scrub({"episode_id": episode["episode_id"], "live_capture": any(entry["incident"].get("source_kind") == "live" for entry in entries),
         "episode_lifecycle": {key: episode.get(key) for key in
                   ("status", "started_at", "ended_at", "last_activity_at")}, "alerts": alerts,
-        "evidence": list(evidence.values())[:80],
-        "impact": [item for entry in entries for item in entry["report"].get("impact", [])][:15],
+        "evidence": ordered_evidence[:80], "priority_evidence_ids": priority_evidence_ids,
+        "impact": [item for entry in ordered_entries for item in entry["report"].get("impact", [])][:15],
         "source_retention": "Unknown. Do not infer expiry from incident age or FCAPSule's own cleanup policy.",
         "grouping_basis": "Same application and temporal proximity only. Independent failure phases can share an episode. A resolved alert followed by another alert is not a demonstrated causal chain.",
         "limits": "Time grouping is not causation. Measurements are sampled. Current state is not historical state."})
