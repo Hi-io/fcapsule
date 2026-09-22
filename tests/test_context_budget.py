@@ -115,6 +115,36 @@ class ContextBudgetTests(unittest.TestCase):
         self.assertIn("A-new-image", compact["priority_evidence_ids"])
         self.assertIn("A-new-image", visible)
 
+    def test_diagnostic_log_evidence_survives_a_large_heartbeat_ledger(self):
+        heartbeats = [
+            {"id": f"E-heartbeat-{index}", "domain": "log_template",
+             "title": "Worker scheduler heartbeat", "summary": "Routine healthy heartbeat."}
+            for index in range(35)
+        ]
+        context = {
+            "episode_id": "episode-priority",
+            "evidence": [
+                {"id": "E-alert", "domain": "alert", "title": "Worker OOMKilled",
+                 "summary": "The worker was OOMKilled."},
+                *heartbeats,
+                {"id": "E-buffered", "domain": "log_template",
+                 "title": "Export page encoded with buffered_bytes",
+                 "summary": "Buffered export pages grew before the OOM termination."},
+            ],
+            "alerts": [],
+        }
+
+        compact, visible = compact_for_model(
+            context, [], max_prompt_tokens=1200, priority_evidence_ids=["E-alert"],
+        )
+
+        self.assertEqual(compact["evidence"][0]["id"], "E-alert")
+        self.assertIn("E-buffered", visible)
+        self.assertLess(
+            [item["id"] for item in compact["evidence"]].index("E-buffered"),
+            [item["id"] for item in compact["evidence"]].index("E-heartbeat-0"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

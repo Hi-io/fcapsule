@@ -78,6 +78,28 @@ def _evidence_item(item: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in values.items() if value not in (None, "", [], {})}
 
 
+def _evidence_priority(item: dict[str, Any], priority_ids: set[str]) -> tuple[int, int, int, int]:
+    """Retain discriminating source evidence ahead of repetitive telemetry."""
+
+    text = json.dumps(item, ensure_ascii=True, default=str).casefold()
+    domain = str(item.get("domain") or "")
+    failure_markers = (
+        "critical", "fatal", "error", "exception", "traceback", "panic", "failed",
+        "failure", "refused", "timeout", "oom", "crash", "sqlstate", "errno", "exit_code",
+    )
+    diagnostic_markers = (
+        "buffered", "allocated", "memory", "throttl", "pbkdf", "kdf", "rounds",
+        "limit", "retry", "rejected", "mismatch", "schema", "version", "endpoint",
+        "route", "authorization", "connection", "deadlock", "lock wait", "constraint",
+    )
+    return (
+        0 if str(item.get("id")) in priority_ids else 1,
+        -int(any(marker in text for marker in failure_markers)),
+        -int(any(marker in text for marker in diagnostic_markers)),
+        -int(domain == "log_template"),
+    )
+
+
 def _pattern_priority(item: dict[str, Any]) -> tuple[int, int, int, int]:
     """Promote failure signatures above frequent healthy heartbeat templates."""
 
@@ -202,9 +224,10 @@ def compact_for_model(
 
     priority_ids = {str(item) for item in priority_evidence_ids or []}
     source_evidence = list(context.get("evidence") or [])
-    # A user-requested revision must be able to see the supplied derived evidence.
-    # Retain the original order within priority and ordinary evidence for reproducibility.
-    source_evidence.sort(key=lambda item: 0 if str(item.get("id")) in priority_ids else 1)
+    # A user-requested revision stays first, then compact the source ledger around
+    # failure signatures rather than high-volume heartbeats. This is especially
+    # important when a realistic incident contains thousands of routine lines.
+    source_evidence.sort(key=lambda item: _evidence_priority(item, priority_ids))
     evidence = []
     for item in source_evidence[:28]:
         compact_item = _evidence_item(item)
