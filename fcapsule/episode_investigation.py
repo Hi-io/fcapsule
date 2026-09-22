@@ -169,7 +169,8 @@ REVIEW_INSTRUCTION = """Evidence review only. Return the corrected complete {"ac
 Treat the draft as claims, not evidence. Remove unsupported causal, recovery and numeric claims. Do not call a sampled
 component a peak, or claim a value below a limit exceeded it. Keep current versus historical state and alert detection
 time versus failure time distinct. convert memory quantities to bytes before comparing them. State when the actual peak remains unsampled.
-Preserve valid cited facts and uncertainty. No private deliberation."""
+Preserve valid cited facts and uncertainty. Every assessment, hypothesis, connection, and historical-comparison citation
+array must contain one to eight visible evidence references. No private deliberation."""
 
 
 REVIEW_REPAIR_INSTRUCTION = """Structured repair only. Return one complete {"action":"finish","assessment":{...}} JSON;
@@ -222,7 +223,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
     if max_prompt_tokens < 1200 or max_prompt_tokens > 12000:
         raise ValueError("max_prompt_tokens must be between 1200 and 12000")
     state = {"version": "1", "episode_id": context["episode_id"], "status": "running", "started_at": now(),
-              "policy_version": "episode-investigation-1.13", "max_completion_tokens_per_call": max_tokens,
+              "policy_version": "episode-investigation-1.14", "max_completion_tokens_per_call": max_tokens,
              "model": model, "context": context, "checks": [], "calls": [], "assessment": None,
              "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
              "token_budget": {"maximum_total_tokens": max_total_tokens, "maximum_prompt_tokens": max_prompt_tokens,
@@ -415,9 +416,11 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 call["validation_error"] = str(error)[:240]
                 refs = candidate.get("evidence_ids") if isinstance(candidate, dict) else None
                 if (turn == max_checks and str(error).startswith("Each evidence_ids array must contain")
-                        and isinstance(refs, list) and 8 < len(refs) <= 32
+                        and isinstance(refs, list) and 1 <= len(refs) <= 32
                         and all(isinstance(ref, str) and ref in evidence_ids for ref in refs)):
-                    # Use the already reserved review call; never trim or publish an invalid draft.
+                    # Use the already reserved review call for citation-shape errors. The
+                    # reviewer may only use visible references; it cannot query sources,
+                    # add facts, or publish the invalid draft.
                     review_candidate = candidate
                     state["draft_validation_error"] = str(error)
                     break

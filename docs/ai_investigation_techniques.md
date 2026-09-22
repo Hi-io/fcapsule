@@ -340,13 +340,15 @@ solely because sampled memory is low. These interpretations follow the
 and [Kubernetes resource behavior](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/).
 They constrain interpretation, not the observed outcome of any particular case.
 
-Policy `episode-investigation-1.13` uses structured output without hidden reasoning
+Policy `episode-investigation-1.14` uses structured output without hidden reasoning
 effort for both investigation and the already reserved final review. Explicit byte
 conversion, component-versus-total memory and termination-versus-alert time checks
 remain in the review instruction. A bounded, cited historical comparison is required
-when a deterministic recurrence candidate exists. One invalid review response may use
-a bounded schema-only repair against the same evidence; any further invalid response
-becomes a grounded abstention rather than a claimed conclusion. Repeated occurrences of the same
+when a deterministic recurrence candidate exists. A final model draft with a citation-shape
+omission can enter the already-reserved evidence review; it may only use the visible
+evidence references. One invalid review response may then use a bounded schema-only
+repair against the same evidence; any further invalid response becomes a grounded
+abstention rather than a claimed conclusion. Repeated occurrences of the same
 alert are retained as recurrence evidence. For distinct alert identities, a missing
 relationship becomes a cited `no_link_established` structural abstention, never an
 inferred cause. The review has the same call and completion budget and is still

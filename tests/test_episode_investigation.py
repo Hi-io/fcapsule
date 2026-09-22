@@ -151,6 +151,19 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(len(state["assessment"]["evidence_ids"]), 8)
         self.assertFalse(any(item["status"] == "ready" and item["assessment"] == draft for item in self.progress))
 
+    def test_initial_nested_citation_omission_uses_the_reserved_evidence_review(self):
+        draft = assessment()
+        draft["hypotheses"][0]["evidence_ids"] = []
+        state, client = self.run_case([
+            {"action": "finish", "assessment": draft},
+            {"action": "finish", "assessment": assessment()},
+        ], max_checks=0)
+        self.assertEqual(state["status"], "ready")
+        self.assertTrue(state["review"]["schema_repair"])
+        self.assertEqual(len(client.requests), 2)
+        self.assertIn("validation_error", state["calls"][0])
+        self.assertEqual(state["calls"][-1]["phase"], "evidence_review")
+
     def test_overflow_with_unknown_citations_is_not_silently_repaired(self):
         draft = assessment()
         draft["evidence_ids"] = ["Q001"] * 8 + ["invented"]
