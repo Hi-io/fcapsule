@@ -442,7 +442,7 @@ class FCAPSuleStore:
                 ),
             )
             if str(payload.get("status", "firing")).lower() != "pending":
-                self._assign_episode(connection, incident_id)
+                self._assign_episode(connection, incident_id, observed_at=now)
             connection.execute(
                 "UPDATE applications SET status = ?, updated_at = ? WHERE app_id = ?",
                 ("degraded", now, payload["app_id"]),
@@ -492,13 +492,15 @@ class FCAPSuleStore:
         for row in rows:
             self._refresh_episode(connection, str(row["episode_id"]))
 
-    def _assign_episode(self, connection: sqlite3.Connection, incident_id: str) -> str:
+    def _assign_episode(
+        self, connection: sqlite3.Connection, incident_id: str, observed_at: str | None = None
+    ) -> str:
         linked = connection.execute(
             "SELECT episode_id FROM episode_incidents WHERE incident_id = ?", (incident_id,)
         ).fetchone()
         if linked:
             episode_id = str(linked["episode_id"])
-            self._refresh_episode(connection, episode_id)
+            self._refresh_episode(connection, episode_id, observed_at=observed_at)
             return episode_id
 
         incident = connection.execute("SELECT * FROM incidents WHERE incident_id = ?", (incident_id,)).fetchone()
@@ -511,9 +513,15 @@ class FCAPSuleStore:
         candidate = connection.execute(
             """
             SELECT episode_id
-            FROM incident_episodes
+            FROM incident_episodes episode
             WHERE app_id = ? AND archived_at IS NULL
-              AND last_activity_at >= ? AND started_at <= ?
+              AND EXISTS (
+                  SELECT 1
+                  FROM episode_incidents membership
+                  JOIN incidents member ON member.incident_id = membership.incident_id
+                  WHERE membership.episode_id = episode.episode_id
+                    AND member.started_at >= ? AND member.started_at <= ?
+              )
             ORDER BY last_activity_at DESC
             LIMIT 1
             """,
@@ -538,7 +546,7 @@ class FCAPSuleStore:
                     incident["summary"] or incident["scenario"],
                     "active" if str(incident["status"]).lower() == "firing" else "resolved",
                     incident["severity"],
-                    started_at,
+                    observed_at or str(incident["created_at"]),
                     started_at,
                     None if str(incident["status"]).lower() == "firing" else incident["ended_at"],
                     incident_id,
@@ -553,10 +561,12 @@ class FCAPSuleStore:
             "INSERT OR IGNORE INTO episode_incidents (episode_id, incident_id) VALUES (?, ?)",
             (episode_id, incident_id),
         )
-        self._refresh_episode(connection, episode_id)
+        self._refresh_episode(connection, episode_id, observed_at=observed_at)
         return episode_id
 
-    def _refresh_episode(self, connection: sqlite3.Connection, episode_id: str) -> None:
+    def _refresh_episode(
+        self, connection: sqlite3.Connection, episode_id: str, observed_at: str | None = None
+    ) -> None:
         signals = connection.execute(
             """
             SELECT i.* FROM incidents i
@@ -576,6 +586,9 @@ class FCAPSuleStore:
         )
         active = bool(firing)
         ended_values = [str(item["ended_at"]) for item in signals if item["ended_at"]]
+        activity_values = [str(item["created_at"]) for item in signals]
+        if observed_at:
+            activity_values.append(observed_at)
         connection.execute(
             """
             UPDATE incident_episodes
@@ -589,7 +602,7 @@ class FCAPSuleStore:
                 "active" if active else "resolved",
                 primary["severity"],
                 min(str(item["started_at"]) for item in signals),
-                max(str(item["started_at"]) for item in signals),
+                max(activity_values),
                 None if active else (max(ended_values) if ended_values else max(str(item["started_at"]) for item in signals)),
                 primary["incident_id"],
                 utc_now(),

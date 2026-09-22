@@ -64,8 +64,8 @@ usable decision. The final review follows the same rule.
 If a model requests an already-completed automatic or model-selected check, FCAPSule
 records the protocol correction and uses the next already-budgeted decision turn to
 finish from the retained observation. It does not execute the source query twice or
-expand the call budget. A second invalid repeat remains incomplete rather than being
-silently repaired.
+expand the call budget. A second invalid repeat becomes an explicit, evidence-cited
+inconclusive result rather than being silently repaired or presented as a diagnosis.
 
 The evidence reference space distinguishes initial capture records (`E...`) from
 executed checks (`Q001`, `Q002`, etc.). Failed checks cannot be cited as successful
@@ -85,8 +85,9 @@ and all content, bounds and reference validations still apply.
 If that final review preserves a conclusion but produces malformed citation structure,
 FCAPSule may make **one** bounded schema-repair call. It receives the rejected review,
 the validation error and the same visible evidence IDs. It cannot call a source or add
-claims, numbers or references; a second invalid result remains incomplete. This makes a
-provider formatting lapse recoverable without treating the original draft as approved.
+claims, numbers or references; a second invalid result becomes an explicit inconclusive
+result. This makes a provider formatting lapse recoverable without treating the original
+draft as approved.
 
 #### Service-Scoped Discovery Alerts
 
@@ -282,16 +283,19 @@ serve episodes. There is no currency budget or global provider rate limiter yet.
 
 `InvestigationService` coordinates work using the existing control-plane lock and
 worker pool. A report fingerprint avoids rerunning an unchanged completed or
-incomplete attempt automatically. A new episode member schedules a new joint
+inconclusive attempt automatically. A new episode member schedules a new joint
 assessment after its report is ready. Members arriving during a running attempt
 are coalesced into a follow-up attempt rather than parallel duplicate work.
 
 State is atomically replaced under `state_dir/investigations/<episode-hash>.json`.
-Statuses are `not_started`, `not_configured`, `waiting`, `queued`, `running`, `ready`
-and `incomplete`. Startup resumes interrupted retained work for unarchived episodes.
-A failed unchanged attempt requires explicit Reassess; it is not retried forever.
+Statuses are `not_started`, `not_configured`, `waiting`, `queued`, `running`, `ready`,
+`inconclusive` and `incomplete`. `inconclusive` is a terminal, evidence-preserving
+abstention: FCAPSule shows the retained evidence and a safe next action without claiming a
+cause. `incomplete` remains reserved for interrupted work that cannot produce that result.
+Startup resumes interrupted retained work for unarchived episodes. An unchanged terminal
+attempt requires explicit Reassess; it is not retried forever.
 
-Completed/incomplete attempts copy `episode_investigation.json` into participating
+Completed, inconclusive and incomplete attempts copy `episode_investigation.json` into participating
 capsules and rebuild the ZIP. `investigation_revisions.json` includes portable,
 derived revision details (assessment, bounded checks, call audit, budget and evidence
 manifest) without copying raw uploaded media. Up to three earlier attempt records,
@@ -340,7 +344,7 @@ conversion, component-versus-total memory and termination-versus-alert time chec
 remain in the review instruction. A bounded, cited historical comparison is required
 when a deterministic recurrence candidate exists. One invalid review response may use
 a bounded schema-only repair against the same evidence; any further invalid response
-remains incomplete. Repeated occurrences of the same
+becomes a grounded abstention rather than a claimed conclusion. Repeated occurrences of the same
 alert are retained as recurrence evidence, while relationship fields are required only
 for distinct alert identities. The review has the same call and completion budget and
 is still model-assisted consistency review, not a deterministic numerical validator.

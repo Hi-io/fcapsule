@@ -71,20 +71,22 @@ class InvestigationEngineTests(unittest.TestCase):
 
     def test_invalid_citation_never_becomes_ready(self):
         state, _ = self.run_case([{"action": "finish", "assessment": assessment("Q999")}], max_checks=0)
-        self.assertEqual(state["status"], "incomplete")
-        self.assertIsNone(state["assessment"])
+        self.assertEqual(state["status"], "inconclusive")
+        self.assertEqual(state["assessment"]["provenance"], "deterministic_abstention")
         self.assertEqual(state["usage"]["total_tokens"], 130)
 
     def test_unavailable_query_is_not_citable(self):
         self.kit.execute.side_effect = RuntimeError("password=never-persist-this")
         state, _ = self.run_case([{"action": "finish", "assessment": assessment()}], max_checks=0)
         self.assertEqual(state["checks"][0]["status"], "unavailable")
-        self.assertEqual(state["status"], "incomplete")
+        self.assertEqual(state["status"], "inconclusive")
+        self.assertEqual(state["assessment"]["hypotheses"][0]["status"], "unresolved")
         self.assertNotIn("never-persist", json.dumps(state))
 
     def test_provider_failure_keeps_checks_and_marks_unknown_usage(self):
         state, _ = self.run_case([RuntimeError("provider failed password=do-not-save")])
-        self.assertEqual(state["status"], "incomplete")
+        self.assertEqual(state["status"], "inconclusive")
+        self.assertTrue(state["assessment"]["next_action"])
         self.assertFalse(state["usage"]["complete"])
         self.assertEqual(state["checks"][0]["status"], "completed")
         self.assertNotIn("do-not-save", json.dumps(state))
@@ -153,7 +155,8 @@ class InvestigationEngineTests(unittest.TestCase):
         draft = assessment()
         draft["evidence_ids"] = ["Q001"] * 8 + ["invented"]
         state, client = self.run_case([{"action": "finish", "assessment": draft}], max_checks=0)
-        self.assertEqual(state["status"], "incomplete")
+        self.assertEqual(state["status"], "inconclusive")
+        self.assertNotEqual(state["assessment"], draft)
         self.assertEqual(len(client.requests), 1)
 
     def test_review_accepts_misplaced_arrays_and_records_original_layout(self):
@@ -251,7 +254,8 @@ class InvestigationEngineTests(unittest.TestCase):
         state, client = self.run_case([decision, decision], max_checks=1)
         self.assertEqual(len(client.requests), 2)
         self.assertEqual(len(state["checks"]), 2)
-        self.assertEqual(state["status"], "incomplete")
+        self.assertEqual(state["status"], "inconclusive")
+        self.assertEqual(state["stop_reason"], "validated_assessment_unavailable")
         self.kit.execute.reset_mock()
         state, _ = self.run_case([{**decision, "tool": "kubectl_exec"}])
         self.assertEqual(self.kit.execute.call_count, 1)  # Preservation only.

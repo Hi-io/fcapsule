@@ -122,7 +122,7 @@ function filteredEpisodes(items, applications) {
     if (queueFilters.namespace && application?.namespace !== queueFilters.namespace) return false;
     if (queueFilters.scope && target !== queueFilters.scope) return false;
     if (queueFilters.status && item.status !== queueFilters.status) return false;
-    if (cutoff && now - new Date(item.started_at).getTime() > cutoff) return false;
+    if (cutoff && now - new Date(item.last_activity_at || item.started_at).getTime() > cutoff) return false;
     if (!needle) return true;
     const references = (item.signals || []).flatMap(signal => [signal.reference, signal.incident_id]);
     return [item.reference, item.episode_id, item.primary_incident_id, ...references, item.title, target, application?.name, application?.namespace, item.status]
@@ -765,10 +765,12 @@ function briefingPanel(payload) {
   const run = payload.investigation || {status:'not_started', episode_id:selectedEpisodeId};
   const assessment = run.assessment;
   const loading = ['queued','running','waiting'].includes(run.status);
-  const saved = run.finished_at ? (run.status === 'ready' ? 'Assessment ready ' : 'Last attempt ') + formatDate(run.finished_at) : '';
+  const saved = run.finished_at ? (run.status === 'ready' ? 'Assessment ready ' : run.status === 'inconclusive' ? 'Assessment inconclusive ' : 'Last attempt ') + formatDate(run.finished_at) : '';
   const header = '<div class="section-heading"><h3>Episode assessment</h3><span class="queue-note">' + safe([run.model, saved].filter(Boolean).join(' · ')) + '</span></div>';
   const incompleteNote = run.status === 'incomplete'
     ? '<details class="assessment-note"><summary>Why this needs attention</summary><p>The last attempt stopped before a conclusion met the evidence contract. Retained observations below are still available.</p>' + (run.validation_error ? '<small>' + safe(run.validation_error) + '</small>' : '') + '</details>' : '';
+  const inconclusiveNote = run.status === 'inconclusive'
+    ? '<details class="assessment-note" open><summary>Why no cause is asserted</summary><p>This is an evidence-preserving abstention, not a diagnosis. The retained observations remain available for review and reassessment.</p></details>' : '';
   if (!assessment) return '<section class="briefing">' + header + '<div class="analysis-state" role="status" aria-live="polite">' +
     (loading ? '<span class="spinner"></span>' : '') + '<div><strong>' + (loading ? 'Investigating' : run.status === 'not_configured' ? 'Provider key required' : run.status === 'incomplete' ? 'Investigation needs attention' : 'No validated conclusion yet') + '</strong><p>' + safe(loading ? (run.message || 'Checking retained evidence and bounded source observations.') : run.status === 'incomplete' ? 'Review the retained observations, then reassess when the missing discriminator is available.' : run.message || 'Retained evidence is available below.') + '</p>' + incompleteNote +
     (!loading ? run.status === 'not_configured' ? '<a href="/settings">Open Settings</a>' : '<button class="secondary" data-investigate="' + safe(run.episode_id) + '">Reassess episode</button>' : '') + '</div></div></section>';
@@ -779,7 +781,7 @@ function briefingPanel(payload) {
   const historyCandidate = run.context?.historical_candidates?.find(item => item.episode_id === history?.episode_id);
   const historyHtml = history ? '<section class="history-comparison"><div><span class="text-label">Related history</span><h4>' + safe(history.status.replaceAll('_',' ')) + '</h4><p>' + safe(history.summary) + '</p></div><div><span class="incident-reference">' + safe(historyCandidate?.reference || history.episode_id) + '</span><div class="citations">' + investigationRefs(run, history.evidence_ids) + '</div></div></section>' : '';
   const findings = (run.findings || []).map((item, index) => '<article class="finding ' + (index === 0 ? 'primary' : '') + '"><div class="section-heading"><div><span class="text-label">' + safe(String(item.state || 'observed').replaceAll('_',' ')) + '</span><h4>' + safe(item.title) + '</h4></div><span class="finding-category">' + safe(String(item.category || '').replaceAll('_',' ')) + '</span></div><p>' + safe(item.summary) + '</p><div class="citations">' + investigationRefs(run, item.evidence_ids) + '</div><p class="finding-next"><strong>Verify next:</strong> ' + safe(item.next_check) + '</p>' + (item.observations?.length ? disclosure('finding-' + safe(item.id), 'Observed details', item.observations.map(observation => '<pre class="compact-data">' + safe(JSON.stringify(observation, null, 2)) + '</pre>').join(''), item.observations.length) : '') + '</article>').join('');
-  return '<section class="briefing">' + header + (findings ? '<div class="findings">' + findings + '</div>' : '') + '<p class="brief-lead">' + safe(assessment.summary) + '</p><h4>Likely explanation</h4><p>' + safe(assessment.likely_mechanism) + '</p>' +
+  return '<section class="briefing">' + header + inconclusiveNote + (findings ? '<div class="findings">' + findings + '</div>' : '') + '<p class="brief-lead">' + safe(assessment.summary) + '</p><h4>Likely explanation</h4><p>' + safe(assessment.likely_mechanism) + '</p>' +
     '<div class="next-check"><h4>Next action</h4><p><strong>' + safe(assessment.next_action) + '</strong></p><p><span class="text-label">What would confirm it</span>' + safe(assessment.expected_finding) + '</p></div>' +
     '<p class="uncertainty"><strong>Still unconfirmed:</strong> ' + safe(assessment.uncertainty) + '</p><div class="citations">' + investigationRefs(run,assessment.evidence_ids) + '</div>' +
     historyHtml +

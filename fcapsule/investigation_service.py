@@ -65,7 +65,7 @@ class InvestigationService:
                 "state_path": str(path),
                 "summary": {key: assessment.get(key) for key in ("summary", "likely_mechanism", "uncertainty") if assessment.get(key)},
                 "created_at": state.get("queued_at") or state.get("started_at") or now(),
-                "completed_at": state.get("finished_at") if state.get("status") in {"ready", "incomplete", "not_configured"} else None,
+                "completed_at": state.get("finished_at") if state.get("status") in {"ready", "incomplete", "inconclusive", "not_configured"} else None,
             }
         )
 
@@ -303,7 +303,7 @@ class InvestigationService:
             previous = self.read(episode_id)
             if any(call.get("status") == "running" for call in previous.get("calls", [])):
                 previous.setdefault("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})["complete"] = False
-            if not retry and previous.get("input_fingerprint") == fingerprint and previous.get("status") in {"ready", "incomplete"}:
+            if not retry and previous.get("input_fingerprint") == fingerprint and previous.get("status") in {"ready", "incomplete", "inconclusive"}:
                 return previous
             revision_id = f"revision-{uuid.uuid4().hex}"
             state = {"version": "1", "episode_id": episode_id, "revision_id": revision_id,
@@ -393,11 +393,11 @@ class InvestigationService:
                                  revision_id=queued.get("revision_id"), parent_revision_id=queued.get("parent_revision_id"),
                                  revision_reason=queued.get("revision_reason"), source_mode=queued.get("source_mode"),
                                  evidence_manifest=evidence_manifest)
-                    if state.get("status") in {"ready", "incomplete"}:
+                    if state.get("status") in {"ready", "incomplete", "inconclusive"}:
                         state["findings"] = derive_findings(state)
                     self.plane._write_briefing_state(self.path(episode_id), state)
                     self._record_revision(state)
-                    if state["status"] in {"ready", "incomplete"}:
+                    if state["status"] in {"ready", "incomplete", "inconclusive"}:
                         for entry in entries:
                             root = Path(entry["record"]["output_dir"])
                             self.plane._write_briefing_state(root / "episode_investigation.json", state)

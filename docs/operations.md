@@ -29,7 +29,9 @@ The view shows:
 - a short **Needs attention** strip only when there is an active incident, a
   retained recurring issue, or a material evidence-based difference from a prior
   occurrence; every item opens its episode;
-- an episode queue ordered by latest activity;
+- an episode queue ordered by latest observed activity, so a newly received
+  member returns its existing episode to the top even when the source alert
+  carries an earlier timestamp;
 - active episodes prioritized before resolved ones;
 - severity and lifecycle state, affected resource, latest signal time, related-signal count, and report readiness; node alerts prefer the captured node-exporter Pod's Kubernetes node over collector or IP labels;
 - a compact recurrence badge when the same application, affected resource and
@@ -75,7 +77,7 @@ For Kubernetes installation and source prerequisites, use `docs/kubernetes_deplo
 
 ### Automatic AI Assessment
 
-When a provider key is configured, retaining member reports queues one episode investigation. Two workers run these jobs without blocking capture. The default investigator preserves mutable workload state, lets the model select one read-only check, then produces and reviews a cited assessment. Operators can raise the bounded check count to four in Settings. Overview refreshes progress while the model works. A missing key points to Settings; incomplete attempts retain observations and offer Reassess. Startup resumes interrupted unarchived work; failed unchanged attempts are not automatically retried. New members trigger a fresh joint assessment after their reports are ready.
+When a provider key is configured, retaining member reports queues one episode investigation. Two workers run these jobs without blocking capture. The default investigator preserves mutable workload state, lets the model select one read-only check, then produces and reviews a cited assessment. Operators can raise the bounded check count to four in Settings. Overview refreshes progress while the model works. A missing key points to Settings; an inconclusive attempt retains observations, states that no cause is asserted, and offers Reassess. Startup resumes interrupted unarchived work; failed unchanged attempts are not automatically retried. New members trigger a fresh joint assessment after their reports are ready.
 
 The request includes retained alerts/rules, performance findings, log examples, configuration and subsequent check observations. The final response contains a likely mechanism, one next action, expected finding, uncertainty, competing hypotheses and alert relationships. For a recurring episode, it must inspect one bounded prior capsule and explicitly classify the historical comparison as similar, changed, or still insufficiently supported. The prior episode can include an **Earlier hypothesis, not proof** label; that is model prose from the earlier run and is never citable evidence. Citation validation confirms references exist, not causal truth. No remediation or application replication is executed. `episode_investigation.json` includes checks, assessment, usage and up to three previous attempts; it is copied to participating capsule archives on completion. Expand the token count for provider usage and the safety reserve. See [techniques and limits](ai_investigation_techniques.md).
 

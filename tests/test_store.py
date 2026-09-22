@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from fcapsule.store import FCAPSuleStore
 
@@ -108,6 +109,35 @@ class StoreTests(unittest.TestCase):
             self.assertTrue(store.activate_live_incident("pending-signal"))
             self.assertEqual(store.list_episodes()[0]["status"], "active")
             self.assertEqual(store.list_episodes()[0]["signal_count"], 1)
+
+    def test_late_observation_reactivates_an_older_episode_at_the_top_of_the_queue(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = FCAPSuleStore(Path(directory) / "state.db")
+            store.upsert_application("checkout", "Checkout", "shop", "local")
+
+            def record(incident_id: str, started_at: str, observed_at: str) -> None:
+                with patch("fcapsule.store.utc_now", return_value=observed_at):
+                    store.record_incident(
+                        {
+                            "incident_id": incident_id,
+                            "app_id": "checkout",
+                            "scenario": "Checkout requests are failing",
+                            "status": "firing",
+                            "severity": "warning",
+                            "started_at": started_at,
+                            "case_dir": f"/tmp/{incident_id}",
+                            "summary": "Checkout requests are failing",
+                        }
+                    )
+
+            record("early", "2026-09-20T10:00:00Z", "2026-09-23T10:00:00Z")
+            record("newer-episode", "2026-09-20T10:30:00Z", "2026-09-23T10:01:00Z")
+            record("late-arrival", "2026-09-20T10:04:00Z", "2026-09-23T10:02:00Z")
+
+            episodes = store.list_episodes()
+            self.assertEqual(episodes[0]["primary_incident_id"], "late-arrival")
+            self.assertEqual(episodes[0]["last_activity_at"], "2026-09-23T10:02:00Z")
+            self.assertEqual([signal["incident_id"] for signal in episodes[0]["signals"]], ["early", "late-arrival"])
 
     def test_resolved_critical_alert_does_not_title_a_different_active_failure(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -165,6 +165,33 @@ and uncertainty. Correct the stated validation error using only the available ev
 connection, and historical comparison citation array must contain one to eight available IDs. No private deliberation."""
 
 
+def inconclusive_assessment(evidence_ids: set[str], error: Exception | None = None) -> dict[str, Any]:
+    """Return an honest, cited abstention when a model result cannot be validated."""
+
+    reference = next(iter(sorted(evidence_ids)), "E001")
+    limitation = (
+        "The model provider did not return a usable assessment during this attempt."
+        if isinstance(error, (OSError, TimeoutError)) else
+        "The returned assessment did not satisfy FCAPSule's grounding and structure contract."
+    )
+    return {
+        "provenance": "deterministic_abstention",
+        "summary": "FCAPSule preserved the incident evidence, but no validated root-cause conclusion is available.",
+        "likely_mechanism": "No mechanism is asserted until a grounded assessment can cite the retained observations.",
+        "next_action": "Review the retained evidence, confirm source availability, then reassess this episode.",
+        "expected_finding": "A reassessment should cite an observation that supports or weakens a specific failure mechanism.",
+        "uncertainty": limitation,
+        "evidence_ids": [reference],
+        "hypotheses": [{
+            "explanation": "The incident cause remains unresolved.",
+            "status": "unresolved",
+            "reason": limitation,
+            "evidence_ids": [reference],
+        }],
+        "connections": [],
+    }
+
+
 def run_investigation(context: dict[str, Any], tools: InvestigationTools, model: str, max_tokens: int,
                       publish: Callable[[dict[str, Any]], None], max_checks: int | None = None,
                       max_total_tokens: int | None = None, max_prompt_tokens: int | None = None,
@@ -458,9 +485,16 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             state.update(assessment=reviewed, status="ready", review={"status": "completed", "changed": reviewed != draft,
                          "schema_repair": review_candidate is not None or repaired_review,
                          "limitation": "Model-assisted consistency review, not independent proof."})
+        if state["status"] != "ready" and state["assessment"] is None:
+            state.update(
+                status="inconclusive",
+                assessment=inconclusive_assessment(evidence_ids),
+                message="No validated conclusion was produced. Retained evidence and a safe next step are available.",
+            )
     except Exception as error:
-        state["status"] = "incomplete"
-        state["message"] = "No validated conclusion was produced. Retained observations remain available; retry is explicit."
+        state["status"] = "inconclusive"
+        state["assessment"] = inconclusive_assessment(evidence_ids, error)
+        state["message"] = "No validated conclusion was produced. Retained evidence and a safe next step are available."
         state["error_type"] = type(error).__name__
         if state.get("review", {}).get("status") == "running":
             state["review"]["status"] = "failed"
@@ -471,6 +505,10 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             state["usage"]["complete"] = False
     state["finished_at"] = now()
     state["elapsed_seconds"] = round(time.monotonic() - started, 2)
-    state["stop_reason"] = "assessment_complete" if state["status"] == "ready" else "budget_or_validation_or_provider_limit"
+    state["stop_reason"] = (
+        "assessment_complete" if state["status"] == "ready" else
+        "validated_assessment_unavailable" if state["status"] == "inconclusive" else
+        "budget_or_validation_or_provider_limit"
+    )
     publish(state)
     return state
