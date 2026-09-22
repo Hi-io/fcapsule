@@ -42,8 +42,15 @@ def validate_assessment(
             raise ValueError("Assessment text is missing or exceeds limits")
         result[key] = text.strip()
 
-    def citations(item):
+    def citations(item, fallback: list[str] | None = None):
         refs = item.get("evidence_ids")
+        # An unresolved alternative can honestly state that its discriminator was
+        # not established. When a model otherwise supplies a grounded assessment
+        # but leaves that one array empty, retain the assessment and anchor the
+        # abstention to its already-cited incident observations. This is a narrow
+        # structural default, never a causal inference or a fabricated reference.
+        if refs == [] and item.get("status") == "unresolved" and fallback:
+            refs = list(fallback)
         if not isinstance(refs, list):
             raise ValueError("Each evidence_ids array must contain one to eight references; keep only the most diagnostic")
         unique_refs = list(dict.fromkeys(refs))
@@ -64,7 +71,7 @@ def validate_assessment(
         if any(not isinstance(item.get(key), str) or not 1 <= len(item[key]) <= 500 for key in ("explanation", "reason")):
             raise ValueError("Invalid hypothesis explanation")
         result["hypotheses"].append({"explanation": item["explanation"], "reason": item["reason"],
-                                     "status": item["status"], "evidence_ids": citations(item)})
+                                     "status": item["status"], "evidence_ids": citations(item, result["evidence_ids"])})
     connections = value.get("connections", [])
     if not isinstance(connections, list) or len(connections) > 6:
         raise ValueError("Invalid alert connections")

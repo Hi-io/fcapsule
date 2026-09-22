@@ -291,6 +291,19 @@ class InvestigationEngineTests(unittest.TestCase):
         connection = validate_assessment(value, {"Q001"}, {"one", "two"})["connections"][0]
         self.assertEqual(connection["provenance"], "model")
 
+    def test_unresolved_hypothesis_without_citations_inherits_assessment_evidence(self):
+        value = assessment()
+        value["hypotheses"] = [{
+            "explanation": "The retained evidence does not establish an alternative mechanism.",
+            "status": "unresolved",
+            "reason": "No separate discriminator was retained for this alternative.",
+            "evidence_ids": [],
+        }]
+
+        normalized = validate_assessment(value, {"Q001"}, {"one"})
+
+        self.assertEqual(normalized["hypotheses"][0]["evidence_ids"], ["Q001"])
+
     def test_repeated_alert_identity_does_not_require_an_artificial_relationship(self):
         self.context["alerts"] = [
             {"incident_id": "one", "alert_identity": "TargetMissing"},
