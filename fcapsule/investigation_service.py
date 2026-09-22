@@ -79,12 +79,36 @@ class InvestigationService:
             "revisions": self.revisions(episode_id),
             "source_disconnected_reviews": self.source_disconnected_reviews(episode_id),
         }
+        revision_details = []
+        exported_keys = (
+            "revision_id", "parent_revision_id", "revision_reason", "source_mode", "status", "queued_at",
+            "started_at", "finished_at", "model", "policy_version", "message", "validation_error",
+            "assessment", "checks", "calls", "review", "findings", "usage", "token_budget",
+            "investigation_contract", "evidence_manifest", "input_fingerprint",
+        )
+        for revision in history["revisions"]:
+            path = Path(str(revision.get("state_path") or ""))
+            if not path.is_file():
+                continue
+            try:
+                saved = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            revision_details.append({key: saved.get(key) for key in exported_keys if key in saved})
+        revisions_export = {
+            "episode_id": episode_id,
+            "generated_at": history["generated_at"],
+            "revisions": revision_details,
+            "source_disconnected_reviews": history["source_disconnected_reviews"],
+            "raw_media_included": False,
+        }
         for signal in episode["signals"]:
             record = self.plane.store.get_capsule_for_incident(str(signal["incident_id"]))
             if not record:
                 continue
             root = Path(record["output_dir"])
             self.plane._write_briefing_state(root / "investigation_history.json", history)
+            self.plane._write_briefing_state(root / "investigation_revisions.json", revisions_export)
             create_archive(root, str(signal["incident_id"]))
 
     def for_incident(self, incident_id: str) -> dict[str, Any] | None:
@@ -338,7 +362,10 @@ class InvestigationService:
             evidence_manifest = self.plane.evidence.manifest(episode_id)
             input_fingerprint = self.fingerprint(entries, evidence_manifest)
             context = episode_context(episode, entries)
-            context["evidence"].extend(self.plane.evidence.model_evidence(episode_id))
+            media_evidence = self.plane.evidence.model_evidence(episode_id)
+            context["evidence"].extend(media_evidence)
+            if queued.get("revision_reason") == "evidence_added":
+                context["priority_evidence_ids"] = [item["id"] for item in media_evidence]
             historical = self.historical_candidates(episode)
             context["historical_candidates"] = [
                 {key: item.get(key) for key in ("episode_id", "reference", "title", "started_at", "ended_at", "status", "resource")}

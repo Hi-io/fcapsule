@@ -282,8 +282,6 @@ class EvidenceService:
                 summary = str(extraction.get("transcript") or "") or "Audio evidence was accepted without a transcript."
                 domain = "audio_transcript"
                 examples = extraction.get("segments", [])[:4] if isinstance(extraction.get("segments"), list) else []
-            if correction:
-                summary = f"{summary} Operator correction: {correction}"
             evidence.append(
                 {
                     "id": "A-" + str(attachment["attachment_id"]),
@@ -293,6 +291,12 @@ class EvidenceService:
                     "time_range": {"observed_at": attachment.get("observed_at"), "uploaded_at": attachment.get("created_at")},
                     "examples": examples,
                     "attachment_id": attachment["attachment_id"],
+                    "operator_context": {
+                        key: value for key, value in {
+                            "note": _safe_text(attachment.get("context_note"), 800),
+                            "correction": correction,
+                        }.items() if value
+                    },
                     "limitation": extraction.get("limitation") or "Externally supplied evidence is not independent verification.",
                 }
             )
@@ -308,6 +312,9 @@ class EvidenceService:
                     "status": item["status"], "observed_at": item.get("observed_at"), "uploaded_at": item["created_at"],
                     "provider": item.get("provider"), "model": item.get("model"), "usage": item.get("usage", {}),
                     "source_redacted": item.get("source_redacted", False),
+                    "context_note": _safe_text(item.get("context_note"), 1000),
+                    "correction": _safe_text(item.get("correction"), 2000),
+                    "extraction": item.get("extraction") if isinstance(item.get("extraction"), dict) else {},
                 }
             )
         return records

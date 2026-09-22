@@ -44,11 +44,14 @@ def validate_assessment(
 
     def citations(item):
         refs = item.get("evidence_ids")
-        if not isinstance(refs, list) or not 1 <= len(refs) <= 8:
+        if not isinstance(refs, list):
             raise ValueError("Each evidence_ids array must contain one to eight references; keep only the most diagnostic")
-        if any(not isinstance(ref, str) or ref not in evidence_ids for ref in refs):
+        unique_refs = list(dict.fromkeys(refs))
+        if not 1 <= len(unique_refs) <= 8:
+            raise ValueError("Each evidence_ids array must contain one to eight references; keep only the most diagnostic")
+        if any(not isinstance(ref, str) or ref not in evidence_ids for ref in unique_refs):
             raise ValueError("Assessment cites unavailable evidence")
-        return list(dict.fromkeys(refs))
+        return unique_refs
 
     result["evidence_ids"] = citations(value)
     alternatives = value.get("hypotheses", [])
@@ -173,7 +176,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
     if max_prompt_tokens < 1200 or max_prompt_tokens > 12000:
         raise ValueError("max_prompt_tokens must be between 1200 and 12000")
     state = {"version": "1", "episode_id": context["episode_id"], "status": "running", "started_at": now(),
-              "policy_version": "episode-investigation-1.11", "max_completion_tokens_per_call": max_tokens,
+              "policy_version": "episode-investigation-1.12", "max_completion_tokens_per_call": max_tokens,
              "model": model, "context": context, "checks": [], "calls": [], "assessment": None,
              "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
              "token_budget": {"maximum_total_tokens": max_total_tokens, "maximum_prompt_tokens": max_prompt_tokens,
@@ -181,6 +184,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                               "reserved_completion_tokens": 0, "reserved_total_tokens": 0,
                               "accounted_total_tokens": 0, "provider_reported_total_tokens": 0,
                               "unbudgeted_provider_total_tokens": 0, "remaining_tokens": max_total_tokens},
+             "investigation_contract": {"optional_model_checks": max_checks, "required_observations": []},
              "source_retention": "unknown", "preservation": "Mutable workload state is checked early; no source expiry is assumed."}
     started = time.monotonic()
     evidence_ids = {item["id"] for item in context["evidence"]}
@@ -193,19 +197,22 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
 
         # A compact context can expose a bounded list of E/Q IDs after this
         # calculation. Reserve enough room for those citations before fitting it.
-        fixed_tokens = estimate_tokens(SYSTEM) + estimate_tokens(base) + 192
-        context_limit = max(320, max_prompt_tokens - fixed_tokens - 32)
+        # Reserve the envelope, citation array and the compact context keys too.
+        # The API receives the complete JSON payload, not merely ``episode``.
+        fixed_tokens = estimate_tokens(SYSTEM) + estimate_tokens(base) + 384
+        context_limit = max(80, max_prompt_tokens - fixed_tokens - 32)
         model_context, visible_evidence_ids = compact_for_model(
             context,
             state["checks"],
             max_prompt_tokens=context_limit,
+            priority_evidence_ids=context.get("priority_evidence_ids") or [],
         )
         return {**base, "episode": model_context}, visible_evidence_ids
 
     def request_model(payload, effort, phase, desired_completion_tokens):
         if time.monotonic() - started > 420:
             raise ValueError("Investigation time budget reached")
-        encoded = json.dumps(payload, ensure_ascii=True)
+        encoded = json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
         estimated_prompt = estimate_tokens(SYSTEM) + estimate_tokens(encoded)
         if estimated_prompt > max_prompt_tokens:
             raise ValueError("Input size budget reached")
@@ -217,6 +224,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             raise ValueError("Investigation token budget reached before another model response could be reserved")
         call = {"started_at": now(), "status": "running", "reasoning_effort": effort, "phase": phase,
                 "estimated_prompt_tokens": estimated_prompt, "maximum_completion_tokens": response_limit}
+        call["visible_evidence_ids"] = list(payload.get("available_evidence_ids") or [])
         state["calls"].append(call)
         reservation = estimated_prompt + response_limit
         budget["estimated_prompt_tokens"] += estimated_prompt
@@ -253,10 +261,10 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
         publish(state)
         return response, call
 
-    def check(name, arguments, question, distinguishes, automatic=False):
+    def check(name, arguments, question, distinguishes, automatic=False, required=False):
         row = {"id": f"Q{len(state['checks']) + 1:03d}", "tool": name, "arguments": arguments,
                "question": question, "distinguishes": distinguishes, "status": "running", "started_at": now(),
-               "automatic_preservation": automatic}
+               "automatic_preservation": automatic, "required_observation": required}
         state["checks"].append(row)
         publish(state)
         try:
@@ -272,7 +280,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
         publish(state)
 
     check("workload_state", {}, "What termination state and resource limits can still be preserved?",
-          "Runtime termination versus application failure; snapshot may be newer than the incident.", True)
+          "Runtime termination versus application failure; snapshot may be newer than the incident.", True, True)
     discovery_capture = any(
         isinstance(alert.get("labels"), dict)
         and any(alert["labels"].get(key) for key in ("target_service", "kubernetes_service", "target_workload"))
@@ -285,7 +293,36 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             "Which monitoring selector and target state explain the missing telemetry?",
             "A selector or target-discovery failure versus an unhealthy application workload.",
             True,
+            True,
         )
+    requires_log_search = (
+        context.get("live_capture")
+        and not discovery_capture
+        and any(item.get("domain") == "log_template" for item in context["evidence"])
+    )
+    if requires_log_search:
+        check(
+            "search_logs",
+            {},
+            "What bounded incident-window log observations survive source retention?",
+            "An application/dependency failure signature versus only the retained alert symptom.",
+            required=True,
+        )
+    historical_candidates = context.get("historical_candidates") or []
+    if historical_candidates:
+        candidate_id = str(historical_candidates[0].get("episode_id") or "")
+        if candidate_id:
+            check(
+                "historical_episode",
+                {"episode_id": candidate_id},
+                "What retained observations distinguish this recurrence candidate from the current episode?",
+                "A repeated mechanism versus a superficially similar alert family.",
+                required=True,
+            )
+    state["investigation_contract"]["required_observations"] = [
+        {"id": row["id"], "tool": row["tool"], "status": row["status"]}
+        for row in state["checks"] if row["required_observation"]
+    ]
     # Repeated evaluations of the same alert are recurrence evidence, not a
     # causal relationship. Only distinct alert identities need an explicit edge.
     alert_identities = {
@@ -302,9 +339,13 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 state["message"] = "Investigation time budget reached. Checks are retained."
                 break
             payload, visible_evidence_ids = compact_payload({"allowed_pods": tools.pods, "tools": tools.CATALOG,
-                       "remaining_checks": max_checks - turn,
+                       "remaining_optional_checks": max_checks - turn,
                        "available_evidence_ids": [], "validation_feedback": validation_feedback,
-                       "instruction": "Finish using collected evidence now." if turn == max_checks else "Choose the most useful remaining check, or finish when further queries would not help."})
+                       "instruction": (
+                           "Required bounded observations have completed. Finish using collected evidence now."
+                           if turn == max_checks else
+                           "Required bounded observations have completed. Choose one optional discriminating check, or finish when further queries would not help."
+                       )})
             payload["available_evidence_ids"] = sorted(visible_evidence_ids)
             state["message"] = "Assessing episode evidence" if turn == 0 else "Reviewing check results"
             publish(state)
@@ -319,14 +360,6 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 decision = parse_object(str(response.get("content", "")))
                 call["decision"] = scrub(decision)
                 if decision.get("action") == "finish":
-                    if max_checks > 0 and len(state["checks"]) < 2:
-                        raise ValueError("Run one discriminating check beyond automatic preservation before concluding")
-                    if (context.get("live_capture") and not discovery_capture
-                            and any(item.get("domain") == "log_template" for item in context["evidence"])
-                            and not any(item["tool"] == "search_logs" for item in state["checks"])):
-                        raise ValueError("Search source logs for a discriminating observation before concluding this live episode")
-                    if context.get("historical_candidates") and not any(item["tool"] == "historical_episode" for item in state["checks"]):
-                        raise ValueError("Inspect one retained historical candidate before concluding this recurring episode")
                     candidate = assessment_payload(decision, call)
                     state["assessment"] = validate_assessment(candidate, set(visible_evidence_ids),
                                                                 {item["incident_id"] for item in context["alerts"]},

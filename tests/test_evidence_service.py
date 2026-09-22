@@ -72,6 +72,9 @@ class EvidenceServiceTests(unittest.TestCase):
         public = self.plane.evidence.list(self.episode_id)[0]
         self.assertNotIn("storage_path", public)
         self.assertIn("artifact_url", public)
+        manifest = self.plane.evidence.manifest(self.episode_id)[0]
+        self.assertEqual(manifest["extraction"]["visible_text"], ["Target down"])
+        self.assertEqual(manifest["context_note"], "Screenshot after the alert")
 
     def test_invalid_or_unsupported_upload_is_rejected_before_storage(self):
         with patch.object(self.plane, "media_submission_allowed", return_value=(True, "")):
@@ -97,6 +100,9 @@ class EvidenceServiceTests(unittest.TestCase):
         self.assertEqual(corrected["correction"], "The target was intentionally disabled.")
         stored = self.plane.store.get_evidence_attachment(attachment["attachment_id"])
         self.assertEqual(stored["extraction"]["visible_text"], ["Target down"])
+        model_evidence = self.plane.evidence.model_evidence(self.episode_id)[0]
+        self.assertEqual(model_evidence["operator_context"]["correction"], "The target was intentionally disabled.")
+        self.assertNotIn("Operator correction", model_evidence["summary"])
 
 
 if __name__ == "__main__":

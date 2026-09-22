@@ -65,7 +65,7 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(state["usage"]["total_tokens"], 390)
         self.assertEqual(len(state["checks"]), 2)
         self.assertTrue(state["checks"][0]["automatic_preservation"])
-        self.assertIn('"reason": "Error"', client.requests[1].messages[1]["content"])
+        self.assertIn('"reason":"Error"', client.requests[1].messages[1]["content"])
         self.assertEqual(self.progress[0]["checks"][0]["status"], "running")
         self.assertEqual(state["source_retention"], "unknown")
 
@@ -257,11 +257,25 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(state["status"], "ready")
         self.assertEqual(state["assessment"]["connections"], [])
 
-    def test_live_log_query_is_not_delegated_back_without_attempt(self):
+    def test_live_log_query_is_preserved_before_the_model_concludes(self):
         self.context.update(live_capture=True, evidence=[{"id": "E1", "domain": "log_template"}])
         state, _ = self.run_case([{"action": "finish", "assessment": assessment()}], max_checks=0)
-        self.assertEqual(state["status"], "incomplete")
-        self.assertIn("Search source logs", state["validation_error"])
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual([item["tool"] for item in state["checks"]], ["workload_state", "search_logs"])
+        self.assertTrue(state["checks"][1]["required_observation"])
+
+    def test_historical_candidate_is_preserved_without_spending_an_optional_model_check(self):
+        self.context["historical_candidates"] = [{"episode_id": "prior-episode"}]
+        value = assessment("Q002")
+        value["historical_comparison"] = {
+            "episode_id": "prior-episode", "status": "insufficient_evidence",
+            "summary": "The retained candidate has not established a shared mechanism.", "evidence_ids": ["Q002"],
+        }
+        state, _ = self.run_case([{"action": "finish", "assessment": value}], max_checks=0)
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["checks"][-1]["tool"], "historical_episode")
+        self.assertTrue(state["checks"][-1]["required_observation"])
+        self.assertEqual(state["token_budget"]["maximum_checks"], 0)
 
     def test_discovery_capture_preserves_selector_evidence_before_concluding(self):
         self.context.update(

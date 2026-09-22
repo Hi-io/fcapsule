@@ -62,7 +62,7 @@ def _bounded(value: Any, depth: int = 0, max_depth: int = 4, max_items: int = 6)
 
 def _evidence_item(item: dict[str, Any]) -> dict[str, Any]:
     examples = item.get("examples") or []
-    return {
+    values = {
         "id": item.get("id"),
         "domain": item.get("domain"),
         "title": _short(item.get("title"), 180),
@@ -70,7 +70,12 @@ def _evidence_item(item: dict[str, Any]) -> dict[str, Any]:
         "time_range": _bounded(item.get("time_range"), max_items=3),
         "diagnostic_example": _bounded(examples[:1], max_items=1) if examples else None,
         "configuration": _bounded(item.get("configuration"), max_items=3) if item.get("configuration") else None,
+        "operator_context": _bounded(item.get("operator_context"), max_items=3) if item.get("operator_context") else None,
+        "revision_priority": True if item.get("revision_priority") else None,
     }
+    # Empty keys cost meaningful tokens across several calls without helping a
+    # model distinguish hypotheses. The full retained record stays on disk.
+    return {key: value for key, value in values.items() if value not in (None, "", [], {})}
 
 
 def _check_item(check: dict[str, Any], latest: bool) -> dict[str, Any]:
@@ -90,6 +95,7 @@ def compact_for_model(
     checks: list[dict[str, Any]],
     *,
     max_prompt_tokens: int = 5200,
+    priority_evidence_ids: list[str] | set[str] | tuple[str, ...] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Return a compact prompt context and the evidence IDs visible to the model.
 
@@ -97,14 +103,24 @@ def compact_for_model(
     plus the newest observation; it can still cite every record actually shown.
     """
 
-    evidence = [_evidence_item(item) for item in (context.get("evidence") or [])[:28]]
+    priority_ids = {str(item) for item in priority_evidence_ids or []}
+    source_evidence = list(context.get("evidence") or [])
+    # A user-requested revision must be able to see the supplied derived evidence.
+    # Retain the original order within priority and ordinary evidence for reproducibility.
+    source_evidence.sort(key=lambda item: 0 if str(item.get("id")) in priority_ids else 1)
+    evidence = []
+    for item in source_evidence[:28]:
+        compact_item = _evidence_item(item)
+        if compact_item.get("revision_priority") or str(item.get("id")) in priority_ids:
+            compact_item["revision_priority"] = True
+        evidence.append(compact_item)
     visible_ids = [str(item["id"]) for item in evidence if item.get("id")]
     retained_checks = checks[-4:]
     recent = [_check_item(item, index == len(retained_checks) - 1) for index, item in enumerate(retained_checks)]
     visible_ids.extend(str(item["id"]) for item in recent if item.get("id") and item.get("status") == "completed")
     alerts = []
     for item in (context.get("alerts") or [])[:12]:
-        alerts.append({
+        alert = {
             "incident_id": item.get("incident_id"),
             "alertname": item.get("alertname") or item.get("name"),
             "severity": item.get("severity"),
@@ -113,18 +129,23 @@ def compact_for_model(
             "endsAt": item.get("ended_at") or item.get("endsAt"),
             "labels": _bounded(item.get("labels"), max_items=6),
             "annotations": _bounded(item.get("annotations"), max_items=4),
-        })
+        }
+        alerts.append({key: value for key, value in alert.items() if value not in (None, "", [], {})})
     payload: dict[str, Any] = {
         "episode_id": context.get("episode_id"),
-        "episode_lifecycle": _bounded(context.get("episode_lifecycle"), max_items=6),
         "live_capture": bool(context.get("live_capture")),
-        "alerts": alerts,
-        "impact": _bounded((context.get("impact") or [])[:8], max_items=5),
         "evidence": evidence,
         "prior_checks": recent,
-        "historical_candidates": _bounded((context.get("historical_candidates") or [])[:3], max_items=4),
         "constraints": "Evidence is bounded and may be incomplete. Current state is not incident-time state. Time correlation is not causation.",
     }
+    optional_fields = {
+        "episode_lifecycle": _bounded(context.get("episode_lifecycle"), max_items=6),
+        "alerts": alerts,
+        "impact": _bounded((context.get("impact") or [])[:8], max_items=5),
+        "historical_candidates": _bounded((context.get("historical_candidates") or [])[:3], max_items=4),
+        "priority_evidence_ids": [item["id"] for item in evidence if item.get("revision_priority")],
+    }
+    payload.update({key: value for key, value in optional_fields.items() if value not in (None, "", [], {})})
 
     def refresh_visible_ids() -> list[str]:
         ids = [str(item["id"]) for item in payload["evidence"] if item.get("id")]
@@ -140,7 +161,7 @@ def compact_for_model(
         elif len(payload["prior_checks"]) > 1:
             payload["prior_checks"].pop(0)
             visible_ids = refresh_visible_ids()
-        elif payload["impact"]:
+        elif payload.get("impact"):
             payload["impact"] = []
         elif any(item.get("diagnostic_example") is not None for item in payload["evidence"]):
             for item in payload["evidence"]:
@@ -162,7 +183,7 @@ def compact_for_model(
         elif len(payload["evidence"]) > 1:
             payload["evidence"].pop()
             visible_ids = refresh_visible_ids()
-        elif payload["alerts"] and len(payload["alerts"]) > 1:
+        elif payload.get("alerts") and len(payload["alerts"]) > 1:
             payload["alerts"].pop()
         else:
             break

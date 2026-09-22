@@ -19,6 +19,7 @@ def create_archive(output_dir: Path, case_id: str) -> Path:
         "ai_briefing.json",
         "episode_investigation.json",
         "investigation_history.json",
+        "investigation_revisions.json",
         "evidence_manifest.json",
         "dashboard.html",
     )

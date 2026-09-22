@@ -49,6 +49,28 @@ class ContextBudgetTests(unittest.TestCase):
         self.assertIn("Q1", visible)
         self.assertNotIn("Q2", visible)
 
+    def test_revision_priority_keeps_new_operator_evidence_visible(self):
+        context = {
+            "episode_id": "episode-3",
+            "evidence": [
+                {"id": f"E{index:03d}", "summary": "existing evidence " + "x" * 300}
+                for index in range(40)
+            ] + [{
+                "id": "A-new-image", "domain": "image_evidence", "summary": "Target table shows checkout metrics down.",
+                "operator_context": {"note": "Captured after the alert."},
+            }],
+            "alerts": [],
+        }
+
+        compact, visible = compact_for_model(
+            context, [], max_prompt_tokens=1200, priority_evidence_ids=["A-new-image"],
+        )
+
+        self.assertEqual(compact["evidence"][0]["id"], "A-new-image")
+        self.assertTrue(compact["evidence"][0]["revision_priority"])
+        self.assertIn("A-new-image", compact["priority_evidence_ids"])
+        self.assertIn("A-new-image", visible)
+
 
 if __name__ == "__main__":
     unittest.main()
