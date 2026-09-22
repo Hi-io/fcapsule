@@ -35,8 +35,8 @@ assessment is retained so a reviewer can see what changed.
    image or record/upload short audio. They can supply observation time, context, and
    whether the copy has been redacted.
 4. The matching specialist processes only that attachment. The original file, derived
-   extraction, provider/model identity, usage record, and correction history are kept
-   with the episode.
+   extraction, provider/model identity, usage record, operator note and correction
+   history are kept with the episode.
 5. The operator chooses **Update investigation** only after a ready extraction exists.
    FCAPSule writes a new assessment revision rather than overwriting the original.
 
@@ -71,8 +71,9 @@ supporting retained evidence. A correction is additive; it does not erase the or
 extraction or earlier assessment revision.
 
 The specialist output is compacted into a bounded observation before the next model
-call. Raw source telemetry is never sent wholesale merely because a media item was
-added. See [AI investigation techniques](ai_investigation_techniques.md) for the
+call. On an explicit evidence revision, its derived `A-...` observation is prioritized
+in the prompt ledger and every call records the visible evidence IDs. Raw source
+telemetry is never sent wholesale merely because a media item was added. See [AI investigation techniques](ai_investigation_techniques.md) for the
 full-request token reserve and [data privacy](data_privacy.md) for retention boundaries.
 
 ## Evaluation Protocol

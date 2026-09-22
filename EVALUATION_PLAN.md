@@ -34,7 +34,7 @@ The expected chain is an investigation path, not a root-cause label.
 
 Important signals are representative groups, not every correlated series. Counting every derivative metric as independently important would reward redundancy and conflict with the attention objective.
 
-The metric named grounding measures valid references, not factual entailment or causal accuracy. Reduction measures capsule content, not the total disk footprint of staged live inputs. Model comparisons must retain the same input and fixed rubric, report ties/regressions, and avoid tuning a scenario after observing a desired winner. Human usefulness review is separate from citation validity.
+The metric named grounding measures valid references, not factual entailment or causal accuracy. Reduction measures capsule content, not the total disk footprint of staged live inputs. Model comparisons must retain the same preserved input and fixed rubric, report ties/regressions, and avoid tuning a scenario after observing a desired winner. A sequential live investigation can still collect different current source observations; evaluation records must store whether bounded tool-observation fingerprints match and describe a mismatch as environmental context, not model superiority. Human usefulness review is separate from citation validity.
 
 ## Baselines
 
@@ -48,7 +48,7 @@ The metric named grounding measures valid references, not factual entailment or 
 
 ## Model Comparison
 
-Enabled models receive identical messages and capsule evidence. Record:
+Offline replay/rescoring models receive identical messages and capsule evidence. For the live Lab runner, models receive the same retained capsule fingerprint but may perform sequential bounded source checks. Record:
 
 - provider and model;
 - prompt;
@@ -63,8 +63,9 @@ Enabled models receive identical messages and capsule evidence. Record:
 - evidence breadth;
 - unsupported final-root-cause language;
 - total rubric score.
+- a bounded tool-observation fingerprint and whether paired runs observed the same live source state.
 
-A model wins only when its total score is measurably higher. Latency and token use remain separate tradeoffs rather than hidden quality bonuses.
+A model result is not a product acceptance gate. Differences between Flash and Pro are expected evaluation evidence; neither is forced to reproduce the other. Latency and token use remain separate tradeoffs rather than hidden quality bonuses.
 
 Stored responses can be evaluated again after a rubric revision with `fcapsule rescore-llms`. Re-scoring does not call the provider and records the rubric version.
 

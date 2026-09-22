@@ -11,11 +11,12 @@ Prometheus, OpenSearch and Kubernetes remain the source systems of record. FCAPS
 | `state_dir/live-cases/<id>/` | Bounded source logs, PM samples, alerts, metadata and configuration snapshot | Until managed incident deletion or retention cleanup |
 | `state_dir/capsules/<id>/` | Selected evidence, masked log examples, metric trends, report, assessment, evaluation and ZIP | Same incident lifetime |
 | `state_dir/investigations/<episode-hash>.json` | Episode context, scrubbed check results, structured decisions, assessments and usage | Invalidated when an episode member is deleted; up to three previous attempts retained |
+| `state_dir/evidence/<attachment-hash>/` | Optional uploaded image/audio, stored owner-readable; derived extraction, note and correction are separately retained in SQLite/manifest | Same incident lifetime; raw media is excluded from default export |
 | `state_dir/fcapsule.db` | Application registry, episodes, incident/capsule metadata and non-secret settings | Incident records are cleaned up; registry/settings persist |
 
 Live capture is **not memory-only**. Staged inputs may contain sensitive logs and metrics. An independent staging TTL is not implemented. External `ingest-case` directories are referenced without copying; FCAPSule never deletes an input directory outside its managed state directory.
 
-The ZIP contains derived artifacts, including representative log lines and retained chart values. It excludes normalized raw input files, raw trace spans and the provider credential. Offline comparison prompts/responses can exist alongside artifacts when explicitly requested, but are not included in the ZIP allowlist.
+The ZIP contains derived artifacts, including representative log lines, retained chart values, an evidence manifest and portable investigation revision details. It excludes normalized raw input files, raw uploaded image/audio, raw trace spans and the provider credential. Offline comparison prompts/responses can exist alongside artifacts when explicitly requested, but are not included in the ZIP allowlist.
 
 ## Retention and Export
 

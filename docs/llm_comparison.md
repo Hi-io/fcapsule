@@ -1,6 +1,6 @@
 # Model Comparison
 
-FCAPSule provides comparison profiles for `deepseek-v4-flash` and `deepseek-v4-pro`. This offline workflow tests differences on identical evidence without presupposing a winner. Operations uses one selected model for automatic background assessment, not simultaneous comparisons. Valid citations are reference checks, not proof of diagnosis accuracy.
+FCAPSule provides comparison profiles for `deepseek-v4-flash` and `deepseek-v4-pro`. This offline workflow tests differences on identical retained evidence without presupposing a winner. Operations uses one selected model for automatic background assessment, not simultaneous comparisons. Valid citations are reference checks, not proof of diagnosis accuracy.
 
 ## Fair-Input Rule
 
@@ -14,7 +14,7 @@ Every model receives:
 - the same selected evidence;
 - the same deterministic hypotheses, limitations, and next checks.
 
-Models never receive different raw samples.
+Offline replay models never receive different raw samples. The external live Lab runner also records an `input_fingerprint` for the same preserved capsule and a separate bounded tool-observation fingerprint. Sequential runs may legitimately see different current Prometheus, OpenSearch or Kubernetes state; those runs are contextual comparisons, not byte-identical live-input experiments.
 
 ## Recorded Fields
 

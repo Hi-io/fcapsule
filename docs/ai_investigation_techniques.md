@@ -38,9 +38,13 @@ There are no model-generated percentages presented as calibrated confidence.
 
 ### 2. Hypothesis-Directed Tool Use
 
-For live captures containing log evidence, a bounded source-log search is required
-before finalizing, so a log investigation is not simply handed back to the operator.
-An unavailable query remains a recorded limitation, not fabricated evidence.
+For live captures containing log evidence, FCAPSule performs one bounded
+incident-window source-log search before the first model call. When a deterministic
+recurrence candidate exists, it also preserves one bounded prior-episode observation
+before that call. These required observations do not consume the configured number of
+optional model-selected checks, so the default token limit cannot make the contract
+impossible to satisfy. An unavailable query remains a recorded limitation, not
+fabricated evidence.
 
 After early preservation, the model returns either a structured check request or a
 final assessment. Each check includes a short diagnostic question and the
@@ -104,8 +108,8 @@ normalized alert identity, FCAPSule exposes at most three earlier episodes to th
 investigator. The candidate list is deterministic and kept separate from normal
 time correlation: episodes remain independently auditable and are never merged.
 
-The model must inspect exactly one supplied candidate before it can publish an
-assessment for a recurring episode. The `historical_episode` tool returns a
+FCAPSule preserves exactly one supplied candidate before asking for an assessment of
+a recurring episode. The `historical_episode` tool returns a
 bounded prior report excerpt, selected configuration/log/alert observations, and
 an optional `prior_hypothesis` explicitly marked as earlier model output. That prose
 is not independent evidence and cannot be cited. The tool cannot fetch arbitrary
@@ -242,10 +246,11 @@ evidence only. The model cannot provide URLs, PromQL, OpenSearch DSL, shell comm
 SQL, arbitrary paths or Kubernetes mutations. Configured sources remain a trusted
 administrator boundary, not a multi-tenant authorization system.
 
-The product default is one automatic preservation check, one model-selected check,
-one final assessment and one evidence review. That normally means no more than three
-provider calls. Operators can raise the number of model-selected checks to four, for a
-maximum of six calls. The default per-investigation reserve is 12,000 tokens and the
+The product default is automatic preservation plus required bounded observations,
+one optional model-selected check, one final assessment and one evidence review.
+Required source reads do not consume provider tokens. That normally means no more than
+three provider calls. Operators can raise the number of optional model-selected checks
+to four, for a maximum of six calls. The default per-investigation reserve is 12,000 tokens and the
 default full-request input cap is 2,100 tokens. The latter includes system instructions,
 the tool catalogue, citation IDs and selected evidence; it is not merely a cap on log
 text. The completion limit in Settings applies per call. Calls request JSON output
@@ -279,8 +284,10 @@ and `incomplete`. Startup resumes interrupted retained work for unarchived episo
 A failed unchanged attempt requires explicit Reassess; it is not retried forever.
 
 Completed/incomplete attempts copy `episode_investigation.json` into participating
-capsules and rebuild the ZIP. Up to three earlier attempt records, including checks
-and assessments, are retained in the state. Earlier usage totals accumulate beyond
+capsules and rebuild the ZIP. `investigation_revisions.json` includes portable,
+derived revision details (assessment, bounded checks, call audit, budget and evidence
+manifest) without copying raw uploaded media. Up to three earlier attempt records,
+including checks and assessments, are retained in the state. Earlier usage totals accumulate beyond
 that short history. Deleting an episode member invalidates the shared investigation
 and removes its derived copies from surviving capsules so deleted evidence is not
 resurrected there. External downloads are not changed by deletion.
@@ -319,7 +326,7 @@ solely because sampled memory is low. These interpretations follow the
 and [Kubernetes resource behavior](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/).
 They constrain interpretation, not the observed outcome of any particular case.
 
-Policy `episode-investigation-1.11` uses structured output without hidden reasoning
+Policy `episode-investigation-1.12` uses structured output without hidden reasoning
 effort for both investigation and the already reserved final review. Explicit byte
 conversion, component-versus-total memory and termination-versus-alert time checks
 remain in the review instruction. A bounded, cited historical comparison is required
@@ -329,6 +336,12 @@ for distinct alert identities. The review has the same call and completion budge
 is still model-assisted consistency review, not a deterministic numerical validator.
 Original and revised assessments must both remain in evaluation records, including
 unsuccessful corrections.
+
+When an operator explicitly updates an investigation with ready image or audio
+evidence, its derived `A-...` record is placed before ordinary retained evidence in
+the bounded prompt ledger. Every provider call records the identifiers visible to it.
+This prevents an uploaded artifact from being stored but silently excluded by the
+context cap; it does not make the operator-provided observation independent proof.
 
 Telemetry is treated as untrusted input, and the prompt explicitly rejects
 instructions embedded in it. Server-side tool dispatch restricts actions even if a
