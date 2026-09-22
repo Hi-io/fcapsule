@@ -115,8 +115,11 @@ class OpenRouterClient:
         prompt = (
             "Extract only visible operational facts from this screenshot. Return concise JSON with keys "
             "visible_text (array), observations (array of {fact, confidence, region}), ambiguities (array), "
-            "and limitation (string). Preserve exact identifiers where readable. Do not infer unseen targets, "
-            "timestamps, configuration, or a diagnosis. Return one JSON object only, with no Markdown or prose."
+            "and limitation (string). Use at most 8 visible_text entries, 6 observations, and 3 ambiguities. "
+            "Keep every string short; use one of high, medium, low, or unspecified for confidence and a short "
+            "plain-language region label, not coordinates. Preserve exact identifiers where readable. Do not infer "
+            "unseen targets, timestamps, configuration, or a diagnosis. Return one JSON object only, with no Markdown, "
+            "prose, or additional keys."
         )
         payload, latency = self._request(
             "/chat/completions",

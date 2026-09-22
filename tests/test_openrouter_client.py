@@ -50,6 +50,7 @@ class OpenRouterClientTests(unittest.TestCase):
         self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
         self.assertEqual(struct.unpack(">II", data[16:24]), (32, 32))
         self.assertEqual(payload["response_format"], {"type": "json_object"})
+        self.assertIn("at most 8 visible_text entries", payload["messages"][0]["content"][0]["text"])
 
     def test_visual_extraction_reserves_output_for_a_complete_json_response(self):
         with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}), patch(

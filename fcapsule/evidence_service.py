@@ -97,7 +97,11 @@ def _extract_json(content: str) -> dict[str, Any]:
         fact = _safe_text(item.get("fact"), 420)
         if not fact:
             continue
-        confidence = str(item.get("confidence") or "unspecified").lower()
+        supplied_confidence = item.get("confidence")
+        if isinstance(supplied_confidence, (int, float)) and not isinstance(supplied_confidence, bool):
+            confidence = "high" if supplied_confidence >= 0.8 else "medium" if supplied_confidence >= 0.5 else "low"
+        else:
+            confidence = str(supplied_confidence or "unspecified").lower()
         if confidence not in {"high", "medium", "low", "unspecified"}:
             confidence = "unspecified"
         observations.append({"fact": fact, "confidence": confidence, "region": _safe_text(item.get("region"), 120)})

@@ -86,6 +86,13 @@ class EvidenceServiceTests(unittest.TestCase):
         self.assertEqual(extraction["visible_text"], ["Target down"])
         self.assertEqual(extraction["observations"][0]["confidence"], "high")
 
+    def test_image_extraction_normalizes_numeric_provider_confidence(self):
+        extraction = _extract_json(
+            '{"visible_text":[],"observations":[{"fact":"Target is down","confidence":0.9,"region":"table"}],'
+            '"ambiguities":[],"limitation":"Visible status only."}'
+        )
+        self.assertEqual(extraction["observations"][0]["confidence"], "high")
+
     def test_invalid_or_unsupported_upload_is_rejected_before_storage(self):
         with patch.object(self.plane, "media_submission_allowed", return_value=(True, "")):
             with self.assertRaisesRegex(ValueError, "base64"):
