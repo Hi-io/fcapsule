@@ -276,6 +276,34 @@ class InvestigationEngineTests(unittest.TestCase):
                 1600,
             )
 
+    def test_required_observations_and_citations_are_compacted_before_the_final_request(self):
+        self.context.update({
+            "live_capture": True,
+            "historical_candidates": [{"episode_id": "older-episode", "summary": "x" * 1800}],
+            "evidence": [{"id": "E1", "domain": "log_template", "summary": "diagnostic context " + "x" * 1800}],
+        })
+        self.kit.execute.return_value = {
+            "observations": [{"kind": "PodSpec", "resources": [{"limits": {"memory": "160Mi"}}],
+                              "container_states": [{"last_state": {"terminated": {"reason": "OOMKilled"}}}]}],
+            "patterns": [{"count": 5000, "examples": [{"message": "x" * 4000}]}],
+        }
+        draft = assessment("E1")
+        draft["historical_comparison"] = {
+            "episode_id": "older-episode",
+            "status": "insufficient_evidence",
+            "summary": "The retained current evidence does not establish a repeated mechanism.",
+            "evidence_ids": ["E1"],
+        }
+        state, client = self.run_case([{"action": "finish", "assessment": draft}], max_checks=0,
+                                      max_total_tokens=5000, max_prompt_tokens=1600)
+        self.assertEqual(state["status"], "ready")
+        self.assertGreaterEqual(len(state["checks"]), 3)
+        for request in client.requests:
+            self.assertLessEqual(
+                estimate_tokens(request.messages[0]["content"]) + estimate_tokens(request.messages[1]["content"]),
+                1600,
+            )
+
     def test_missing_provider_usage_still_blocks_unreserved_follow_up_calls(self):
         decision = {"action": "check", "tool": "resource_history", "arguments": {},
                     "question": "Resource pressure?", "distinguishes": "CPU or memory"}

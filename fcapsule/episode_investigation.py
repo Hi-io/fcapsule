@@ -262,19 +262,51 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
     def compact_payload(base: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         """Fit the entire API request, not only its incident evidence, into the cap."""
 
-        # A compact context can expose a bounded list of E/Q IDs after this
-        # calculation. Reserve enough room for those citations before fitting it.
-        # Reserve the envelope, citation array and the compact context keys too.
-        # The API receives the complete JSON payload, not merely ``episode``.
-        fixed_tokens = estimate_tokens(SYSTEM) + estimate_tokens(base) + 384
-        context_limit = max(80, max_prompt_tokens - fixed_tokens - 32)
+        # ``compact_for_model`` only owns the episode ledger.  The provider sees
+        # the system instruction, tools, review draft and citation catalogue too,
+        # so measure the final serialized request before returning it.  This keeps
+        # a richer retained state from turning into an avoidable investigation
+        # failure when a source adds a few fields.
+        request_base = {**base, "available_evidence_ids": []}
+        context_limit = max(1, max_prompt_tokens - estimate_tokens(SYSTEM) - estimate_tokens(request_base))
+        for _ in range(8):
+            model_context, visible_evidence_ids = compact_for_model(
+                context,
+                state["checks"],
+                max_prompt_tokens=context_limit,
+                priority_evidence_ids=context.get("priority_evidence_ids") or [],
+            )
+            payload = {
+                **request_base,
+                "episode": model_context,
+                "available_evidence_ids": sorted(visible_evidence_ids),
+            }
+            estimated_prompt = estimate_tokens(SYSTEM) + estimate_tokens(payload)
+            if estimated_prompt <= max_prompt_tokens:
+                return payload, visible_evidence_ids
+            context_limit = max(1, context_limit - max(1, estimated_prompt - max_prompt_tokens + 16))
+
+        # At the smallest configured prompt caps, the optional tool catalogue can
+        # consume the space needed for the evidence ledger.  Preserve the evidence
+        # and ask for a final assessment instead of issuing an oversized request.
+        request_base.update({
+            "allowed_pods": [],
+            "tools": {},
+            "remaining_optional_checks": 0,
+            "instruction": "Finish using the retained evidence. No further checks are available in this request.",
+        })
         model_context, visible_evidence_ids = compact_for_model(
             context,
             state["checks"],
-            max_prompt_tokens=context_limit,
+            max_prompt_tokens=max(1, max_prompt_tokens - estimate_tokens(SYSTEM) - estimate_tokens(request_base)),
             priority_evidence_ids=context.get("priority_evidence_ids") or [],
         )
-        return {**base, "episode": model_context}, visible_evidence_ids
+        payload = {
+            **request_base,
+            "episode": model_context,
+            "available_evidence_ids": sorted(visible_evidence_ids),
+        }
+        return payload, visible_evidence_ids
 
     def request_model(payload, effort, phase, desired_completion_tokens):
         if time.monotonic() - started > 420:
@@ -414,7 +446,6 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                            if turn == max_checks else
                            "Required bounded observations have completed. Choose one optional discriminating check, or finish when further queries would not help."
                        )})
-            payload["available_evidence_ids"] = sorted(visible_evidence_ids)
             state["message"] = "Assessing episode evidence" if turn == 0 else "Reviewing check results"
             publish(state)
             response, call = request_model(
@@ -485,7 +516,6 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 "draft_validation_error": state.get("draft_validation_error"),
                 "instruction": REVIEW_INSTRUCTION}
             payload, visible_evidence_ids = compact_payload(review_base)
-            payload["available_evidence_ids"] = sorted(visible_evidence_ids)
             response, call = request_model(payload, "none", "evidence_review", 1200)
             decision = parse_object(str(response.get("content", "")))
             call["decision"] = scrub(decision)
@@ -511,7 +541,6 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                     "instruction": REVIEW_REPAIR_INSTRUCTION,
                 }
                 payload, visible_evidence_ids = compact_payload(repair_base)
-                payload["available_evidence_ids"] = sorted(visible_evidence_ids)
                 response, repair_call = request_model(payload, "none", "evidence_review_repair", 700)
                 repair_decision = parse_object(str(response.get("content", "")))
                 repair_call["decision"] = scrub(repair_decision)

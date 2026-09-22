@@ -299,6 +299,30 @@ def compact_for_model(
             visible_ids = refresh_visible_ids()
         elif payload.get("alerts") and len(payload["alerts"]) > 1:
             payload["alerts"].pop()
+        elif len(payload["prior_checks"]) > 1:
+            # A very low provider cap still needs room for an assessment. Keep
+            # the freshest bounded observation rather than failing the request.
+            payload["prior_checks"].pop(0)
+            visible_ids = refresh_visible_ids()
+        elif payload.get("historical_candidates"):
+            payload.pop("historical_candidates", None)
+        elif payload.get("episode_lifecycle"):
+            payload.pop("episode_lifecycle", None)
+        elif payload.get("alerts"):
+            payload.pop("alerts", None)
+        elif payload.get("constraints") != "Evidence may be incomplete.":
+            payload["constraints"] = "Evidence may be incomplete."
+        elif payload["prior_checks"]:
+            payload["prior_checks"] = []
+            visible_ids = refresh_visible_ids()
+        elif payload["evidence"] and payload["evidence"][0].get("summary"):
+            payload["evidence"][0]["summary"] = _short(payload["evidence"][0].get("summary"), 60)
+        elif payload["evidence"] and len(payload["evidence"][0]) > 2:
+            payload["evidence"][0] = {
+                key: payload["evidence"][0][key]
+                for key in ("id", "summary") if key in payload["evidence"][0]
+            }
+            visible_ids = refresh_visible_ids()
         else:
             break
     return payload, list(dict.fromkeys(visible_ids))

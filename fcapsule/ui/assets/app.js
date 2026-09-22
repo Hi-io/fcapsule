@@ -163,7 +163,7 @@ function renderConsole(state) {
   const data = state.overview;
   const allQueueEpisodes = [...(showArchived ? data.archived_episodes : data.episodes)];
   const apps = new Map(data.applications.map(item => [item.app_id, item]));
-  const episodes = filteredEpisodes(allQueueEpisodes, apps).sort((a,b) => Number(b.status === 'active') - Number(a.status === 'active') || b.last_activity_at.localeCompare(a.last_activity_at));
+  const episodes = filteredEpisodes(allQueueEpisodes, apps).sort((a,b) => b.last_activity_at.localeCompare(a.last_activity_at));
   const active = data.episodes.filter(item => item.status === 'active').length;
   app.innerHTML = `
     <div class="page-head"><div><div class="eyebrow">Incident workspace</div><h1>Operations</h1><p>${active} active · ${data.episodes.length - active} resolved</p></div><a class="button-link" href="/targets">Manage targets</a></div>
