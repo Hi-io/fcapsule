@@ -18,7 +18,7 @@ data shapes:
 | Role | Default model | Data it receives | Operator value |
 |---|---|---|---|
 | Episode investigator | configured DeepSeek-compatible model | selected text, structured alerts, configuration, and bounded metric/log summaries | asks a discriminating read-only check and returns a cited incident assessment |
-| Visual specialist | `qwen/qwen3-vl-8b-instruct` through OpenRouter | a manually supplied PNG, JPEG, or WebP image | extracts visible operational observations, labels, values, and uncertainty from a screenshot |
+| Visual specialist | `qwen/qwen3-vl-30b-a3b-instruct` through OpenRouter | a manually supplied PNG, JPEG, or WebP image | extracts visible operational observations, labels, values, and uncertainty from a screenshot |
 | Audio specialist | `qwen/qwen3-asr-0.6b` through OpenRouter | a manually supplied short audio recording | produces a transcript that can be considered with retained episode evidence |
 
 The models are orchestrated rather than placed side by side: FCAPSule captures and
@@ -75,6 +75,11 @@ call. On an explicit evidence revision, its derived `A-...` observation is prior
 in the prompt ledger and every call records the visible evidence IDs. Raw source
 telemetry is never sent wholesale merely because a media item was added. See [AI investigation techniques](ai_investigation_techniques.md) for the
 full-request token reserve and [data privacy](data_privacy.md) for retention boundaries.
+
+Visual extraction reserves at most 800 completion tokens so the specialist can finish
+the required structured response. This is an optional, per-attachment cost: its
+provider-reported token use, cost, and latency are retained beside the attachment and
+do not expand the core investigation's bounded evidence budget.
 
 ## Evaluation Protocol
 

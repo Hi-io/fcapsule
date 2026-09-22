@@ -51,6 +51,16 @@ class OpenRouterClientTests(unittest.TestCase):
         self.assertEqual(struct.unpack(">II", data[16:24]), (32, 32))
         self.assertEqual(payload["response_format"], {"type": "json_object"})
 
+    def test_visual_extraction_reserves_output_for_a_complete_json_response(self):
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}), patch(
+            "fcapsule.reasoning.openrouter.urllib.request.urlopen",
+            return_value=_Response({"choices": [{"message": {"content": "{}"}}], "usage": {"total_tokens": 2}}),
+        ) as request:
+            OpenRouterClient().visual_extract(b"small png", "image/png", "qwen/qwen3-vl-30b-a3b-instruct")
+
+        payload = json.loads(request.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(payload["max_tokens"], 800)
+
 
 if __name__ == "__main__":
     unittest.main()

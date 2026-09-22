@@ -106,7 +106,7 @@ class OpenRouterClient:
         usage = payload.get("usage")
         return usage if isinstance(usage, dict) else {}
 
-    def visual_extract(self, image: bytes, mime_type: str, model: str, max_tokens: int = 420) -> dict[str, Any]:
+    def visual_extract(self, image: bytes, mime_type: str, model: str, max_tokens: int = 800) -> dict[str, Any]:
         if len(image) > 6 * 1024 * 1024:
             raise OpenRouterError("Image evidence exceeds the 6 MiB provider upload limit")
         if mime_type not in {"image/png", "image/jpeg", "image/webp"}:
