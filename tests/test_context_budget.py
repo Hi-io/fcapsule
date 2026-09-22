@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from fcapsule.reasoning.context_budget import compact_for_model, estimate_tokens
+from fcapsule.reasoning.context_budget import _log_observation, compact_for_model, estimate_tokens
 
 
 class ContextBudgetTests(unittest.TestCase):
@@ -80,6 +80,18 @@ class ContextBudgetTests(unittest.TestCase):
         signal = log_check["observation"]["top_signal"]
         self.assertEqual(signal["level"], "ERROR")
         self.assertEqual(signal["error"], "Only base64 data is allowed")
+
+    def test_log_observation_prefers_less_frequent_operational_signal_over_heartbeat(self):
+        observation = _log_observation({"patterns": [
+            {"pattern": "Worker scheduler heartbeat", "count": 100,
+             "examples": [{"level": "INFO", "message": '{"message":"Worker scheduler heartbeat"}'}]},
+            {"pattern": "Export page encoded delivery buffered", "count": 12,
+             "examples": [{"level": "INFO", "message": '{"message":"Export page encoded","buffered_bytes":141432000,"delivery":"buffered"}'}]},
+        ]})
+
+        self.assertEqual(observation["top_signal"]["message"], "Export page encoded")
+        self.assertEqual(observation["top_signal"]["delivery"], "buffered")
+        self.assertEqual(observation["top_signal"]["buffered_bytes"], "141432000")
 
     def test_revision_priority_keeps_new_operator_evidence_visible(self):
         context = {

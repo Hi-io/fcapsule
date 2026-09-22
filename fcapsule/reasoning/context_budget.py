@@ -78,7 +78,7 @@ def _evidence_item(item: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in values.items() if value not in (None, "", [], {})}
 
 
-def _pattern_priority(item: dict[str, Any]) -> tuple[int, int, int]:
+def _pattern_priority(item: dict[str, Any]) -> tuple[int, int, int, int]:
     """Promote failure signatures above frequent healthy heartbeat templates."""
 
     text = json.dumps(item, ensure_ascii=True, default=str).casefold()
@@ -86,11 +86,21 @@ def _pattern_priority(item: dict[str, Any]) -> tuple[int, int, int]:
         "critical", "fatal", "error", "exception", "traceback", "panic", "failed",
         "failure", "refused", "timeout", "oom", "crash", "sqlstate", "errno", "exit_code",
     )
+    diagnostic_markers = (
+        "buffered", "allocated", "memory", "throttl", "pbkdf", "kdf", "rounds",
+        "limit", "retry", "rejected", "mismatch", "schema", "version", "endpoint",
+        "route", "authorization", "connection", "deadlock", "lock wait", "constraint",
+    )
     try:
         count = int(item.get("count", 0))
     except (TypeError, ValueError):
         count = 0
-    return (int(any(marker in text for marker in failure_markers)), int(bool(item.get("fields"))), count)
+    return (
+        int(any(marker in text for marker in failure_markers)),
+        int(any(marker in text for marker in diagnostic_markers)),
+        int(bool(item.get("fields"))),
+        count,
+    )
 
 
 def _log_example(item: dict[str, Any]) -> dict[str, Any] | str | None:
@@ -109,6 +119,8 @@ def _log_example(item: dict[str, Any]) -> dict[str, Any] | str | None:
         values = {key: structured.get(key) for key in (
             "level", "message", "error", "error_type", "reason", "exit_code", "errno",
             "sqlstate", "mysql_error_code", "status_code", "disposition", "payload_encoding",
+            "buffered_bytes", "page_bytes", "delivery", "rows", "kdf", "rounds", "mode",
+            "timeout_seconds", "expected_schema", "response_schema", "query_revision", "endpoint",
         )}
         return {key: _short(value, 180) for key, value in values.items() if value not in (None, "")}
     return {
