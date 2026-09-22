@@ -118,6 +118,21 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(len(client.requests), 2)
         self.assertFalse(any(item["status"] == "ready" and item["assessment"] == assessment() for item in self.progress))
 
+    def test_review_schema_omission_gets_one_bounded_repair_attempt(self):
+        malformed = assessment()
+        malformed["hypotheses"][0].pop("evidence_ids")
+        corrected = assessment()
+        state, client = self.run_case([
+            {"action": "finish", "assessment": assessment()},
+            {"action": "finish", "assessment": malformed},
+            {"action": "finish", "assessment": corrected},
+        ], max_checks=0)
+        self.assertEqual(state["status"], "ready")
+        self.assertTrue(state["review"]["schema_repair"])
+        self.assertEqual(client.requests[-1].reasoning_effort, "none")
+        self.assertEqual(state["calls"][-1]["phase"], "evidence_review_repair")
+        self.assertIn("validation_error", state["calls"][-2])
+
     def test_reserved_review_can_repair_excess_known_citations_without_more_calls(self):
         refs = [f"E{index}" for index in range(10)]
         self.context["evidence"] = [{"id": ref} for ref in refs]

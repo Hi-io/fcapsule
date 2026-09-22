@@ -82,6 +82,12 @@ of inside it, only that known layout mismatch is normalized and recorded in the
 call audit. Conflicting values are rejected. The original response is retained,
 and all content, bounds and reference validations still apply.
 
+If that final review preserves a conclusion but produces malformed citation structure,
+FCAPSule may make **one** bounded schema-repair call. It receives the rejected review,
+the validation error and the same visible evidence IDs. It cannot call a source or add
+claims, numbers or references; a second invalid result remains incomplete. This makes a
+provider formatting lapse recoverable without treating the original draft as approved.
+
 #### Service-Scoped Discovery Alerts
 
 Some Prometheus alerts describe a missing target and therefore identify a
@@ -249,15 +255,17 @@ administrator boundary, not a multi-tenant authorization system.
 The product default is automatic preservation plus required bounded observations,
 one optional model-selected check, one final assessment and one evidence review.
 Required source reads do not consume provider tokens. That normally means no more than
-three provider calls. Operators can raise the number of optional model-selected checks
-to four, for a maximum of six calls. The default per-investigation reserve is 12,000 tokens and the
+three provider calls. A malformed evidence review can consume one schema-repair call,
+for a maximum of four by default; it stays inside the same total token budget.
+Operators can raise the number of optional model-selected checks to four, for a maximum
+of seven calls when a repair is needed. The default per-investigation reserve is 12,000 tokens and the
 default full-request input cap is 2,100 tokens. The latter includes system instructions,
 the tool catalogue, citation IDs and selected evidence; it is not merely a cap on log
 text. The completion limit in Settings applies per call. Calls request JSON output
 with reasoning disabled: the evidence contract, bounded dispatch table and final
 review are the safety controls, rather than hidden deliberation that can consume an
-entire response allowance. One schema repair uses a remaining reserved call; it does
-not increase the total call budget. These controls follow the [DeepSeek API contract](https://api-docs.deepseek.com/api/create-chat-completion/).
+entire response allowance. One schema repair is permitted only after the final review;
+it does not increase the total token budget. These controls follow the [DeepSeek API contract](https://api-docs.deepseek.com/api/create-chat-completion/).
 
 Before each request, FCAPSule reserves its estimated full input plus the allowed
 completion. A missing provider usage field therefore cannot create further unreserved
@@ -326,11 +334,13 @@ solely because sampled memory is low. These interpretations follow the
 and [Kubernetes resource behavior](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/).
 They constrain interpretation, not the observed outcome of any particular case.
 
-Policy `episode-investigation-1.12` uses structured output without hidden reasoning
+Policy `episode-investigation-1.13` uses structured output without hidden reasoning
 effort for both investigation and the already reserved final review. Explicit byte
 conversion, component-versus-total memory and termination-versus-alert time checks
 remain in the review instruction. A bounded, cited historical comparison is required
-when a deterministic recurrence candidate exists. Repeated occurrences of the same
+when a deterministic recurrence candidate exists. One invalid review response may use
+a bounded schema-only repair against the same evidence; any further invalid response
+remains incomplete. Repeated occurrences of the same
 alert are retained as recurrence evidence, while relationship fields are required only
 for distinct alert identities. The review has the same call and completion budget and
 is still model-assisted consistency review, not a deterministic numerical validator.

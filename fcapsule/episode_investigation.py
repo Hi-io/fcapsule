@@ -159,6 +159,12 @@ time versus failure time distinct. convert memory quantities to bytes before com
 Preserve valid cited facts and uncertainty. No private deliberation."""
 
 
+REVIEW_REPAIR_INSTRUCTION = """Structured repair only. Return one complete {"action":"finish","assessment":{...}} JSON;
+do not call tools or add facts, diagnoses, numbers, or evidence IDs. Preserve the reviewed assessment's supported wording
+and uncertainty. Correct the stated validation error using only the available evidence IDs. Every assessment, hypothesis,
+connection, and historical comparison citation array must contain one to eight available IDs. No private deliberation."""
+
+
 def run_investigation(context: dict[str, Any], tools: InvestigationTools, model: str, max_tokens: int,
                       publish: Callable[[dict[str, Any]], None], max_checks: int | None = None,
                       max_total_tokens: int | None = None, max_prompt_tokens: int | None = None,
@@ -176,7 +182,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
     if max_prompt_tokens < 1200 or max_prompt_tokens > 12000:
         raise ValueError("max_prompt_tokens must be between 1200 and 12000")
     state = {"version": "1", "episode_id": context["episode_id"], "status": "running", "started_at": now(),
-              "policy_version": "episode-investigation-1.12", "max_completion_tokens_per_call": max_tokens,
+              "policy_version": "episode-investigation-1.13", "max_completion_tokens_per_call": max_tokens,
              "model": model, "context": context, "checks": [], "calls": [], "assessment": None,
              "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
              "token_budget": {"maximum_total_tokens": max_total_tokens, "maximum_prompt_tokens": max_prompt_tokens,
@@ -416,14 +422,41 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             response, call = request_model(payload, "none", "evidence_review", 900)
             decision = parse_object(str(response.get("content", "")))
             call["decision"] = scrub(decision)
-            reviewed = validate_assessment(
-                review_assessment_payload(decision, call), set(visible_evidence_ids),
-                {item["incident_id"] for item in context["alerts"]},
-                {item["episode_id"] for item in context.get("historical_candidates", [])},
-                require_connections=require_connections,
-            )
+            repaired_review = False
+            try:
+                reviewed = validate_assessment(
+                    review_assessment_payload(decision, call), set(visible_evidence_ids),
+                    {item["incident_id"] for item in context["alerts"]},
+                    {item["episode_id"] for item in context.get("historical_candidates", [])},
+                    require_connections=require_connections,
+                )
+            except ValueError as error:
+                # The consistency pass may preserve the conclusion but omit a required
+                # JSON citation field. Spend one bounded call on structure only; it
+                # cannot query sources, invent evidence, or publish an invalid draft.
+                call["validation_error"] = str(error)[:240]
+                state["review"].update(status="repairing", validation_error=call["validation_error"])
+                publish(state)
+                repair_base = {
+                    "available_evidence_ids": [],
+                    "assessment_to_repair": decision,
+                    "review_validation_error": call["validation_error"],
+                    "instruction": REVIEW_REPAIR_INSTRUCTION,
+                }
+                payload, visible_evidence_ids = compact_payload(repair_base)
+                payload["available_evidence_ids"] = sorted(visible_evidence_ids)
+                response, repair_call = request_model(payload, "none", "evidence_review_repair", 700)
+                repair_decision = parse_object(str(response.get("content", "")))
+                repair_call["decision"] = scrub(repair_decision)
+                reviewed = validate_assessment(
+                    review_assessment_payload(repair_decision, repair_call), set(visible_evidence_ids),
+                    {item["incident_id"] for item in context["alerts"]},
+                    {item["episode_id"] for item in context.get("historical_candidates", [])},
+                    require_connections=require_connections,
+                )
+                repaired_review = True
             state.update(assessment=reviewed, status="ready", review={"status": "completed", "changed": reviewed != draft,
-                         "schema_repair": review_candidate is not None,
+                         "schema_repair": review_candidate is not None or repaired_review,
                          "limitation": "Model-assisted consistency review, not independent proof."})
     except Exception as error:
         state["status"] = "incomplete"
