@@ -1130,11 +1130,17 @@ class FCAPSuleStore:
             {
                 "episode_id": str(item["episode_id"]), "reference": _reference("EP", str(item["episode_id"])),
                 "title": str(item["title"]), "status": str(item["status"]), "severity": str(item["severity"]),
-                "started_at": str(item["started_at"]), "app_id": str(item["app_id"]),
+                "started_at": str(item["started_at"]), "last_activity_at": str(item["last_activity_at"]),
+                "app_id": str(item["app_id"]),
             }
             for item in members
         ]
         result["episode_count"] = len(result["episodes"])
+        result["active_count"] = sum(1 for item in result["episodes"] if item["status"] == "active")
+        result["first_observed_at"] = result["episodes"][0]["started_at"] if result["episodes"] else None
+        result["last_observed_at"] = max(
+            (item["last_activity_at"] for item in result["episodes"]), default=None,
+        )
         return result
 
     def get_related_episode_group(self, group_id: str) -> dict[str, Any] | None:
