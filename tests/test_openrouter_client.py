@@ -49,6 +49,7 @@ class OpenRouterClientTests(unittest.TestCase):
         data = base64.b64decode(url.split(",", 1)[1])
         self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
         self.assertEqual(struct.unpack(">II", data[16:24]), (32, 32))
+        self.assertEqual(payload["response_format"], {"type": "json_object"})
 
 
 if __name__ == "__main__":

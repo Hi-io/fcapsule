@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fcapsule.control_plane import ControlPlane
+from fcapsule.evidence_service import _extract_json
 
 
 PIXEL_PNG = base64.b64decode(
@@ -75,6 +76,15 @@ class EvidenceServiceTests(unittest.TestCase):
         manifest = self.plane.evidence.manifest(self.episode_id)[0]
         self.assertEqual(manifest["extraction"]["visible_text"], ["Target down"])
         self.assertEqual(manifest["context_note"], "Screenshot after the alert")
+
+    def test_image_extraction_recovers_a_json_object_wrapped_by_provider_prose(self):
+        extraction = _extract_json(
+            'Here is the requested object: {"visible_text":["Target down"],'
+            '"observations":[{"fact":"checkout target is down","confidence":"high","region":"table"}],'
+            '"ambiguities":[],"limitation":"Visible status only."}'
+        )
+        self.assertEqual(extraction["visible_text"], ["Target down"])
+        self.assertEqual(extraction["observations"][0]["confidence"], "high")
 
     def test_invalid_or_unsupported_upload_is_rejected_before_storage(self):
         with patch.object(self.plane, "media_submission_allowed", return_value=(True, "")):

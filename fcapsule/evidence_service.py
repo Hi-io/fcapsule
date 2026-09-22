@@ -75,13 +75,19 @@ def _extract_json(content: str) -> dict[str, Any]:
     text = content.strip()
     if text.startswith("```"):
         text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
+    parsed: Any = None
+    candidates = [text]
+    candidates.extend(text[index:] for index, character in enumerate(text) if character == "{")
+    for candidate in candidates:
+        try:
+            value, _ = json.JSONDecoder().raw_decode(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            parsed = value
+            break
+    if parsed is None:
         return {"visible_text": [], "observations": [], "ambiguities": ["The visual model did not return structured extraction."],
-                "limitation": "Treat this attachment as available but not machine-extracted."}
-    if not isinstance(parsed, dict):
-        return {"visible_text": [], "observations": [], "ambiguities": ["The visual model returned an unexpected shape."],
                 "limitation": "Treat this attachment as available but not machine-extracted."}
     visible_text = [_safe_text(item, 240) for item in parsed.get("visible_text", []) if str(item).strip()][:20]
     observations = []

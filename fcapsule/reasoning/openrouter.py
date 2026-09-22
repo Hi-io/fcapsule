@@ -116,7 +116,7 @@ class OpenRouterClient:
             "Extract only visible operational facts from this screenshot. Return concise JSON with keys "
             "visible_text (array), observations (array of {fact, confidence, region}), ambiguities (array), "
             "and limitation (string). Preserve exact identifiers where readable. Do not infer unseen targets, "
-            "timestamps, configuration, or a diagnosis."
+            "timestamps, configuration, or a diagnosis. Return one JSON object only, with no Markdown or prose."
         )
         payload, latency = self._request(
             "/chat/completions",
@@ -124,6 +124,7 @@ class OpenRouterClient:
                 "model": model,
                 "temperature": 0,
                 "max_tokens": max(128, min(800, int(max_tokens))),
+                "response_format": {"type": "json_object"},
                 "messages": [{"role": "user", "content": [
                     {"type": "text", "text": prompt},
                     {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{encoded}"}},
