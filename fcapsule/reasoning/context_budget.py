@@ -170,8 +170,21 @@ def _workload_observation(result: dict[str, Any]) -> dict[str, Any]:
     """Preserve the termination and resource facts needed to avoid re-querying it."""
 
     workloads = []
+    configuration = []
     for item in result.get("observations", []):
-        if not isinstance(item, dict) or item.get("kind") != "PodSpec":
+        if not isinstance(item, dict):
+            continue
+        if item.get("kind") == "ConfigMap":
+            values = item.get("data") if isinstance(item.get("data"), dict) else {}
+            retained = _safe_configuration_values(values)
+            if retained:
+                configuration.append({
+                    "kind": "ConfigMap",
+                    "name": item.get("name"),
+                    "values": retained,
+                })
+            continue
+        if item.get("kind") != "PodSpec":
             continue
         resource = next((row for row in item.get("resources", []) if isinstance(row, dict)), {})
         state = next((row for row in item.get("container_states", []) if isinstance(row, dict)), {})
@@ -179,15 +192,48 @@ def _workload_observation(result: dict[str, Any]) -> dict[str, Any]:
         workloads.append({
             "ready": item.get("ready"),
             "limits": resource.get("limits"),
-            "last_termination": {"reason": terminated.get("reason"), "exit_code": terminated.get("exitCode")},
+            "last_termination": {
+                "reason": terminated.get("reason"),
+                "exit_code": terminated.get("exitCode"),
+                "finished_at": terminated.get("finishedAt"),
+            },
             "restart_count": state.get("restart_count"),
         })
     values = {
         "declared_dependencies": [item.get("service") for item in result.get("declared_dependencies", [])
                                   if isinstance(item, dict) and item.get("service")][:4],
         "workloads": workloads,
+        "configuration": configuration[:4],
     }
     return {key: value for key, value in values.items() if value not in (None, "", [], {})}
+
+
+def _safe_configuration_values(values: dict[str, Any]) -> dict[str, str]:
+    """Retain operational configuration without sending credentials to a model."""
+
+    sensitive = ("password", "secret", "token", "credential", "private", "certificate", "apikey", "api_key")
+    useful = ("url", "host", "port", "timeout", "revision", "schema", "version", "key_id", "key-id",
+              "max", "limit", "mode", "service", "feature")
+    retained: dict[str, str] = {}
+    for key, value in values.items():
+        normalized = str(key).casefold()
+        if any(marker in normalized for marker in sensitive):
+            continue
+        text = str(value or "").strip()
+        if any(marker in normalized for marker in useful):
+            retained[str(key)] = _short(text, 180)
+            continue
+        # Config files can bundle safe operational settings with unrelated data.
+        # Keep only their diagnostic assignment lines, never the entire file.
+        lines = [
+            line.strip() for line in text.splitlines()
+            if "=" in line
+            and not any(marker in line.casefold().split("=", 1)[0] for marker in sensitive)
+            and any(marker in line.casefold().split("=", 1)[0] for marker in useful)
+        ]
+        if lines:
+            retained[str(key)] = _short("; ".join(lines[:6]), 300)
+    return retained
 
 
 def _check_item(check: dict[str, Any], latest: bool) -> dict[str, Any]:

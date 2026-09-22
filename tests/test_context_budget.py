@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from fcapsule.reasoning.context_budget import _log_observation, compact_for_model, estimate_tokens
+from fcapsule.reasoning.context_budget import _log_observation, _workload_observation, compact_for_model, estimate_tokens
 
 
 class ContextBudgetTests(unittest.TestCase):
@@ -158,6 +158,39 @@ class ContextBudgetTests(unittest.TestCase):
         self.assertLessEqual(estimate_tokens(compact), 80)
         self.assertEqual(visible, ["E1"])
         self.assertLessEqual(len(compact["evidence"][0].get("summary", "")), 60)
+
+    def test_workload_observation_keeps_safe_configuration_and_termination_time(self):
+        observation = _workload_observation({
+            "observations": [
+                {
+                    "kind": "PodSpec",
+                    "ready": True,
+                    "resources": [{"limits": {"memory": "160Mi"}}],
+                    "container_states": [{"restart_count": 3, "last_state": {"terminated": {
+                        "reason": "OOMKilled", "exitCode": 137, "finishedAt": "2026-09-23T10:00:00Z",
+                    }}}],
+                },
+                {
+                    "kind": "ConfigMap",
+                    "name": "orders-config",
+                    "data": {
+                        "INVENTORY_URL": "http://inventory-api:8099",
+                        "INVENTORY_TIMEOUT_SECONDS": "0.05",
+                        "REQUEST_KEY_ID": "checkout-key-v1",
+                        "MYSQL_PASSWORD": "never-send-this",
+                        "lab.cnf": "[mysqld]\nmax_connections=40\npassword=never-send-this",
+                    },
+                },
+            ],
+        })
+
+        self.assertEqual(observation["workloads"][0]["last_termination"]["finished_at"], "2026-09-23T10:00:00Z")
+        values = observation["configuration"][0]["values"]
+        self.assertEqual(values["INVENTORY_URL"], "http://inventory-api:8099")
+        self.assertEqual(values["REQUEST_KEY_ID"], "checkout-key-v1")
+        self.assertIn("max_connections=40", values["lab.cnf"])
+        self.assertNotIn("MYSQL_PASSWORD", values)
+        self.assertNotIn("never-send-this", json.dumps(values))
 
 
 if __name__ == "__main__":
