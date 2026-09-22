@@ -241,6 +241,17 @@ class InvestigationEngineTests(unittest.TestCase):
         result = validate_assessment(value, {"Q001"}, {"one"})
         self.assertNotIn("historical_comparison", result)
 
+    def test_unavailable_history_claim_is_omitted_without_overturning_current_assessment(self):
+        value = assessment()
+        value["historical_comparison"] = {
+            "episode_id": "invented-prior-episode", "status": "similar_mechanism",
+            "summary": "This unprovided episode is allegedly related.", "evidence_ids": ["Q001"],
+        }
+
+        result = validate_assessment(value, {"Q001"}, {"one"})
+
+        self.assertNotIn("historical_comparison", result)
+
     def test_last_investigation_turn_reserves_tokens_for_structured_output(self):
         state, client = self.run_case([{"action": "finish", "assessment": assessment()}], max_checks=0, model_max_tokens=2000)
         self.assertEqual(state["status"], "ready")
@@ -302,6 +313,19 @@ class InvestigationEngineTests(unittest.TestCase):
         value["connections"] = [{"from": "one", "to": "two", "relationship": "no_link_established", "reason": "Timing only", "evidence_ids": ["Q001"]}]
         connection = validate_assessment(value, {"Q001"}, {"one", "two"})["connections"][0]
         self.assertEqual(connection["provenance"], "model")
+
+    def test_uncited_model_connection_becomes_a_non_causal_structural_abstention(self):
+        value = assessment()
+        value["connections"] = [{
+            "from": "one", "to": "two", "relationship": "possibly_related",
+            "reason": "The model did not provide a retained reference.", "evidence_ids": [],
+        }]
+
+        connection = validate_assessment(value, {"Q001"}, {"one", "two"})["connections"][0]
+
+        self.assertEqual(connection["relationship"], "no_link_established")
+        self.assertEqual(connection["evidence_ids"], ["Q001"])
+        self.assertEqual(connection["provenance"], "structural_default")
 
     def test_unresolved_hypothesis_without_citations_inherits_assessment_evidence(self):
         value = assessment()

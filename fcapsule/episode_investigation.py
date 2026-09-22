@@ -98,6 +98,20 @@ def validate_assessment(
             raise ValueError("Invalid relationship type")
         if not isinstance(item.get("reason"), str) or not 1 <= len(item["reason"]) <= 500:
             raise ValueError("Invalid relationship reason")
+        # Alert links are presentation-level context, not a prerequisite for a
+        # separately grounded diagnosis. When the model leaves a link uncited,
+        # retain a clearly non-causal abstention rather than discard the whole
+        # assessment. This never preserves the model's ungrounded relationship.
+        if item.get("evidence_ids") == []:
+            result["connections"].append({
+                "from": item["from"],
+                "to": item["to"],
+                "relationship": "no_link_established",
+                "reason": "No causal relationship is established by the retained observations.",
+                "evidence_ids": result["evidence_ids"],
+                "provenance": "structural_default",
+            })
+            continue
         result["connections"].append({key: item[key] for key in ("from", "to", "relationship", "reason")}
                                     | {"evidence_ids": citations(item), "provenance": "model"})
     comparison = value.get("historical_comparison")
@@ -117,13 +131,11 @@ def validate_assessment(
             "evidence_ids": citations(comparison),
         }
     elif comparison is not None:
-        harmless_placeholder = (
-            isinstance(comparison, dict)
-            and comparison.get("status") == "insufficient_evidence"
-            and str(comparison.get("episode_id", "")).casefold() in {"", "none", "null", "not_available"}
-        )
-        if not harmless_placeholder:
-            raise ValueError("Historical comparison supplied without a recurrence candidate")
+        # Historical comparison is optional when the system has no candidate.
+        # Discard any unsupported model-generated comparison rather than letting
+        # it overturn a grounded assessment of current evidence. Nothing about
+        # the omitted field is retained or presented as historical fact.
+        pass
     return scrub(result)
 
 
