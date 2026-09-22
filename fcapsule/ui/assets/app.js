@@ -408,7 +408,11 @@ function episodeContext(episode) {
   const id = reportId() || episode.primary_incident_id;
   const signal = episode.signals.find(item => item.incident_id === id) || episode.signals[0] || {};
   const identity = `<span class="incident-reference">${safe(signal.reference || episode.reference || id)}</span>`;
-  const lifecycle = episode.status === 'resolved' && episode.investigation?.finished_at ? `Assessment saved ${safe(relativeTime(episode.investigation.finished_at))} · currently resolved` : episode.status === 'active' ? 'Currently active' : 'Currently resolved';
+  const investigation = episode.investigation || {};
+  const assessmentState = investigation.status === 'ready' ? `Assessment ready ${safe(relativeTime(investigation.finished_at))}`
+    : investigation.status === 'incomplete' ? `Investigation needs attention ${safe(relativeTime(investigation.finished_at))}`
+      : investigation.status === 'running' || investigation.status === 'queued' ? 'Investigation in progress' : '';
+  const lifecycle = assessmentState || (episode.status === 'active' ? 'Currently active' : 'Currently resolved');
   if (reportTab === 'overview') return `<span class="queue-note">${identity} · ${episode.signal_count} captured alert${episode.signal_count === 1 ? '' : 's'} · ${lifecycle}</span><button class="icon-button" data-copy-incident-link title="Copy direct incident link" aria-label="Copy direct incident link">${icon('copy')}</button>`;
   if (episode.signals.length === 1) return '<span class="queue-note">Investigation</span>';
   return `<div class="signal-selector"><label for="signal-report">Alert report</label><select id="signal-report" data-signal-select>${episode.signals.map((signal, index) => `<option value="${safe(signal.incident_id)}" ${id === signal.incident_id ? 'selected' : ''}>${index + 1}. ${safe(signal.summary || signal.scenario)} · ${shortTime(signal.started_at)}</option>`).join('')}</select></div>`;

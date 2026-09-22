@@ -96,6 +96,16 @@ test('episode overview does not imply it is the selected individual alert', () =
   assert.doesNotMatch(html, /select/);
 });
 
+test('episode lifecycle does not label an incomplete investigation as saved', () => {
+  const context = helper('episodeContext', 'formatDate', {
+    reportId:()=> 'one', reportTab:'overview', safe:value=>String(value ?? ''), relativeTime:value=>value, icon:()=>'',
+  });
+  const html = context({episode_id:'episode', reference:'EP-ONE', signal_count:1, status:'resolved',
+    investigation:{status:'incomplete',finished_at:'attempt-time'}, signals:[{incident_id:'one',reference:'INC-ONE'}]});
+  assert.match(html, /Investigation needs attention attempt-time/);
+  assert.doesNotMatch(html, /Assessment saved/);
+});
+
 test('queue filters can find a stable incident reference without hiding unrelated history', () => {
   const filter = helper('filteredEpisodes', 'queueFiltersPanel', {
     queueFilters:{namespace:'commerce',scope:'',status:'resolved',period:'',query:'inc-ab'},
