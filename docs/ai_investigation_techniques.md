@@ -26,11 +26,13 @@ Up to eighty initial evidence records enter the investigation context. Individua
 reports outside that bound remain accessible; the bound is declared to the model.
 
 The LLM receives alert identities, retained alert conditions when available, selected
-logs, metric findings and configuration. A multi-alert assessment must describe at
-least one relationship: `possibly_related`, `same_symptom` or
-`no_link_established`, but only when the episode contains distinct alert identities.
-Repeated occurrences of one alert are recurrence evidence, not artificial causal
-edges. Group membership is not evidence of a shared cause.
+logs, metric findings and configuration. A multi-alert assessment describes a
+relationship when one is supported: `possibly_related`, `same_symptom` or
+`no_link_established`. If a structurally valid model assessment omits that display
+field, FCAPSule retains it with a cited `no_link_established` default rather than
+inventing a causal edge or discarding the assessment. Repeated occurrences of one
+alert are recurrence evidence, not artificial causal edges. Group membership is not
+evidence of a shared cause.
 
 The output has one episode-level summary, likely mechanism, next action, expected
 finding, uncertainty, one to three competing hypotheses and cited relationships.
@@ -345,9 +347,10 @@ remain in the review instruction. A bounded, cited historical comparison is requ
 when a deterministic recurrence candidate exists. One invalid review response may use
 a bounded schema-only repair against the same evidence; any further invalid response
 becomes a grounded abstention rather than a claimed conclusion. Repeated occurrences of the same
-alert are retained as recurrence evidence, while relationship fields are required only
-for distinct alert identities. The review has the same call and completion budget and
-is still model-assisted consistency review, not a deterministic numerical validator.
+alert are retained as recurrence evidence. For distinct alert identities, a missing
+relationship becomes a cited `no_link_established` structural abstention, never an
+inferred cause. The review has the same call and completion budget and is still
+model-assisted consistency review, not a deterministic numerical validator.
 Original and revised assessments must both remain in evaluation records, including
 unsuccessful corrections.
 

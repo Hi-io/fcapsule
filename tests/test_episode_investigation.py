@@ -260,12 +260,17 @@ class InvestigationEngineTests(unittest.TestCase):
         state, _ = self.run_case([{**decision, "tool": "kubectl_exec"}])
         self.assertEqual(self.kit.execute.call_count, 1)  # Preservation only.
 
-    def test_multi_alert_relationships_are_explicit(self):
-        with self.assertRaises(ValueError):
-            validate_assessment(assessment(), {"Q001"}, {"one", "two"})
+    def test_multi_alert_relationship_omission_defaults_to_an_evidence_cited_abstention(self):
+        normalized = validate_assessment(assessment(), {"Q001"}, {"one", "two"})
+        self.assertEqual(normalized["connections"], [{
+            "from": "one", "to": "two", "relationship": "no_link_established",
+            "reason": "No causal relationship is established by the retained observations.",
+            "evidence_ids": ["Q001"], "provenance": "structural_default",
+        }])
         value = assessment()
         value["connections"] = [{"from": "one", "to": "two", "relationship": "no_link_established", "reason": "Timing only", "evidence_ids": ["Q001"]}]
-        self.assertEqual(len(validate_assessment(value, {"Q001"}, {"one", "two"})["connections"]), 1)
+        connection = validate_assessment(value, {"Q001"}, {"one", "two"})["connections"][0]
+        self.assertEqual(connection["provenance"], "model")
 
     def test_repeated_alert_identity_does_not_require_an_artificial_relationship(self):
         self.context["alerts"] = [

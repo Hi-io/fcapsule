@@ -68,9 +68,22 @@ def validate_assessment(
     connections = value.get("connections", [])
     if not isinstance(connections, list) or len(connections) > 6:
         raise ValueError("Invalid alert connections")
-    if (len(incident_ids) > 1 if require_connections is None else require_connections) and not connections:
-        raise ValueError("Multi-alert episodes require an explicit relationship assessment")
     result["connections"] = []
+    needs_relationship = len(incident_ids) > 1 if require_connections is None else require_connections
+    if needs_relationship and not connections:
+        ordered_incidents = sorted(incident_ids)
+        if len(ordered_incidents) < 2:
+            raise ValueError("A multi-alert relationship requires two incident references")
+        # This is deliberately an abstention, not an inferred causal edge. A valid,
+        # grounded assessment should remain useful when the model omits this display field.
+        result["connections"].append({
+            "from": ordered_incidents[0],
+            "to": ordered_incidents[1],
+            "relationship": "no_link_established",
+            "reason": "No causal relationship is established by the retained observations.",
+            "evidence_ids": result["evidence_ids"],
+            "provenance": "structural_default",
+        })
     for item in connections:
         if not isinstance(item, dict) or item.get("from") not in incident_ids or item.get("to") not in incident_ids or item["from"] == item["to"]:
             raise ValueError("Unknown alert relationship")
@@ -79,7 +92,7 @@ def validate_assessment(
         if not isinstance(item.get("reason"), str) or not 1 <= len(item["reason"]) <= 500:
             raise ValueError("Invalid relationship reason")
         result["connections"].append({key: item[key] for key in ("from", "to", "relationship", "reason")}
-                                     | {"evidence_ids": citations(item)})
+                                    | {"evidence_ids": citations(item), "provenance": "model"})
     comparison = value.get("historical_comparison")
     if historical_episode_ids:
         if not isinstance(comparison, dict):
