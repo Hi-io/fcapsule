@@ -461,9 +461,12 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 raise ValueError("Missing purpose for check")
             check(name, arguments, scrub(question), scrub(distinguishes))
         if state["assessment"] is not None or review_candidate is not None:
-            draft = state.pop("assessment") or review_candidate
+            validated_draft = state.pop("assessment")
+            draft = validated_draft or review_candidate
             state.update(status="running", assessment=None, draft_assessment=draft,
-                         review={"status": "running", "schema_repair": review_candidate is not None}, message="Checking the conclusion against its evidence")
+                         draft_validated=validated_draft is not None,
+                         review={"status": "running", "schema_repair": review_candidate is not None},
+                         message="Checking the conclusion against its evidence")
             publish(state)
             review_base = {"available_evidence_ids": [],
                 "assessment_to_review": draft,
@@ -517,13 +520,31 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 message="No validated conclusion was produced. Retained evidence and a safe next step are available.",
             )
     except Exception as error:
-        state["status"] = "inconclusive"
-        state["assessment"] = inconclusive_assessment(evidence_ids, error)
-        state["message"] = "No validated conclusion was produced. Retained evidence and a safe next step are available."
-        state["error_type"] = type(error).__name__
-        if state.get("review", {}).get("status") == "running":
-            state["review"]["status"] = "failed"
-        if isinstance(error, ValueError):
+        validated_draft = state.get("draft_assessment") if state.get("draft_validated") else None
+        if isinstance(validated_draft, dict):
+            # The draft passed the grounding and citation contract before the
+            # optional consistency pass began. A provider/budget failure in that
+            # second pass must never discard a useful, validated conclusion.
+            state.update(
+                status="ready",
+                assessment=validated_draft,
+                message="Validated conclusion retained; the optional consistency review was unavailable.",
+                review={
+                    "status": "unavailable",
+                    "changed": False,
+                    "schema_repair": bool(state.get("review", {}).get("schema_repair")),
+                    "limitation": "The validated assessment was retained because the optional consistency review could not complete.",
+                    "error_type": type(error).__name__,
+                },
+            )
+        else:
+            state["status"] = "inconclusive"
+            state["assessment"] = inconclusive_assessment(evidence_ids, error)
+            state["message"] = "No validated conclusion was produced. Retained evidence and a safe next step are available."
+            state["error_type"] = type(error).__name__
+            if state.get("review", {}).get("status") == "running":
+                state["review"]["status"] = "failed"
+        if not isinstance(validated_draft, dict) and isinstance(error, ValueError):
             state["validation_error"] = str(error)[:240]
         if state["calls"] and state["calls"][-1]["status"] == "running":
             state["calls"][-1].update(status="failed", finished_at=now())

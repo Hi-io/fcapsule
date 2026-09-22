@@ -121,6 +121,18 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(len(client.requests), 2)
         self.assertFalse(any(item["status"] == "ready" and item["assessment"] == assessment() for item in self.progress))
 
+    def test_validated_draft_survives_an_optional_review_failure(self):
+        state, _ = self.run_case([
+            {"action": "finish", "assessment": assessment()},
+            RuntimeError("review provider failed password=do-not-save"),
+        ], max_checks=0)
+
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["assessment"]["likely_mechanism"], assessment()["likely_mechanism"])
+        self.assertEqual(state["review"]["status"], "unavailable")
+        self.assertFalse(state["usage"]["complete"])
+        self.assertNotIn("do-not-save", json.dumps(state))
+
     def test_review_schema_omission_gets_one_bounded_repair_attempt(self):
         malformed = assessment()
         malformed["hypotheses"][0].pop("evidence_ids")
