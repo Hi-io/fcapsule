@@ -188,7 +188,7 @@ class InvestigationService:
 
     def start_by_incident(self, incident_id: str) -> dict[str, Any]:
         episode = self.plane.store.episode_for_incident(incident_id)
-        return self.start(episode["episode_id"]) if episode else {}
+        return self.start(episode["episode_id"], primary_incident_id=incident_id) if episode else {}
 
     def start_source_disconnected_review(self, episode_id: str, question: str) -> dict[str, Any]:
         """Ask one bounded question without passing a live-source adapter to the worker."""
@@ -341,7 +341,7 @@ class InvestigationService:
     def resume(self) -> None:
         for episode in self.plane.store.list_episodes(limit=10000):
             if any(signal.get("report_ready") for signal in episode["signals"]):
-                self.start(episode["episode_id"])
+                self.start(episode["episode_id"], primary_incident_id=episode.get("primary_incident_id"))
 
     def invalidate(self, episode_id: str) -> None:
         """Do not retain deleted member evidence in a surviving episode assessment."""
