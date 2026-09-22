@@ -159,6 +159,7 @@ invented metrics, exact confidence percentages or a definitive root cause. Prese
 Use short literal log terms. Dependency checks require a declared Service. A prior_hypothesis is earlier model output,
 not independent evidence: do not cite or use it as proof. Cite the prior episode's retained observations instead.
 If a measurement does not establish a peak or causal link, say so. Cite only visible E/Q references; failed checks are limitations.
+Keep each assessment field concise (normally at most 280 characters) and each hypothesis concise (normally at most 180 characters).
 Return JSON only.
 For another check: {"action":"check","tool":"catalog name","arguments":{},"question":"short question","distinguishes":"short contrast"}.
 To finish: {"action":"finish","assessment":{"summary":"symptom and scope","likely_mechanism":"cautious mechanism","next_action":"one concrete safe check","expected_finding":"what supports or refutes it","uncertainty":"remaining limitation","evidence_ids":["E..."],"hypotheses":[{"explanation":"candidate","status":"supported|weakened|unresolved","reason":"why","evidence_ids":["E..."]}],"connections":[{"from":"incident_id","to":"incident_id","relationship":"possibly_related|same_symptom|no_link_established","reason":"why","evidence_ids":["E..."]}],"historical_comparison":{"episode_id":"candidate ID","status":"similar_mechanism|changed_or_different|insufficient_evidence","summary":"comparison","evidence_ids":["Q..."]}}}.
@@ -401,7 +402,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 payload,
                 "none",
                 "investigation",
-                900 if turn == max_checks else 640,
+                1200 if turn == max_checks else 640,
             )
             candidate = None
             try:
@@ -463,7 +464,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 "instruction": REVIEW_INSTRUCTION}
             payload, visible_evidence_ids = compact_payload(review_base)
             payload["available_evidence_ids"] = sorted(visible_evidence_ids)
-            response, call = request_model(payload, "none", "evidence_review", 900)
+            response, call = request_model(payload, "none", "evidence_review", 1200)
             decision = parse_object(str(response.get("content", "")))
             call["decision"] = scrub(decision)
             repaired_review = False

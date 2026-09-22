@@ -267,7 +267,9 @@ the tool catalogue, citation IDs and selected evidence; it is not merely a cap o
 text. Log-query compaction ranks failure signatures above frequent healthy heartbeats,
 and retains the compact termination, limit and declared-dependency facts from required
 observations before lower-priority retained summaries. A forced final assessment omits
-the unused tool catalogue. The completion limit in Settings applies per call. Calls request JSON output
+the unused tool catalogue. Assessment and review calls reserve up to 1,200 completion
+tokens so their complete structured result is not cut off by the shorter check-decision
+allowance; the system also asks for concise fields. The completion limit in Settings applies per call. Calls request JSON output
 with reasoning disabled: the evidence contract, bounded dispatch table and final
 review are the safety controls, rather than hidden deliberation that can consume an
 entire response allowance. One schema repair is permitted only after the final review;

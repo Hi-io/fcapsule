@@ -49,10 +49,11 @@ class InvestigationEngineTests(unittest.TestCase):
         self.progress = []
 
     def run_case(self, decisions, **kwargs):
+        model_max_tokens = kwargs.pop("model_max_tokens", 1000)
         if decisions and isinstance(decisions[-1], dict) and decisions[-1].get("action") == "finish":
             decisions = [*decisions, copy.deepcopy(decisions[-1])]
         client = FakeClient(decisions)
-        state = run_investigation(self.context, self.kit, "test-model", 1000,
+        state = run_investigation(self.context, self.kit, "test-model", model_max_tokens,
                                   lambda state: self.progress.append(copy.deepcopy(state)), client=client, **kwargs)
         return state, client
 
@@ -229,9 +230,11 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertNotIn("historical_comparison", result)
 
     def test_last_investigation_turn_reserves_tokens_for_structured_output(self):
-        state, client = self.run_case([{"action": "finish", "assessment": assessment()}], max_checks=0)
+        state, client = self.run_case([{"action": "finish", "assessment": assessment()}], max_checks=0, model_max_tokens=2000)
         self.assertEqual(state["status"], "ready")
         self.assertEqual(client.requests[0].reasoning_effort, "none")
+        self.assertEqual(client.requests[0].max_tokens, 1200)
+        self.assertEqual(client.requests[1].max_tokens, 1200)
         payload = json.loads(client.requests[0].messages[1]["content"])
         self.assertEqual(payload["tools"], {})
         self.assertEqual(payload["allowed_pods"], [])
