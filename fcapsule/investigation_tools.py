@@ -69,13 +69,19 @@ def log_patterns(logs: list[dict[str, Any]], terms: list[str] | None = None) -> 
             "limitation": "Bounded sample; no matches does not prove the event did not occur."}
 
 
-def episode_context(episode: dict[str, Any], entries: list[dict[str, Any]]) -> dict[str, Any]:
+def episode_context(
+    episode: dict[str, Any],
+    entries: list[dict[str, Any]],
+    primary_incident_id: str | None = None,
+) -> dict[str, Any]:
     evidence: dict[str, dict[str, Any]] = {}
     alerts = []
     # A recurrence can reopen a retained operator episode. Put the primary
     # incident first so bounded context selection investigates its latest
     # evidence; older member reports are still available as non-current context.
-    primary_incident_id = str(episode.get("primary_incident_id") or "")
+    requested_primary = str(primary_incident_id or "")
+    entry_ids = {str(entry["incident"].get("incident_id") or "") for entry in entries}
+    primary_incident_id = requested_primary if requested_primary in entry_ids else str(episode.get("primary_incident_id") or "")
     ordered_entries = sorted(
         entries,
         key=lambda entry: str(entry["incident"].get("incident_id")) != primary_incident_id,

@@ -177,10 +177,12 @@ class InvestigationService:
         return candidates
 
     @staticmethod
-    def fingerprint(entries, evidence_manifest: list[dict[str, Any]] | None = None) -> str:
+    def fingerprint(entries, evidence_manifest: list[dict[str, Any]] | None = None,
+                    primary_incident_id: str | None = None) -> str:
         payload = {
             "reports": [[item["incident"]["incident_id"], item["report"]] for item in entries],
             "attachments": evidence_manifest or [],
+            "primary_incident_id": primary_incident_id or "",
         }
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
@@ -288,7 +290,7 @@ class InvestigationService:
                 self.source_review_jobs.discard(review_id)
 
     def start(self, episode_id: str, retry: bool = False, reason: str = "initial_capture",
-              source_mode: str = "live_sources") -> dict[str, Any]:
+              source_mode: str = "live_sources", primary_incident_id: str | None = None) -> dict[str, Any]:
         with self.plane.briefing_lock:
             episode = self.plane.store.get_episode(episode_id)
             if not episode:
@@ -298,8 +300,10 @@ class InvestigationService:
             entries = self.entries(episode)
             if not entries:
                 raise ValueError("Build at least one report before starting an investigation")
+            if primary_incident_id and primary_incident_id not in {item["incident"]["incident_id"] for item in entries}:
+                raise ValueError("Primary incident is not a member of this episode")
             evidence_manifest = self.plane.evidence.manifest(episode_id)
-            fingerprint = self.fingerprint(entries, evidence_manifest)
+            fingerprint = self.fingerprint(entries, evidence_manifest, primary_incident_id)
             previous = self.read(episode_id)
             if any(call.get("status") == "running" for call in previous.get("calls", [])):
                 previous.setdefault("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})["complete"] = False
@@ -310,7 +314,8 @@ class InvestigationService:
                      "parent_revision_id": previous.get("revision_id"), "revision_reason": reason,
                      "source_mode": source_mode, "status": "queued", "queued_at": now(),
                      "input_fingerprint": fingerprint, "checks": [], "assessment": None,
-                     "attempt": previous.get("attempt", 0) + 1, "evidence_manifest": evidence_manifest}
+                     "attempt": previous.get("attempt", 0) + 1, "evidence_manifest": evidence_manifest,
+                     "primary_incident_id": primary_incident_id}
             history = list(previous.get("previous_runs", []))
             if previous.get("started_at"):
                 history.append({key: previous.get(key) for key in ("attempt", "started_at", "finished_at", "status", "usage", "assessment", "checks", "calls", "draft_assessment", "review", "policy_version")})
@@ -362,8 +367,9 @@ class InvestigationService:
             entries = self.entries(episode)
             original_ids = {item["incident"]["incident_id"] for item in entries}
             evidence_manifest = self.plane.evidence.manifest(episode_id)
-            input_fingerprint = self.fingerprint(entries, evidence_manifest)
-            context = episode_context(episode, entries)
+            primary_incident_id = queued.get("primary_incident_id")
+            input_fingerprint = self.fingerprint(entries, evidence_manifest, primary_incident_id)
+            context = episode_context(episode, entries, primary_incident_id)
             media_evidence = self.plane.evidence.model_evidence(episode_id)
             context["evidence"].extend(media_evidence)
             if queued.get("revision_reason") == "evidence_added":
@@ -425,5 +431,5 @@ class InvestigationService:
                 if current and not self.stopping and original_ids.issubset({item["incident_id"] for item in current["signals"]}):
                     fresh = self.entries(current)
                     fresh_manifest = self.plane.evidence.manifest(episode_id)
-                    if fresh and self.fingerprint(fresh, fresh_manifest) != input_fingerprint:
-                        self.start(episode_id)
+                    if fresh and self.fingerprint(fresh, fresh_manifest, queued.get("primary_incident_id")) != input_fingerprint:
+                        self.start(episode_id, primary_incident_id=queued.get("primary_incident_id"))

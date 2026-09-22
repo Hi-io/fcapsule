@@ -263,7 +263,15 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
                 return
             if path.startswith("/api/episodes/") and path.endswith("/investigation"):
                 episode_id = unquote(path.removeprefix("/api/episodes/").removesuffix("/investigation").rstrip("/"))
-                self._json(self.server.control_plane.investigator.start(episode_id, retry=True), HTTPStatus.ACCEPTED)
+                payload = self._payload()
+                self._json(
+                    self.server.control_plane.investigator.start(
+                        episode_id,
+                        retry=True,
+                        primary_incident_id=str(payload.get("incident_id") or "") or None,
+                    ),
+                    HTTPStatus.ACCEPTED,
+                )
                 return
             if path.startswith("/api/episodes/") and path.endswith("/evidence"):
                 episode_id = unquote(path.removeprefix("/api/episodes/").removesuffix("/evidence").rstrip("/"))

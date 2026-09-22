@@ -594,6 +594,9 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertEqual(context["evidence"][0]["title"], "Current failure marker")
         self.assertIn(context["evidence"][0]["id"], context["priority_evidence_ids"])
 
+        focused = episode_context({"episode_id": "episode", "primary_incident_id": "current"}, [earlier, current], "earlier")
+        self.assertEqual(focused["alerts"][0]["incident_id"], "earlier")
+
     def test_active_alert_does_not_inherit_legacy_capture_window_end(self):
         self.entries[0]["incident"].update(status="firing", ended_at="2026-09-20T12:10:00Z")
         context = episode_context({"episode_id": "episode"}, self.entries)
