@@ -145,6 +145,20 @@ class ContextBudgetTests(unittest.TestCase):
             [item["id"] for item in compact["evidence"]].index("E-heartbeat-0"),
         )
 
+    def test_extreme_budget_reaches_a_stable_minimum_context(self):
+        context = {
+            "episode_id": "episode-minimum",
+            "evidence": [{"id": "E1", "domain": "log_template", "title": "Long title " * 20,
+                          "summary": "Long diagnostic summary " * 80}],
+            "alerts": [],
+        }
+
+        compact, visible = compact_for_model(context, [], max_prompt_tokens=80)
+
+        self.assertLessEqual(estimate_tokens(compact), 80)
+        self.assertEqual(visible, ["E1"])
+        self.assertLessEqual(len(compact["evidence"][0].get("summary", "")), 60)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -338,7 +338,7 @@ def compact_for_model(
         elif payload["prior_checks"]:
             payload["prior_checks"] = []
             visible_ids = refresh_visible_ids()
-        elif payload["evidence"] and payload["evidence"][0].get("summary"):
+        elif payload["evidence"] and len(str(payload["evidence"][0].get("summary") or "")) > 60:
             payload["evidence"][0]["summary"] = _short(payload["evidence"][0].get("summary"), 60)
         elif payload["evidence"] and len(payload["evidence"][0]) > 2:
             payload["evidence"][0] = {
