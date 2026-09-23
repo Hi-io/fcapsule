@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import Mock
 
-from fcapsule.episode_investigation import SYSTEM, RELATIONSHIP_REVIEW_SYSTEM, assessment_payload, run_investigation, validate_assessment
+from fcapsule.episode_investigation import SYSTEM, RELATIONSHIP_REVIEW_SYSTEM, EVIDENCE_REVIEW_SYSTEM, assessment_payload, run_investigation, validate_assessment
 from fcapsule.investigation_tools import InvestigationTools, episode_context, log_patterns, metric_summary, scrub, stamp
 from fcapsule.processing.anonymizer import anonymize_text, template_for_message
 from fcapsule.reasoning.context_budget import estimate_tokens
@@ -97,7 +97,7 @@ class InvestigationEngineTests(unittest.TestCase):
         value["basis"] = "Repeated decoder failure supports an application error. password=never-retain-basis"
         state, client = self.run_case([{"action": "finish", "assessment": value}], max_checks=0)
         self.assertEqual(state["status"], "ready")
-        self.assertEqual(state["policy_version"], "episode-investigation-1.18")
+        self.assertEqual(state["policy_version"], "episode-investigation-1.19")
         self.assertEqual(len(client.requests), 2)
         self.assertEqual(state["assessment"]["evidence_ids"], ["Q001"])
         self.assertNotIn("never-retain-basis", json.dumps(state))
@@ -233,6 +233,30 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(state["status"], "inconclusive")
         self.assertEqual(state["assessment"]["hypotheses"][0]["status"], "unresolved")
         self.assertNotIn("never-persist", json.dumps(state))
+
+    def test_compact_review_keeps_media_and_runtime_citations_with_large_basis(self):
+        self.context["scope"] = {"namespace": "production", "pod": "exporter-123"}
+        self.context["evidence"] = [{"id": "A-image", "domain": "image_evidence", "revision_addition": True,
+            "summary": "Target is down. The request returned HTTP404 from /metrics-v2. " * 4,
+            "limitation": "Visible state only, not proof of cause."}]
+        self.context["priority_evidence_ids"] = ["A-image"]
+        self.kit.execute.return_value = {"observations": [{"kind": "PodSpec", "ready": True,
+            "resources": [{"limits": {"memory": "96Mi"}}], "container_states": [{"restart_count": 0}]}]}
+        draft = assessment("A-image")
+        draft["evidence_ids"] = ["A-image", "Q001"]
+        draft["basis"] = ("The image shows a failed scrape while the workload snapshot is ready. " * 7)[:490]
+        state, client = self.run_case([{"action": "finish", "assessment": draft}], max_checks=0,
+                                      max_prompt_tokens=2100, max_total_tokens=12000)
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["review"]["status"], "completed")
+        self.assertEqual(len(client.requests), 2)
+        review = client.requests[-1]
+        self.assertEqual(review.messages[0]["content"], EVIDENCE_REVIEW_SYSTEM)
+        self.assertLess(estimate_tokens(EVIDENCE_REVIEW_SYSTEM), estimate_tokens(SYSTEM))
+        payload = json.loads(review.messages[1]["content"])
+        self.assertTrue({"A-image", "Q001"}.issubset(payload["available_evidence_ids"]))
+        self.assertIn("/metrics-v2", json.dumps(payload["episode"]))
+        self.assertLessEqual(estimate_tokens(review.messages[0]["content"]) + estimate_tokens(review.messages[1]["content"]), 2100)
 
     def test_provider_failure_keeps_checks_and_marks_unknown_usage(self):
         state, _ = self.run_case([RuntimeError("provider failed password=do-not-save")])

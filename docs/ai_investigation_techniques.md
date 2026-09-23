@@ -363,6 +363,14 @@ A compact review instruction preserves the full-request budget; one existing rep
 attempt remains the limit. Unavailable citations are rejected, and unsuccessful repair
 ends as an explicit inconclusive assessment, not an invented relationship.
 
+Policy `episode-investigation-1.19` uses a short dedicated system instruction for the
+normal evidence review, rather than replaying the entire investigation/tool protocol.
+The draft, original review checks, citation validation and call limits are unchanged.
+The saved tokens leave more room for the cited observations, including a workload
+snapshot alongside an image. A regression verifies both remain visible during a
+2,100-token review with a long basis. Reference IDs belong in citation arrays, not
+operator-facing prose; truncated source fragments must not be treated as full values.
+
 Supported Prometheus rules now contribute a preserved numerical discriminator:
 the expression value before the outer scalar comparison, its threshold/operator,
 labels, sampled condition counts, missing values, baseline and capture provenance.
