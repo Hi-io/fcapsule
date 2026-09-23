@@ -1,128 +1,172 @@
-# Your Telemetry Expires. Your Operational Memory Shouldn't.
+# Observability With Memory.
 
-**FCAPSule is an AI-powered incident memory layer for teams that cannot keep every log, metric and event searchable forever.** It captures the evidence around an incident while it is available, gives an AI investigator tools to examine that evidence, and keeps a compact record that can still be questioned after the original observability window has closed.
+**FCAPSule brings AI investigation and incident memory to your observability stack. It connects alerts, logs, metrics and workload configuration so your engineers can investigate with context, follow the evidence and draw on what happened before.**
 
-The big idea is simple: **keep long-term memory about the failures that matter, instead of paying to retain every byte of every normal day for months.**
+When an incident starts, the questions arrive together: What is affected? What could explain it? What should we check next? Have we seen this before? FCAPSule gives an AI investigator access to selected telemetry and bounded diagnostic tools to help answer those questions. It preserves the evidence and the investigation in a capsule that the model can remember and consult when a related incident returns.
 
-## The retention opportunity
+Your existing tools supply the signals. FCAPSule gives the investigation continuity: across data sources, across responders and across recurring incidents.
 
-At telecom scale, retention is a product and cost decision. Storing three months of high-volume telemetry can mean keeping many terabytes of mostly routine data so that the small fraction associated with incidents might still be searchable later.
+**Investigate with context. Respond with evidence. Remember what happened.**
 
-FCAPSule offers another path to evaluate: capture incident-focused evidence when an alert fires, preserve the measurements, representative logs, configuration facts and investigative findings, then use that retained record when the source systems no longer hold the original time window.
+## Give your SRE an investigator that remembers
 
-### What 90 to 30 days can mean
+An engineer responding to an alert needs to make decisions while the environment is changing. A workload may restart, a configuration may change, and the observation that explains the problem may be spread across several tools.
 
-For a steady ingest rate of **D terabytes per day**, a simple logical-retention estimate is:
+FCAPSule connects Prometheus alerts and metrics, OpenSearch logs and supported Kubernetes workload configuration in an incident workspace. Its AI can select a diagnostic check, inspect the returned observations, compare possible explanations and recommend a next step. The engineer can see what it checked and open the evidence behind the assessment.
 
-| Raw source retention | Approximate retained volume |
-|---|---:|
-| 90 days | 90 × D TB |
-| 30 days | 30 × D TB |
-| Difference | 60 × D TB less, or about 66.7% less retained raw volume |
+The practical value is a stronger starting point for troubleshooting: the affected workload, the observed symptoms, a proposed explanation with supporting evidence, and a check that could confirm or weaken that explanation. When the available data cannot establish a cause, the investigation identifies what remains unknown.
 
-At **10 TB/day**, that is approximately **900 TB versus 300 TB**, a difference of **600 TB of logical raw data**. It makes the scale of the opportunity visible. It is an illustrative capacity calculation, not a measured FCAPSule result or a savings guarantee. Actual cost depends on indexes, replicas, compression, storage tiers, backups, billing and which telemetry can safely move to a shorter window.
+And when an eligible matching incident returns, **the model remembers**. It can consult a previous capsule and bring retained observations into the current investigation. An earlier incident becomes a source of evidence for today's decision.
 
-FCAPSule does **not currently change Prometheus or OpenSearch retention settings for you**. The product supplies a way to test whether a smaller incident record can support later troubleshooting. Before reducing a source retention policy, a team needs evidence that the incidents it cares about were captured, that the retained capsules are sufficient after source expiry, and that the total FCAPSule storage cost is included in the comparison.
+## A working relationship with your observability stack
 
-There is one storage detail worth measuring honestly: the capsule export contains derived evidence, while FCAPSule's managed state also stages bounded source captures until incident cleanup. Today those staged inputs follow the incident retention lifecycle. A serious retention-cost evaluation should therefore measure both the capsule and the staged capture, not just the ZIP size.
+FCAPSule builds on the sources your team already uses. Prometheus supplies alert conditions and performance signals. OpenSearch supplies the incident's log window. Kubernetes supplies supported workload state and configuration facts. FCAPSule connects those perspectives around the incident and preserves the selected evidence.
 
-## AI that investigates, not just summarizes
+| The responder's question | What FCAPSule contributes |
+|---|---|
+| What is happening, and where? | Affected resources, namespaces, captured alerts and supported measurements around the incident. |
+| What could explain these symptoms? | An AI assessment grounded in selected observations, with competing explanations and uncertainty where available. |
+| What should I check next? | A proposed diagnostic action and the observation that would support or weaken the explanation. |
+| Have we seen this before? | Recurrence records and bounded comparisons with eligible earlier capsules. |
+| Can someone else review the investigation? | Saved checks, evidence references, an incident timeline and an exportable capsule. |
+| What survives when the source data expires? | The observations and investigative records retained in FCAPSule under its own retention policy. |
 
-The model is the investigation orchestrator. Its job is to decide what evidence would help distinguish possible explanations, request a bounded read-only check, study the observation and refine its assessment.
+This gives observability a longer working life: a captured observation can support the immediate investigation, a later review and a future recurrence.
+
+## AI directs the investigation
+
+The model has an active role in deciding which supported observation to request next. Depending on the available evidence, it can examine resource history, look for relevant log patterns, inspect workload configuration, compare a baseline, investigate a declared dependency or consult an earlier incident.
 
 ```mermaid
 flowchart LR
-    A[Alert fires] --> B[Capture incident window]
-    B --> C[Select useful evidence]
-    C --> D[AI chooses a diagnostic check]
-    D --> E[Read-only source tool runs]
-    E --> F[Observation is saved and cited]
-    F --> G[AI compares explanations]
-    G --> H[Next check, expected result and uncertainty]
-    H --> I[Retained incident memory]
-    I -->|matching future incident| D
+    A[Alert and captured evidence] --> B[AI investigates]
+    B --> C[Read-only diagnostic check]
+    C --> D[Saved observation]
+    D --> B
+    B --> E[Assessment and next action]
+    E --> F[Incident capsule]
+    F --> G[Memory for a future incident]
+    G --> B
+    H[Operator evidence] --> B
 ```
 
-FCAPSule gives the model a fixed catalogue of bounded tools for supported Prometheus, OpenSearch and Kubernetes observations. The default allows one model-selected diagnostic check, configurable up to four; the investigator also preserves required initial observations and reviews the proposed assessment against the retained evidence. Every result is saved into the incident record as the investigation proceeds.
+The investigation activity shows the questions asked, the observations returned and the checks completed. Citations let the responder inspect the source material behind the answer. Token usage is available alongside the investigation so the team can understand its model consumption.
 
-That changes the experience from “the model restated the alert” to “the model checked whether memory pressure, a peer replica, a database signal, a log pattern or a configuration mismatch helps explain it.” The answer can remain unresolved when evidence is missing. The assessment gives the engineer cited observations, competing explanations, a concrete next check, what result would support it, and what is still uncertain.
+The workflow is bounded and read-only. The engineer retains control over operational changes. The number of checks, evidence supplied to the model and model usage are limited; an investigation may finish with an explicit gap rather than a confirmed explanation.
 
-The design is intentionally bounded: the model selects among approved read-only operations, and it does not run shell commands, change a workload or apply a remediation. FCAPSule preserves its deterministic report even without an AI key; AI enriches the investigation rather than making capture depend on a provider.
+## Capsules are the model's incident memory
 
-## A responder's memory that survives source expiry
+A capsule preserves selected evidence and the recorded investigation: representative log patterns, captured metric facts, supported configuration observations, completed checks and assessment provenance. Its value comes from keeping these pieces connected to the incident they explain.
 
-Imagine a fault returns six weeks after the first occurrence. Prometheus and OpenSearch may retain only the most recent month, so the original time series and logs may no longer be queryable. If FCAPSule's own incident retention is configured to keep that earlier capsule, the investigator can compare the new event with the observations saved at the time: alert measurements, representative logs, captured configuration facts and completed checks.
+When a suitable earlier capsule is available, the model can remember the event through those observations and compare them with the current evidence. A repeated alert becomes an opportunity to investigate whether the same mechanism is present, or whether familiar symptoms now point somewhere else.
 
-This is not an attempt to recreate expired raw telemetry. It is a way to ask a narrower, useful question: **what did we actually observe when this happened before, and does the current event match?** The retained-only review can use the saved capsule without querying live sources. If the capsule lacks the required fact, it says that the answer is incomplete.
+The Patterns view makes recurrence visible through occurrence counts, affected resources, first and latest observations, and observed intervals. Engineers can move from the pattern to the episodes behind it. Shared-condition cues can also draw attention to related operational context without establishing a common cause on their own.
 
-Recurrence matching is specific today: same application, affected resource and normalized alert identity. FCAPSule can select up to three prior candidates and use one bounded prior capsule for an investigation. It does not treat matching alert names as proof of a repeated cause, and previous model prose is context rather than evidence.
+Today, historical candidate selection uses the same application, resource identity and normalized alert identity. It is deliberately scoped; it does not yet recognize every similar failure across different or replacement workloads. The AI can inspect a bounded earlier capsule, and earlier model conclusions remain distinct from the evidence supporting them.
 
-## Patterns before alert fatigue
+In product terms, **the model remembers through its capsules**. Technically, FCAPSule retrieves retained observations into the model's context. It does not update model weights. A larger history creates more opportunities for a useful comparison; improved diagnostic accuracy must still be demonstrated through evaluation.
 
-Repeated incidents appear as recurring patterns with their count, first and latest observations, and the median gap between occurrences. Potential shared-condition cues can also highlight episodes that share an alert family and operational context, such as a node or dependency.
+## The engineer can add the missing piece
 
-That lets an SRE notice “this is the fourth time this workload has shown this failure” or “separate services started reporting this alert around the same shared dependency.” Episodes remain individually inspectable. These signals direct attention; they do not automatically merge incidents or declare a root cause.
+Some of the most useful evidence starts with a person: a screenshot from an external dashboard, an observation made during a deployment, or a short spoken account of what changed.
 
-As the retained history grows, FCAPSule can give a new investigation more operational context. This is **evidence reuse**, not automatic model training: it does not fine-tune itself or turn old AI conclusions into ground truth.
+FCAPSule lets the responder add that evidence to the incident. With the optional specialist models configured, image analysis extracts observations from an uploaded screenshot and speech recognition transcribes an audio note. The primary investigator can then use the added information in an updated assessment.
 
-## See the investigation, not just its conclusion
+This keeps the engineer involved in the investigation. A screenshot can contribute a target state or visible configuration detail that the connected sources did not capture. A note can identify a change worth checking. The evidence remains attributable to the operator and does not automatically become proof of causality.
 
-The following captures come from FCAPSule's Kubernetes lab and use a synthetic scrape-failure incident. They demonstrate the current workflow; they are not telecom production measurements.
+The models have complementary jobs: the primary model directs the investigation and evaluates observations; vision and speech models make additional operator evidence usable within that same workflow.
 
-### Evidence-backed incident view
+## What the experience looks like
 
-The report leads with a likely mechanism, its supporting evidence, the next check and a performance series around the alert threshold. The responder can open the cited source details instead of trusting an unexplained answer.
+These screenshots show the current product using synthetic Kubernetes Lab incidents. They illustrate the workflow, not measured telecom production outcomes.
 
-![FCAPSule incident overview showing a scrape-failure assessment, source evidence and the alert-condition time series](assets/product/incident-overview-lab.png)
+### Start with the decision
 
-### AI investigation activity
+The incident overview brings the explanation, supporting observations, next check and relevant performance signal into one workspace. The responder can start with the assessment and inspect the underlying evidence as needed.
 
-The investigation records the questions asked, completed source checks and a comparison with an earlier retained episode. This makes the model's work visible and reviewable rather than presenting only a polished final paragraph.
+![FCAPSule incident overview with an assessment, cited evidence and an alert-condition performance chart](assets/product/incident-overview-lab.png)
 
-![FCAPSule investigation view showing completed diagnostic checks and a retained-episode comparison](assets/product/ai-investigation-lab.png)
+### Inspect the AI's work
 
-### Recurring operational patterns
+The investigation view records diagnostic questions and completed checks, including an earlier retained episode where available. Engineers can review the observations used to reach the assessment.
 
-The Patterns view shows repeated issues, their affected resources and observed intervals, with direct paths back to the episodes behind each row.
+![FCAPSule investigation activity showing diagnostic checks and a comparison with an earlier retained episode](assets/product/ai-investigation-lab.png)
 
-![FCAPSule Patterns view showing recurring issues and links to their retained episodes](assets/product/recurring-patterns-lab.png)
+### Recognize a returning problem
 
-## The incident, end to end
+The Patterns view puts repeated issues and their observed intervals in context, with paths back to the retained episodes.
 
-Consider an alert that says a Prometheus target is down. That signal says measurements are missing; it does not explain why. FCAPSule preserves the alert and supported condition trend, checks Kubernetes service and target identity, compares monitor selectors with captured labels, and searches relevant logs. The AI investigator can choose a further check and compare the result with an earlier matching capsule.
+![FCAPSule recurring patterns with affected resources, occurrence counts and links to retained episodes](assets/product/recurring-patterns-lab.png)
 
-The responder gets an evidence-backed account of whether the selector and target labels match, what observations support the proposed mechanism, and what fact would confirm or weaken it. If the target evidence was never captured or is no longer present, the report exposes that gap. If the same issue happened before, the earlier capsule can contribute observations even after the old source data expires.
+## When a familiar alert returns
 
-The same workflow applies to memory pressure, resource limits, restart behavior, database saturation, latency and other failures where alert, metrics, logs and workload configuration provide different pieces of the explanation.
+Consider a Prometheus scrape-failure alert. The signal establishes a loss of telemetry, but the responder still needs to distinguish among an unavailable exporter, an incorrect endpoint, a discovery mismatch and other possible explanations.
 
-## Multiple models with useful jobs
+FCAPSule captures the available alert evidence and supported condition history. Its investigation can examine workload state, available discovery/configuration facts and relevant logs. An engineer can add a screenshot from Prometheus to show a target detail that was missing from the original capture.
 
-The primary model reasons over the incident and orchestrates source checks. Optional specialist models can extract observations from an operator-supplied screenshot or transcribe a short voice note; the primary investigator can then consider that extracted evidence in a new assessment. These modalities are optional additions to the same incident record, not separate novelty demos or automatic surveillance.
+If an eligible earlier episode exists, the model can compare the retained observations with the current incident. It might find a matching configuration discrepancy, a meaningful difference, or insufficient evidence to connect them. The useful result is an explanation tied to observations and a next check that helps the engineer decide what to do.
 
-This is a practical multi-model design: language reasoning helps choose and compare diagnostic evidence, vision can read an external dashboard or target screenshot, and speech recognition can preserve an operator's spoken observation. The responder decides what to attach, and the resulting evidence is timestamped and distinguishable from source telemetry.
+Weeks later, the earlier capsule can still contribute even if the original source window has expired, provided FCAPSule has retained it. The investigation carries forward the evidence that was captured at the time.
 
-## A sharper position in the open-source market
+## Memory beyond the retention window
 
-Open-source AI SRE projects already exist. For example, [Akmatori](https://github.com/akmatori/akmatori) describes tool-using incident agents and cross-incident memory; [OpenSRE](https://github.com/swapnildahiphale/OpenSRE) describes episodic memory and a knowledge graph; and [Mezmo AURA](https://github.com/mezmo/aura) describes coordinated agents that investigate telemetry and infrastructure state. FCAPSule should not claim to be the first or only open-source AI incident investigator.
+Retention is one of the strongest consequences of this design. A team's ability to revisit an incident can extend beyond the searchable lifetime of its original telemetry.
 
-Its strongest, defensible product position is narrower and more memorable: **AI-guided incident investigation built around a retained evidence capsule, for teams whose source telemetry has a hard expiry date.** The central promise is not simply “AI finds root cause.” It is “when the raw window is gone, your investigation can still begin with what the system preserved, what it found before, and what evidence to check next.”
+Logs and metric samples may expire while an intermittent issue is still being investigated. FCAPSule preserves selected incident evidence early, and its retained-only review can use saved observations without querying the live telemetry sources. It can also reuse completed source checks from an eligible previous capsule.
 
-## How to prove the value
+This preserves continuity for later troubleshooting and incident review. It does not reconstruct uncaptured or deleted data. The capsule must contain the relevant observation and remain within FCAPSule's own retention policy; retained-only AI review still requires the configured model provider.
 
-The financial and operational story should be backed by a controlled comparison, not a headline percentage alone. A useful evaluation would record:
+### The opportunity at telecom scale
 
-- daily source ingest and actual storage cost under the current retention policy;
-- the number and types of incidents that produce complete, readable capsules;
-- capsule and bounded staged-capture size per incident, including retention over time;
-- investigation quality when the source window is available versus after it expires;
-- whether the AI identifies useful discriminating checks and cites the observations correctly;
-- the net storage footprint and cost after including FCAPSule's own retained state.
+For teams processing terabytes per day, incident memory also opens a storage strategy worth evaluating: retain selected incident evidence for longer while reducing raw retention where operational and organizational requirements allow it.
 
-That evidence can show which datasets can safely have shorter raw retention, which still need longer source history, and how much the incident-memory layer costs in exchange. Until those measurements exist, the 90-to-30-day example is a scale illustration, not a claimed customer saving.
+At a steady **10 TB/day**, a simplified change from **90 days to 30 days** of raw retention changes the logical retained volume from **900 TB to 300 TB**. That is **600 TB less**, or approximately **66.7% less raw volume**. This illustrates the scale of the opportunity; it is not a measured FCAPSule saving. Indexes, replicas, compression, backups and storage pricing affect the actual financial outcome.
 
-## The short pitch
+FCAPSule does not change source retention policies automatically. A team must first verify that the retained incident evidence supports its investigation needs. The storage comparison must include FCAPSule's own state: both the exported capsule and bounded staged source captures, which currently follow the incident cleanup lifecycle.
 
-**Telecom systems can generate terabytes of telemetry every day, but only a fraction belongs to an incident. FCAPSule uses AI to investigate that fraction while the evidence is still available, preserves a traceable capsule, and lets future responders compare a new failure with the observations that survived the source retention window. Keep less routine history searchable; keep more of the reasoning needed to understand what went wrong.**
+The immediate benefit is continuity of investigation. Reduced raw-retention cost is a potential additional benefit that can be measured against it.
+
+## Why this combination matters
+
+FCAPSule brings AI orchestration, observations from several telemetry sources, operator-supplied evidence and retained incident memory into one workflow. The capsule connects these capabilities: it records what the investigator could observe and gives a future investigation something concrete to revisit.
+
+The product's value is especially clear in environments with recurring failures, changing workloads and high telemetry volume. Engineers can consult an investigation that already contains selected context, inspect its supporting evidence and contribute what the automated sources missed.
+
+**FCAPSule strengthens observability by giving the investigation a memory.** As an open-source project, it also lets teams inspect how evidence is selected, how diagnostic access is bounded and how retained observations reach the model. The investigation workflow itself is open to review.
+
+## The product pitch
+
+**FCAPSule gives your observability stack an AI investigator that remembers. It connects alerts, logs, metrics and configuration, investigates possible causes, and preserves the evidence in incident capsules. When a related problem returns, the model can draw on what happened before, even after the original telemetry expires. Your engineers get context they can inspect, a next step they can evaluate and an investigation that carries forward.**
+
+---
+
+## Recommended next step: close the incident's learning loop
+
+The following are product proposals, not claims about features already delivered. Together, they would strengthen the promise that experience improves the next investigation. They can build on the existing capsules, checks, assessments and historical retrieval without introducing another telemetry platform.
+
+### 1. Remember the confirmed outcome
+
+Add a small resolution action where an engineer can record the confirmed cause, the action taken and whether recovery was observed. Allow an explicit unresolved outcome and link the confirmation to supporting evidence where available.
+
+Future investigations could then distinguish an old hypothesis from an operator-confirmed result. This would make the model's memory more useful: it could recall which explanation was validated and what restored service, while checking whether the new evidence supports the same conclusion.
+
+Keep this interaction brief and optional. A closed alert is not proof that the diagnosis or remediation was correct. Confirmations need an author, timestamp, provenance and a way to correct them.
+
+### 2. Explain what is different this time
+
+Use comparable facts from the current and earlier capsules to produce a compact comparison: what matches, what changed and why the difference might matter. Useful examples include changed resource limits, a different termination reason, a new configuration value or a changed log failure signature.
+
+Show the most relevant supported difference beside the assessment and make the full comparison expandable. Missing observations must remain unknown; a value captured after an incident cannot establish what was configured before it. A difference identifies a diagnostic lead, not a proven cause.
+
+This builds directly on existing historical retrieval. Broader recurrence matching across replacement pods would require a separate, validated workload-identity improvement.
+
+### 3. Learn which checks help the engineer
+
+Associate completed checks with verified outcomes and lightweight operator feedback. Use that history to help prioritize available diagnostic checks in comparable future incidents, with the model still evaluating the current evidence.
+
+The benefit to demonstrate would be earlier discovery of useful evidence with fewer unnecessary checks and lower model usage. Success should be measured on held-out incidents using diagnostic usefulness, unsupported-claim rate, source queries, tokens and time to an actionable finding. Frequently selected checks should not automatically count as successful checks.
+
+These capabilities would support a stronger future claim: **FCAPSule remembers what was confirmed, shows what changed and uses that experience to guide the next investigation.** That claim should follow implementation and evaluation. The current product already supplies the retained evidence and investigation records needed to begin testing it.
 
 ## Further reading
 
