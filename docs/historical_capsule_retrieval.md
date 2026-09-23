@@ -71,7 +71,9 @@ budget can still omit any check. Each investigation call saves `model_context`
 beside `visible_evidence_ids` so the actual bounded evidence can be audited. A
 comparison must cite a visible historical check for the selected candidate;
 otherwise it is downgraded to insufficient evidence without discarding the current
-assessment. An absent comparison or an unknown candidate is instead omitted with a
+assessment. This also normalizes an already-insufficient comparison's unsupported
+past-fact claims to the neutral guard summary; its status is not a grounding exemption.
+An absent comparison or an unknown candidate is instead omitted with a
 `historical_comparison_review` grounding-guard trace; no substitute episode is
 invented. All other assessment citations must still validate. These guards do not
 request a model repair call. `tests/test_evidence_budget_guard.py` covers the full

@@ -160,7 +160,7 @@ def ground_historical_comparison(assessment: dict[str, Any], checks: list[dict[s
                                 model_context: dict[str, Any]) -> dict[str, Any]:
     """A valid current citation cannot substitute for the selected prior capsule."""
     comparison = assessment.get("historical_comparison")
-    if not comparison or comparison.get("status") == "insufficient_evidence":
+    if not comparison:
         return assessment
     selected = {check["id"] for check in checks if check.get("tool") == "historical_episode"
                 and check.get("arguments", {}).get("episode_id") == comparison["episode_id"]
