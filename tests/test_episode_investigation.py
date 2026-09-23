@@ -97,7 +97,7 @@ class InvestigationEngineTests(unittest.TestCase):
         value["basis"] = "Repeated decoder failure supports an application error. password=never-retain-basis"
         state, client = self.run_case([{"action": "finish", "assessment": value}], max_checks=0)
         self.assertEqual(state["status"], "ready")
-        self.assertEqual(state["policy_version"], "episode-investigation-1.19")
+        self.assertEqual(state["policy_version"], "episode-investigation-1.20")
         self.assertEqual(len(client.requests), 2)
         self.assertEqual(state["assessment"]["evidence_ids"], ["Q001"])
         self.assertNotIn("never-retain-basis", json.dumps(state))

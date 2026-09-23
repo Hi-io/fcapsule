@@ -191,7 +191,9 @@ def episode_context(
         "impact": [item for entry in ordered_entries for item in entry["report"].get("impact", [])][:15],
         "source_retention": "Unknown. Do not infer expiry from incident age or FCAPSule's own cleanup policy.",
         "grouping_basis": "Same application and temporal proximity only. Independent failure phases can share an episode. A resolved alert followed by another alert is not a demonstrated causal chain.",
-        "limits": "Time grouping is not causation. Measurements are sampled. Current state is not historical state."})
+        "limits": "Time grouping is not causation. Measurements are sampled. Current state is not historical state."},
+        reference_ids={str(episode["episode_id"]), *entry_ids, *evidence,
+                       *(str(row["evidence_id"]) for item in evidence.values() for row in item["provenance"])})
 
 
 def _discovery_labels(report: dict[str, Any]) -> dict[str, str]:
@@ -218,6 +220,44 @@ def _alert_identity(report: dict[str, Any]) -> str:
         if isinstance(name, str) and name.strip():
             return name.strip()
     return ""
+
+
+def historical_episode_result(candidate: dict[str, Any], *, include_hypothesis: bool = True) -> dict[str, Any]:
+    """Put captured facts ahead of episode metadata in the bounded tool ledger."""
+
+    episode = {key: value for key, value in candidate.items() if key not in {"observations", "retained_checks"}
+               and (include_hypothesis or key != "prior_hypothesis")}
+    observations = []
+    retained_checks = candidate.get("retained_checks", [])[-4:]
+    for item in candidate.get("observations", [])[:80 - len(retained_checks)]:
+        observation = {key: item[key] for key in (
+            "summary", "metric_observation", "configuration", "examples", "time_range", "limitation",
+        ) if item.get(key) not in (None, "", [], {})}
+        metric = observation.get("metric_observation")
+        if isinstance(metric, dict) and metric.get("condition"):
+            # Generic tool compaction keeps only a few fields. Measured values
+            # must precede optional rule metadata even in an older check.
+            observation["metric_observation"] = {"condition": metric["condition"], **metric}
+        observation["source"] = {"episode_id": candidate["episode_id"], "provenance": item.get("provenance", [])}
+        observations.append(observation)
+    for check in retained_checks:
+        observations.append({
+            "retained_check": check.get("result"),
+            "source": {"episode_id": candidate["episode_id"], "check_id": check.get("id"),
+                       "tool": check.get("tool"), "finished_at": check.get("finished_at")},
+            "limitation": "Previously saved source observation; its collection time may differ from the incident window.",
+        })
+    # These references come from the selected stored candidate, not model input.
+    reference_ids = {str(candidate["episode_id"])}
+    reference_ids.update(str(row[key]) for item in candidate.get("observations", [])
+                         for row in item.get("provenance", []) for key in ("incident_id", "evidence_id") if row.get(key))
+    return scrub({
+        "source": "Retained FCAPSule historical episode",
+        "observations": observations,
+        "episode": episode,
+        "availability": candidate.get("availability", "retained" if observations else "unavailable"),
+        "limitation": "This is a prior captured episode, not proof of the same cause. Any prior_hypothesis is earlier model output, not independent evidence and not citable. Compare only its retained observations; missing captures cannot establish similarity or difference.",
+    }, reference_ids=reference_ids)
 
 
 class InvestigationTools:
@@ -297,11 +337,7 @@ class InvestigationTools:
             candidate = self.historical_episodes.get(episode_id)
             if not candidate:
                 raise ValueError("Episode is outside the deterministic recurrence candidates")
-            return scrub({
-                "source": "Retained FCAPSule historical episode",
-                "episode": candidate,
-                "limitation": "This is a prior captured episode, not proof of the same cause. Any prior_hypothesis is earlier model output, not independent evidence and not citable. Compare only its retained observations.",
-            })
+            return historical_episode_result(candidate)
         prometheus, opensearch, kubernetes = self._adapters()
         if name == "alert_rule_logic":
             retained = []

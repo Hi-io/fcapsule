@@ -349,6 +349,27 @@ def _check_item(check: dict[str, Any], latest: bool) -> dict[str, Any]:
     }
 
 
+def _minimal_check_observation(check: dict[str, Any]) -> Any:
+    observation = check.get("observation")
+    if isinstance(observation, str) and len(observation) <= 180:
+        return observation
+    if check.get("tool") == "historical_episode" and isinstance(observation, dict):
+        if observation.get("compacted_history"):
+            return observation
+        facts = []
+        for item in (observation.get("observations") or [])[:2]:
+            if not isinstance(item, dict):
+                continue
+            metric = item.get("metric_observation")
+            fact = ({"metric_observation": _bounded(metric, max_items=3)} if metric else
+                    {key: _bounded(item[key], max_items=2) for key in ("configuration", "examples", "summary") if item.get(key)})
+            if fact:
+                facts.append(fact)
+        return {"compacted_history": True, "observations": facts,
+                "limitation": "Partial retained history; missing facts cannot establish the same cause."}
+    return _short(json.dumps(observation, ensure_ascii=True), 180)
+
+
 def compact_for_model(
     context: dict[str, Any],
     checks: list[dict[str, Any]],
@@ -474,11 +495,11 @@ def compact_for_model(
                 item.pop("distinguishes", None)
         elif any(
             item.get("observation")
-            and (not isinstance(item.get("observation"), str) or len(item["observation"]) > 180)
+            and item.get("observation") != _minimal_check_observation(item)
             for item in payload["prior_checks"]
         ):
             for item in payload["prior_checks"]:
-                item["observation"] = _short(json.dumps(item.get("observation"), ensure_ascii=True), 180)
+                item["observation"] = _minimal_check_observation(item)
         elif len(payload["evidence"]) > 1:
             payload["evidence"].pop()
             visible_ids = refresh_visible_ids()

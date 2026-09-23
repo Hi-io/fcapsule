@@ -13,6 +13,7 @@
 
 - [Architecture](architecture.md) and [engineering design](../PROJECT_DESIGN.md)
 - [AI investigation techniques and limits](ai_investigation_techniques.md)
+- [Historical capsule retrieval and retained-only reasoning](historical_capsule_retrieval.md)
 - [Implemented Operations evolution](operations_evolution_plan.md)
 - [Data and artifact contracts](../DATA_SCHEMA.md)
 - [Design decisions](design_decisions.md)
