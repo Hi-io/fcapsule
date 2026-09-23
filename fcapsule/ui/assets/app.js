@@ -954,10 +954,15 @@ function logLabel(pattern) {
 function briefingPanel(payload, detailed = false, evidencePrompt = '') {
   const run = payload.investigation || {status:'not_started', episode_id:selectedEpisodeId};
   const assessment = run.assessment;
-  if (detailed && !assessment) return '';
+  const zeroCallBudget = ['inconclusive','incomplete'].includes(run.status) && run.validation_error === 'Input size budget reached' &&
+    Array.isArray(run.calls) && run.calls.length === 0 && (!assessment || assessment.provenance === 'deterministic_abstention');
   const loading = ['queued','running','waiting'].includes(run.status);
-  const saved = run.finished_at ? (run.status === 'ready' ? 'Assessment ready ' : run.status === 'inconclusive' ? 'Assessment inconclusive ' : 'Last attempt ') + formatDate(run.finished_at) : '';
+  const saved = run.finished_at ? (zeroCallBudget ? 'Last attempt ' : run.status === 'ready' ? 'Assessment ready ' : run.status === 'inconclusive' ? 'Assessment inconclusive ' : 'Last attempt ') + formatDate(run.finished_at) : '';
   const header = '<div class="section-heading"><h3>Episode assessment</h3><span class="queue-note">' + safe([run.model, saved].filter(Boolean).join(' · ')) + '</span></div>';
+  if (zeroCallBudget) return '<section class="briefing">' + header + '<div class="analysis-state" role="status" aria-live="polite"><div><strong>Prompt budget exceeded before any model call</strong>' +
+    '<p>Retained evidence and source checks remain available. Review the prompt budget before reassessing.</p>' +
+    '<button class="secondary" data-investigate="' + safe(run.episode_id) + '">Reassess episode</button>' + evidencePrompt + '</div></div></section>';
+  if (detailed && !assessment) return '';
   const incompleteNote = run.status === 'incomplete'
     ? '<details class="assessment-note"><summary>Why this needs attention</summary><p>The last attempt stopped before a conclusion met the evidence contract. Retained observations below are still available.</p>' + (run.validation_error ? '<small>' + safe(run.validation_error) + '</small>' : '') + '</details>' : '';
   const inconclusiveNote = run.status === 'inconclusive'
