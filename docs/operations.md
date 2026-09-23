@@ -46,6 +46,12 @@ The view shows:
 
 Overview presents one episode assessment, next action, uncertainty and a compact investigation status. When an earlier deterministic match exists, the assessment may include a cited **Related history** comparison. It compares captured evidence; it does not establish that two events share a root cause. Additional findings, competing explanations, alert relationships and detailed checks are expandable. Evidence includes agent observations plus the selected alert capture's telemetry; the alert selector appears in detail views, not the shared Overview. Timeline separates historical alerts from later agent activity. References open the cited observation, with a return control to restore the assessment. At most two cited performance charts appear in Overview; full charts remain in Evidence. New reports record the baseline reference window, while older captures may only have a median value. Charts describe the captured interval, not current workload health, and the dashed marker is not the alert time. Queue ages are relative with exact timestamps on hover. Export names the selected capture and episode-wide investigation scope. Compression, preservation, grounding and runtime remain in collapsed engineering diagnostics.
 
+Reports use a centered reading area: the likely explanation and next check sit
+alongside each other when space allows, then stack on smaller screens. **Capture
+context** preserves the initial summary without repeating it in the first view.
+**Assessment history** appears independently when there are revisions but no
+operator attachments; **Operator evidence** is reserved for actual supplied files.
+
 ## Patterns View
 
 Patterns is historical context, not a second incident queue. **Recurring issues**

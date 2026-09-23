@@ -169,6 +169,19 @@ Node is needed only for frontend tests, not to run FCAPSule. The suite covers va
 model comparison scoring, external-case ingestion, SQLite control-plane state, HTTP
 routes, and the full capsule pipeline.
 
+An optional read-only browser check exercises the live UI at six desktop and mobile
+widths. Install Playwright in your development environment and provide a running
+instance with retained incidents:
+
+```bash
+FCAPSULE_URL=http://127.0.0.1:8765 node tests/ui_layout_smoke.cjs
+```
+
+It previews local UI assets against that instance without modifying its settings or
+starting model calls. Set `LIVE_ASSETS=1` to verify the deployed assets instead.
+Optional `CHROME_PATH` and `PLAYWRIGHT_MODULE` select an existing browser/runtime.
+Screenshots and checks are saved under ignored `local_reports/`.
+
 ## Deployment
 
 The reference deployment runs as a Kubernetes pod with read-only access to Prometheus, OpenSearch, and the Kubernetes API. Prometheus firing alerts trigger bounded capture; range queries provide PM data; OpenSearch supplies Filebeat-indexed logs; and the Kubernetes API supplies workload identity, PodSpec state, and referenced ConfigMaps. Secrets are never read as configuration evidence.

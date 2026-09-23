@@ -210,6 +210,8 @@ test('assessment presents one primary explanation and retains distinct observati
   assert.match(html, /Database observation/);
   assert.match(html, /Still unconfirmed:/);
   assert.match(html, /Full assessment/);
+  assert.match(html, /class="assessment-decision"/);
+  assert.match(html, /<summary>Capture context<\/summary>/);
 });
 
 test('conflicting investigator finding is visible rather than silently merged', () => {
@@ -321,4 +323,20 @@ test('media upload is enabled only when the core and matching specialist are rea
   });
   assert.equal(disabled.image, false);
   assert.equal(disabled.audio, false);
+});
+
+test('assessment revisions without attachments do not render an empty media section', () => {
+  const render = helper('mediaEvidencePanel', 'sourceReviewPanel', {
+    selectedEpisodeId:'episode', safe:value=>String(value ?? ''), formatDate:value=>value,
+    disclosure:(id,title,body,count)=>'<details id="'+id+'"><summary>'+title+' '+count+'</summary>'+body+'</details>',
+  });
+  assert.equal(render({}), '');
+  const html = render({investigation_revisions:[
+    {reason:'initial',status:'ready',created_at:'first'},
+    {reason:'new_alert',status:'ready',created_at:'second'},
+  ]});
+  assert.equal((html.match(/Assessment history/g) || []).length, 1);
+  assert.doesNotMatch(html, /operator-evidence|Operator evidence|media-evidence/);
+  assert.match(html, /first/);
+  assert.match(html, /second/);
 });

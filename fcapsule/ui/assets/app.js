@@ -555,7 +555,7 @@ function mediaEvidencePanel(payload) {
   }).join('');
   const revision = payload.investigation_revisions || [];
   const history = revision.length > 1 ? disclosure('assessment-history', 'Assessment history', revision.map(item=>`<div class="revision-row"><span>${safe(item.reason.replaceAll('_',' '))}</span><strong>${safe(item.summary?.summary || item.status.replaceAll('_',' '))}</strong><small>${safe(formatDate(item.completed_at || item.created_at))}</small></div>`).join(''), revision.length) : '';
-  if (!items.length && !history) return '';
+  if (!items.length) return history;
   return disclosure('operator-evidence', 'Operator evidence', `<section class="media-evidence">${ready ? `<div class="row-actions"><button data-update-evidence-investigation="${safe(episodeId || '')}">Update investigation</button></div>` : ''}${rows}${history}</section>`, items.length);
 }
 
@@ -852,12 +852,13 @@ function briefingPanel(payload) {
     (item.next_check && !same(item.next_check, assessment.next_action) ? '<p><strong>Additional check:</strong> ' + safe(item.next_check) + '</p>' : '') +
     (item.observations?.length ? disclosure('finding-' + safe(item.id), 'Observed details', item.observations.map(observation => '<pre class="compact-data">' + safe(JSON.stringify(observation, null, 2)) + '</pre>').join(''), item.observations.length) : '') + '</article>').join('');
   const atCapture = assessment.summary && !same(assessment.summary, mechanism)
-    ? '<p class="assessment-context"><span class="text-label">At capture</span>' + safe(assessment.summary) + '</p>' : '';
+    ? disclosure('assessment-context', 'Capture context', '<p class="assessment-context">' + safe(assessment.summary) + '</p>') : '';
   return '<section class="briefing">' + header + inconclusiveNote +
-    '<div class="assessment-main"><span class="text-label">' + (run.status === 'inconclusive' ? 'Evidence assessment · inconclusive' : 'Likely explanation · model assessment') + '</span><p class="brief-lead">' + safe(mechanism || 'No supported cause yet.') + '</p><div class="citations">' + investigationRefs(run, mainIds) + '</div></div>' +
-    discrepancy + atCapture + (briefObservations ? '<div class="key-observations"><h4>Key observations</h4><ul>' + briefObservations + '</ul></div>' : '') +
+    '<div class="assessment-decision"><div class="assessment-main"><span class="text-label">' + (run.status === 'inconclusive' ? 'Evidence assessment · inconclusive' : 'Likely explanation · model assessment') + '</span><p class="brief-lead">' + safe(mechanism || 'No supported cause yet.') + '</p><div class="citations">' + investigationRefs(run, mainIds) + '</div></div>' +
     '<div class="next-check"><h4>Next check</h4><p><strong>' + safe(assessment.next_action) + '</strong></p><p><span class="text-label">What would confirm it</span>' + safe(assessment.expected_finding) + '</p></div>' +
+    '</div>' + discrepancy + (briefObservations ? '<div class="key-observations"><h4>Key observations</h4><ul>' + briefObservations + '</ul></div>' : '') +
     '<p class="uncertainty"><strong>Still unconfirmed:</strong> ' + safe(assessment.uncertainty) + '</p>' +
+    atCapture +
     (historyHtml ? disclosure('related-history', 'Related history', historyHtml) : '') +
     (findingDetails ? disclosure('all-findings', 'Full assessment', '<div class="findings">' + findingDetails + '</div>', run.findings.length) : '') +
     disclosure('competing-explanations','Explanations considered',hypotheses,assessment.hypotheses?.length) +
@@ -872,7 +873,8 @@ function investigationRefs(run, ids = []) {
     if (!item) return '<span class="source-unavailable">Reference ' + safe(id) + ' unavailable in this capture</span>';
     const log = item?.domain === 'log_template';
     const prior = item?.tool === 'historical_episode' ? item.result?.episode?.reference : '';
-    const label = prior ? 'Prior episode ' + prior : checks[item?.tool] || (log ? 'Logs: ' + logLabel(item.title).replace(/^(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL):\s*/i,'').slice(0, 52) : item?.title) || item?.question || id;
+    const logTitle = log ? logLabel(item.title).replace(/^(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL):\s*/i,'') : '';
+    const label = prior ? 'Prior episode ' + prior : checks[item?.tool] || (log ? 'Logs: ' + (logTitle.length > 72 ? logTitle.slice(0, 69).trimEnd() + '…' : logTitle) : item?.title) || item?.question || id;
     const occurrence = (labels.get(label) || 0) + 1; labels.set(label,occurrence);
     const kind = log || ['search_logs','review_omitted'].includes(item.tool) ? 'logs'
       : item.domain === 'configuration' || item.tool === 'workload_state' ? 'configuration'
@@ -1063,7 +1065,7 @@ function renderPatterns(state) {
     const recent = (pattern.episodes || []).slice(0, 3);
     const older = (pattern.episodes || []).slice(3);
     const episodeLink = episode => `<a href="/console?episode=${encodeURIComponent(episode.episode_id)}"><strong>${safe(episode.reference)}</strong><time title="${safe(formatExactDate(episode.started_at))}">${safe(relativeTime(episode.started_at))}</time>${icon('chevron-right')}</a>`;
-    return `<article class="pattern-row"><div class="pattern-main"><h2>${safe(pattern.title)}</h2><p>${safe(target)} · ${safe(application?.namespace || '')}</p><span class="pattern-reference">${safe(pattern.pattern_id)}</span></div><dl class="pattern-stats"><div><dt>Occurrences</dt><dd>${safe(pattern.occurrence_count)}</dd></div><div><dt>Last seen</dt><dd title="${safe(formatExactDate(pattern.last_seen_at))}">${safe(relativeTime(pattern.last_seen_at))}</dd></div><div><dt>Observed gap</dt><dd>${safe(interval || 'Insufficient observations')}</dd></div></dl><div class="pattern-episodes"><span>Recent episodes</span>${recent.map(episodeLink).join('')}${older.length ? `<details class="pattern-older" id="older-${safe(pattern.pattern_id)}"><summary>Show ${older.length} more</summary>${older.map(episodeLink).join('')}</details>` : ''}<small>First seen ${safe(formatDate(pattern.first_seen_at))}</small></div></article>`;
+    return `<article class="pattern-row"><div class="pattern-summary"><div class="pattern-main"><h2>${safe(pattern.title)}</h2><p>${safe(target)} · ${safe(application?.namespace || '')}</p><span class="pattern-reference">${safe(pattern.pattern_id)}</span></div><dl class="pattern-stats"><div><dt>Occurrences</dt><dd>${safe(pattern.occurrence_count)}</dd></div><div><dt>Last seen</dt><dd title="${safe(formatExactDate(pattern.last_seen_at))}">${safe(relativeTime(pattern.last_seen_at))}</dd></div><div><dt>Observed gap</dt><dd>${safe(interval || 'Insufficient observations')}</dd></div></dl></div><div class="pattern-episodes"><span>Recent episodes</span>${recent.map(episodeLink).join('')}${older.length ? `<details class="pattern-older" id="older-${safe(pattern.pattern_id)}"><summary>Show ${older.length} more</summary>${older.map(episodeLink).join('')}</details>` : ''}<small>First seen ${safe(formatDate(pattern.first_seen_at))}</small></div></article>`;
   }).join('');
   const groups = state.overview.related_groups || [];
   app.innerHTML = `<div class="page-head"><div><div class="eyebrow">Incident history</div><h1>Patterns</h1><p>Repeated episodes and possible shared operating conditions in retained history.</p></div></div><div class="patterns-view" role="group" aria-label="Pattern view"><button type="button" data-patterns-view="recurring" aria-pressed="${patternsMode === 'recurring'}">Recurring issues</button><button type="button" data-patterns-view="shared" aria-pressed="${patternsMode === 'shared'}">Shared conditions${groups.length ? ` (${groups.length})` : ''}</button></div>${patternsMode === 'recurring' ? `<section class="patterns"><div class="sheet-head"><h2>Recurring issues</h2><span class="queue-note">${patterns.length} recurring pattern${patterns.length === 1 ? '' : 's'}</span></div>${rows || '<div class="empty">No recurring patterns in retained history.</div>'}</section>` : relatedActivity(groups)}`;

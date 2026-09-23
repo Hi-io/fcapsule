@@ -4,8 +4,13 @@
 
 ### Changed
 
+- Centered report reading areas and aligned the explanation with the next check on
+  wide screens. Capture context remains expandable; mobile retains the same reading order.
+- Aligned recurring-pattern details, improved shared-episode links and settings
+  spacing, and fixed an empty preview appearing before an evidence file is selected.
+- Added read-only, multi-viewport browser checks for all product views and report controls.
 - Added stable short incident/episode references, shareable direct report links,
-  compact queue filters, a focused Operations triage strip and a Patterns view
+  compact queue filters and a Patterns view
   for retained recurring issues. Recurrence is resource- and alert-aware; it does
   not merge incidents or claim a common root cause.
 - Added a bounded historical-episode investigator tool. Recurring assessments now
