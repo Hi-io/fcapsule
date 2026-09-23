@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from fcapsule.processing.metrics_analyzer import ALERT_METRIC_FIELDS
+
 
 _METRIC_ORDER = (
     "request_error_rate",
@@ -136,9 +138,40 @@ def _impact_context(name: str, value: Any, baseline: Any) -> tuple[str, str]:
 
 
 def _window_counter_increase(source_metrics: list[dict[str, Any]] | None, name: str) -> float | None:
-    series = next((item for item in source_metrics or [] if item.get("metric") == name), None)
+    series = next((item for item in source_metrics or [] if item.get("metric") == name and item.get("signal_origin") != "alert_rule"), None)
     values = [float(point[1]) for point in (series or {}).get("values", []) if isinstance(point, list) and len(point) == 2]
     return max(values) - min(values) if len(values) >= 2 else None
+
+
+def _alert_value(value: Any, unit: str | None) -> str:
+    if value is None:
+        return "Unavailable"
+    return f"{float(value):g}" + (f" {unit}" if unit and unit != "state" else "")
+
+
+def _alert_pm_signals(source_metrics: list[dict[str, Any]], anomalies: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_id = {item.get("series_id"): item for item in anomalies if item.get("signal_origin") == "alert_rule"}
+    signals = []
+    for series in source_metrics:
+        if series.get("signal_origin") != "alert_rule":
+            continue
+        anomaly = by_id.get(series.get("series_id"))
+        if not anomaly:
+            continue
+        unit = series.get("unit")
+        signals.append({
+            **{key: anomaly[key] for key in ALERT_METRIC_FIELDS if key in anomaly},
+            "evidence_id": f"ev_{anomaly['metric_id']}", "metric": series["metric"],
+            "label": series["metric"], "meaning": anomaly["reason"],
+            "component": series.get("labels", {}).get("pod") or series.get("labels", {}).get("service"),
+            "baseline": _alert_value(anomaly["baseline_median"], unit),
+            "peak": _alert_value(anomaly["incident_peak"], unit),
+            "baseline_value": anomaly["baseline_median"], "peak_value": anomaly["incident_peak"],
+            "baseline_start": anomaly["baseline_start"], "baseline_end": anomaly["baseline_end"],
+            "baseline_basis": anomaly["baseline_basis"],
+            "values": [{"timestamp": point[0], "value": point[1]} for point in series["values"]],
+        })
+    return signals
 
 
 def _pm_signals(source_metrics: list[dict[str, Any]] | None, anomalies: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -146,9 +179,9 @@ def _pm_signals(source_metrics: list[dict[str, Any]] | None, anomalies: list[dic
 
     if not source_metrics:
         return []
-    anomaly_by_metric = {item.get("metric"): item for item in anomalies}
-    by_name = {item.get("metric"): item for item in source_metrics}
-    signals = []
+    anomaly_by_metric = {item.get("metric"): item for item in anomalies if item.get("signal_origin") != "alert_rule"}
+    by_name = {item.get("metric"): item for item in source_metrics if item.get("signal_origin") != "alert_rule"}
+    signals = _alert_pm_signals(source_metrics, anomalies)
     for name in _PM_CHART_METRICS:
         series = by_name.get(name)
         anomaly = anomaly_by_metric.get(name)
@@ -268,6 +301,9 @@ def build_incident_report(
     anomalies = sorted(capsule.get("metric_anomalies", []), key=_metric_rank)
     impact = []
     for metric in anomalies:
+        if metric.get("signal_origin") == "alert_rule":
+            # Alert comparisons have their own raw-value projection, not generic deltas.
+            continue
         name = str(metric.get("metric", ""))
         if not any(term in name for term in _METRIC_ORDER):
             continue
@@ -361,6 +397,11 @@ def build_incident_report(
         "topology": case.get("topology", []),
         "fault_alerts": _fault_alerts(capsule),
         "pm_signals": _pm_signals(source_metrics, anomalies),
+        "alert_metric_evidence": [alert.get("metric_evidence") or {
+            "status": "unavailable", "reason": "not_captured", "alertname": alert.get("alertname"),
+            "rule": alert.get("rule", {}),
+            "note": "Alert-driven metric values were not retained in this capture. Historical captures are not backfilled.",
+        } for alert in capsule.get("alerts", [])],
         "pm_coverage_note": (
             f"No {', '.join(missing_pm)} series were received for this incident, so FCAPSule cannot rule out host-level pressure."
             if missing_pm

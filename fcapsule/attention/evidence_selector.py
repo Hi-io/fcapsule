@@ -41,7 +41,8 @@ def select_evidence(evidence: list[dict[str, Any]], limit: int = MAX_SELECTED_EV
                 ),
             )
         elif evidence_type == "metric_anomaly":
-            required = _representatives(
+            required = [item for item in matches if item.get("signal_origin") == "alert_rule"]
+            required += [item for item in _representatives(
                 matches,
                 (
                     ("error", "failure"),
@@ -50,7 +51,7 @@ def select_evidence(evidence: list[dict[str, Any]], limit: int = MAX_SELECTED_EV
                     ("pool", "exhaust", "saturation"),
                     ("log_indexing", "scrape", "telemetry"),
                 ),
-            )
+            ) if item not in required]
         ordered = required + [item for item in matches if item not in required]
         for item in ordered[:type_limit]:
             if item not in selected and len(selected) < limit:

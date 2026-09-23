@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import time
 import math
+import hashlib
+import json
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
 
 from fcapsule.adapters.transport import JsonTransport
+from fcapsule.adapters.alert_expression import UnavailableExpression, plan_alert_expression
+
+MAX_ALERT_SERIES = 12
+MAX_ALERT_POINTS = 241
+MAX_ALERT_WINDOW_SECONDS = 4 * 60 * 60
 
 
 class PrometheusAdapter:
@@ -135,7 +142,7 @@ class PrometheusAdapter:
                 name = str(rule.get("name", "")).strip()
                 if not name or str(rule.get("type", "alerting")) != "alerting":
                     continue
-                definitions[name] = {
+                definition = {
                     "name": name,
                     "query": str(rule.get("query", "")),
                     "duration": float(rule.get("duration", 0) or 0),
@@ -147,7 +154,102 @@ class PrometheusAdapter:
                     "group": str(group.get("name", "")),
                     "file": str(group.get("file", "")),
                 }
+                if name in definitions:
+                    # Alertmanager labels alone cannot disambiguate same-name rules.
+                    definitions[name]["ambiguous"] = True
+                else:
+                    definitions[name] = definition
         return definitions
+
+    def collect_alert_metrics(
+        self, alert: dict[str, Any], namespace: str, pod: str, start: datetime, end: datetime,
+    ) -> dict[str, Any]:
+        """Capture bounded underlying values from a source-discovered rule, never a model query.
+
+        Failure is evidence of unavailable coverage, not an empty healthy graph.
+        This method only reads the configured Prometheus; it never follows alert URLs.
+        """
+        rule = alert.get("rule") if isinstance(alert.get("rule"), dict) else {}
+        evidence: dict[str, Any] = {
+            "status": "unavailable", "reason": None, "signal_origin": "alert_rule",
+            "alertname": alert.get("alertname"), "alert_timestamp": alert.get("startsAt"),
+            "rule": rule, "labels": dict(alert.get("labels", {})),
+            "source": {"adapter": "prometheus", "endpoint": "/api/v1/query_range",
+                       "captured_at": _timestamp(time.time()), "capture_mode": "incident_capture"},
+            "time_range": {"start": _timestamp(start.timestamp()), "end": _timestamp(end.timestamp())},
+        }
+        result: dict[str, Any] = {"series": [], "alert_evidence": evidence}
+        duration = (end - start).total_seconds()
+        if not 0 < duration <= MAX_ALERT_WINDOW_SECONDS:
+            evidence["reason"] = "capture_window_out_of_bounds"
+            return result
+        try:
+            evidence.update(plan_alert_expression(rule, alert.get("labels", {}), namespace, pod))
+        except UnavailableExpression as exc:
+            evidence["reason"] = str(exc)
+            return result
+        step = max(15, math.ceil(duration / (MAX_ALERT_POINTS - 1)))
+        evidence["step_seconds"] = step
+        try:
+            data = self._api("/api/v1/query_range", {
+                "query": evidence["expression"], "start": start.timestamp(), "end": end.timestamp(),
+                "step": step, "timeout": "4s", "limit": MAX_ALERT_SERIES + 1,
+            }) or {}
+        except (RuntimeError, OSError, ValueError):
+            evidence["reason"] = "query_failed"
+            return result
+        if not isinstance(data, dict):
+            evidence["reason"] = "unsupported_query_result"
+            return result
+        results = data.get("result", [])
+        if data.get("resultType") != "matrix" or not isinstance(results, list):
+            evidence["reason"] = "unsupported_query_result"
+            return result
+        if len(results) > MAX_ALERT_SERIES:
+            evidence["reason"] = "series_limit_exceeded"
+            return result
+        try:
+            for item in results:
+                if item.get("histograms"):
+                    evidence["reason"] = "native_histogram_values_unsupported"
+                    result["series"] = []
+                    return result
+                labels = {str(key): str(value) for key, value in item.get("metric", {}).items()}
+                if any(key in labels and labels[key] != expected for key, expected in evidence["scope"].items()):
+                    evidence["reason"] = "result_outside_incident_scope"
+                    result["series"] = []
+                    return result
+                samples = item.get("values", [])
+                if len(samples) > MAX_ALERT_POINTS:
+                    raise ValueError("too many samples")
+                grid = [start.timestamp() + offset * step for offset in range(math.floor(duration / step) + 1)]
+                by_position = {}
+                for stamp, raw_value in samples:
+                    stamp, value = float(stamp), float(raw_value)
+                    if not math.isfinite(stamp) or not start.timestamp() - 0.001 <= stamp <= end.timestamp() + 0.001:
+                        raise ValueError("sample outside window")
+                    position = round((stamp - start.timestamp()) / step)
+                    if abs(grid[position] - stamp) > 0.001 or position in by_position:
+                        raise ValueError("invalid sample timestamp")
+                    by_position[position] = [_timestamp(stamp), value if math.isfinite(value) else None]
+                values = [by_position.get(position, [_timestamp(stamp), None]) for position, stamp in enumerate(grid)]
+                if not any(point[1] is not None for point in values):
+                    continue
+                rule_identity = {key: rule.get(key) for key in ("name", "query", "duration", "keep_firing_for", "group", "file", "labels")}
+                identity = json.dumps([rule_identity, labels], sort_keys=True, separators=(",", ":"))
+                series_id = "alert_" + hashlib.sha256(identity.encode()).hexdigest()[:16]
+                result["series"].append({
+                    **{key: value for key, value in evidence.items() if key not in {"status", "reason", "labels"}},
+                    "series_id": series_id, "labels": labels, "values": values,
+                })
+        except (TypeError, ValueError, KeyError, IndexError, AttributeError):
+            evidence["reason"] = "invalid_query_samples"
+            result["series"] = []
+            return result
+        evidence["status"] = "available" if result["series"] else "unavailable"
+        evidence["reason"] = None if result["series"] else "no_finite_samples"
+        evidence["series_ids"] = [item["series_id"] for item in result["series"]]
+        return result
 
     def pod_inventory(self, namespaces: set[str] | None = None) -> dict[tuple[str, str], dict[str, str]]:
         inventory: dict[tuple[str, str], dict[str, str]] = {}

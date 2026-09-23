@@ -11,6 +11,8 @@ import json
 import math
 from typing import Any
 
+from fcapsule.processing.anonymizer import anonymize_text
+
 
 def estimate_tokens(value: Any) -> int:
     """Use a deliberately conservative character estimate before a provider replies."""
@@ -73,13 +75,98 @@ def _evidence_item(item: dict[str, Any]) -> dict[str, Any]:
         "operator_context": _bounded(item.get("operator_context"), max_items=3) if item.get("operator_context") else None,
         "limitation": _short(item.get("limitation"), 180),
         "revision_priority": True if item.get("revision_priority") else None,
+        "metric_observation": compact_metric_observation(item.get("metric_observation")),
     }
     # Empty keys cost meaningful tokens across several calls without helping a
     # model distinguish hypotheses. The full retained record stays on disk.
     return {key: value for key, value in values.items() if value not in (None, "", [], {})}
 
 
-def _evidence_priority(item: dict[str, Any], priority_ids: set[str]) -> tuple[int, int, int, int, int]:
+def compact_metric_observation(value: Any, *, minimal: bool = False) -> dict[str, Any]:
+    """Retain sampled alert-rule facts, never raw points or arbitrary metadata."""
+
+    if not isinstance(value, dict):
+        return {}
+
+    def fields(source, strings=(), numbers=()):
+        if not isinstance(source, dict):
+            return {}
+        kept = {key: anonymize_text(source[key]).strip()[:limit] for key, limit in strings
+                if isinstance(source.get(key), str) and source[key].strip()}
+        kept.update({key: source[key] for key in numbers
+                     if type(source.get(key)) in (int, float) and -1e308 <= source[key] <= 1e308})
+        return kept
+
+    result = fields(value, (("metric", 120), ("operator", 4), ("unit", 48)), ("threshold",))
+    if not result.get("metric"):
+        return {}
+    condition = fields(value.get("condition"), numbers=(
+        "observed_samples", "matching_samples", "missing_samples", "incident_observed_samples",
+        "incident_matching_samples", "min", "max",
+    ))
+    raw_condition = value.get("condition") if isinstance(value.get("condition"), dict) else {}
+    latest = fields(raw_condition.get("latest"), (("timestamp", 40),), ("value",))
+    if latest:
+        condition["latest"] = latest
+    expression = value.get("expression")
+    if isinstance(expression, str) and expression.strip():
+        result["expression"] = _short(anonymize_text(expression), 180 if minimal else 300)
+    for key, names in (
+        ("labels", tuple((name, 253) for name in (("namespace", "pod") if minimal else
+                                                 ("namespace", "pod", "container", "service", "job")))),
+        ("rule", (("name", 120), ("duration", 40), ("keep_firing_for", 40))),
+        ("time_range", (("start", 40), ("end", 40))),
+    ):
+        retained = fields(value.get(key), names, ("duration", "keep_firing_for") if key == "rule" else ())
+        if retained:
+            result[key] = retained
+    if not minimal:
+        condition.update(fields(raw_condition, (("first_match", 40), ("last_match", 40))))
+        result.update(fields(value, numbers=("step_seconds",)))
+        source = fields(value.get("source"), (("adapter", 40), ("endpoint", 80), ("captured_at", 40), ("capture_mode", 40)))
+        if source:
+            result["source"] = source
+    if condition:
+        condition["limitation"] = "Sampled comparison only; missing samples are unknown, not proof of continuous rule duration or cause."
+        result["condition"] = condition
+    return result
+
+
+def _scope(value: Any) -> dict[str, Any]:
+    """Whitelist retained identity, without copying arbitrary resource metadata."""
+
+    if not isinstance(value, dict):
+        return {}
+
+    def fields(source, keys, limit):
+        if not isinstance(source, dict):
+            return {}
+        return {key: anonymize_text(source[key]).strip()[:limit] for key in keys
+                if isinstance(source.get(key), str) and source[key].strip()}
+
+    result = fields(value, ("pod", "namespace", "service", "cluster"), 253)
+    result.update(fields(value, ("alert_started_at",), 40))
+    for key, names, limit in (("window", ("start", "end"), 40), ("resource", ("kind", "name"), 253)):
+        retained = fields(value.get(key), names, limit)
+        if retained:
+            result[key] = retained
+    return result
+
+
+def _recurrence(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    count = value.get("previous_count")
+    if type(count) is not int or count < 0:
+        return {}
+    return {
+        "previous_count": min(count, 9999),
+        "count_capped": count > 9999 or value.get("count_capped") is True,
+        "limitation": "Same-signature retained candidates only; not evidence of the same cause.",
+    }
+
+
+def _evidence_priority(item: dict[str, Any], priority_ids: set[str]) -> tuple[int, ...]:
     """Retain discriminating source evidence ahead of repetitive telemetry."""
 
     text = json.dumps(item, ensure_ascii=True, default=str).casefold()
@@ -87,7 +174,7 @@ def _evidence_priority(item: dict[str, Any], priority_ids: set[str]) -> tuple[in
     if item.get("revision_addition"):
         # The service orders additions newest first. Preserve that order instead
         # of ranking operator observations by error keywords or modality.
-        return (0, 0, 0, 0, 0)
+        return (0, 0, 0, 0, 0, 0)
     failure_markers = (
         "critical", "fatal", "error", "exception", "traceback", "panic", "failed",
         "failure", "refused", "timeout", "oom", "crash", "sqlstate", "errno", "exit_code",
@@ -100,6 +187,7 @@ def _evidence_priority(item: dict[str, Any], priority_ids: set[str]) -> tuple[in
     return (
         1,
         0 if str(item.get("id")) in priority_ids else 1,
+        -int(item.get("signal_origin") == "alert_rule" and bool(item.get("metric_observation"))),
         -int(any(marker in text for marker in failure_markers)),
         -int(any(marker in text for marker in diagnostic_markers)),
         -int(domain == "log_template"),
@@ -311,6 +399,8 @@ def compact_for_model(
         "constraints": "Evidence is bounded and may be incomplete. Current state is not incident-time state. Time correlation is not causation.",
     }
     optional_fields = {
+        "scope": _scope(context.get("scope")),
+        "recurrence": _recurrence(context.get("recurrence")),
         "episode_lifecycle": _bounded(context.get("episode_lifecycle"), max_items=6),
         "alerts": alerts,
         "impact": _bounded((context.get("impact") or [])[:8], max_items=5),
@@ -351,12 +441,27 @@ def compact_for_model(
             visible_ids = refresh_visible_ids()
         elif payload.get("impact"):
             payload["impact"] = []
+        elif payload.get("scope", {}).get("cluster"):
+            payload["scope"].pop("cluster")
+        elif (payload.get("scope", {}).get("pod")
+              and str(payload["scope"].get("resource", {}).get("kind", "")).casefold() == "pod"
+              and payload["scope"]["resource"].get("name") == payload["scope"]["pod"]):
+            payload["scope"].pop("resource")
+        elif payload.get("scope", {}).get("service") and (payload["scope"].get("pod") or payload["scope"].get("resource")):
+            # Protect pod/namespace (or the only known non-pod identity), plus
+            # capture time, even when repetitive alert details no longer fit.
+            payload["scope"].pop("service")
         elif any(item.get("diagnostic_example") is not None for item in payload["evidence"]):
             for item in payload["evidence"]:
                 item["diagnostic_example"] = None
         elif any(item.get("configuration") is not None for item in payload["evidence"]):
             for item in payload["evidence"]:
                 item["configuration"] = None
+        elif any(item.get("metric_observation") != compact_metric_observation(item.get("metric_observation"), minimal=True)
+                 for item in payload["evidence"] if item.get("metric_observation")):
+            for item in payload["evidence"]:
+                if item.get("metric_observation"):
+                    item["metric_observation"] = compact_metric_observation(item["metric_observation"], minimal=True)
         elif any(len(str(item.get("summary", ""))) > 140 for item in payload["evidence"]):
             for item in payload["evidence"]:
                 item["summary"] = _short(item.get("summary"), 140)
@@ -397,10 +502,10 @@ def compact_for_model(
             visible_ids = refresh_visible_ids()
         elif payload["evidence"] and len(str(payload["evidence"][0].get("summary") or "")) > 60:
             payload["evidence"][0]["summary"] = _short(payload["evidence"][0].get("summary"), 60)
-        elif payload["evidence"] and len(payload["evidence"][0]) > 2:
+        elif payload["evidence"] and set(payload["evidence"][0]) - {"id", "summary", "metric_observation"}:
             payload["evidence"][0] = {
                 key: payload["evidence"][0][key]
-                for key in ("id", "summary") if key in payload["evidence"][0]
+                for key in ("id", "summary", "metric_observation") if key in payload["evidence"][0]
             }
             visible_ids = refresh_visible_ids()
         else:

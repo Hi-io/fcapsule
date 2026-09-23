@@ -253,6 +253,10 @@ class ControlPlane:
         }
 
     def media_submission_allowed(self, kind: str) -> tuple[bool, str]:
+        if kind == "text":
+            if self.ai_configuration()["capability"]["status"] != "ready":
+                return False, "Validate the core investigator before adding text context."
+            return True, ""
         media = self.media_configuration()
         core_status = media["core_investigator"]["capability"]["status"]
         specialist = media.get(kind, {}).get("capability", {}).get("status")

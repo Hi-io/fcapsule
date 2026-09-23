@@ -227,8 +227,8 @@ function renderConsole(state) {
   document.querySelector('[role="tablist"]')?.addEventListener('keydown', event => {
     if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
     event.preventDefault();
-    const names = ['overview','evidence','timeline'];
-    reportTab = event.key === 'Home' ? names[0] : event.key === 'End' ? names[2] : names[(names.indexOf(reportTab) + (event.key === 'ArrowRight' ? 1 : 2)) % 3];
+    const names = ['overview','investigation','evidence','timeline'];
+    reportTab = event.key === 'Home' ? names[0] : event.key === 'End' ? names.at(-1) : names[(names.indexOf(reportTab) + (event.key === 'ArrowRight' ? 1 : names.length - 1)) % names.length];
     renderPreservingFocus(() => renderConsole(lastState));
     document.getElementById('tab-' + reportTab)?.focus({preventScroll:true});
   });
@@ -446,7 +446,7 @@ function episodeContext(episode) {
       : investigation.status === 'running' || investigation.status === 'queued' ? 'Investigation in progress' : '';
   const lifecycle = assessmentState || (episode.status === 'active' ? 'Currently active' : 'Currently resolved');
   const episodeLine = `<div class="episode-context-line">${identity}<button class="icon-button" data-copy-incident-link title="Copy direct episode link" aria-label="Copy direct episode link">${icon('copy')}</button><span class="queue-note">${episode.signal_count} captured alert${episode.signal_count === 1 ? '' : 's'} · ${lifecycle}</span></div>`;
-  if (reportTab === 'overview') return episodeLine;
+  if (['overview','investigation'].includes(reportTab)) return episodeLine;
   const capture = episode.signals.length === 1
     ? `<span class="queue-note">Selected alert capture · ${safe(signal.reference || id)} · ${safe(formatDate(signal.started_at))}</span>`
     : `<div class="signal-selector"><label for="signal-report">Alert capture</label><select id="signal-report" data-signal-select>${episode.signals.map((item, index) => `<option value="${safe(item.incident_id)}" ${id === item.incident_id ? 'selected' : ''}>${index + 1}. ${safe(item.summary || item.scenario)} · ${shortTime(item.started_at)}</option>`).join('')}</select></div>`;
@@ -529,6 +529,7 @@ async function buildCapsule(id) {
 
 function attachmentSummary(item) {
   const extraction = item.extraction || {};
+  if (item.kind === 'text') return extraction.content_text || item.context_note || 'Operator context';
   if (item.kind === 'audio') return extraction.transcript || extraction.limitation || 'Transcription pending.';
   const first = extraction.observations?.[0]?.fact || extraction.visible_text?.[0];
   return first || extraction.limitation || 'Visual extraction pending.';
@@ -538,25 +539,26 @@ function mediaEvidenceAvailability(media) {
   const config = media || (typeof lastState === 'object' ? lastState?.media : null) || {};
   const coreReady = config.core_investigator?.capability?.status === 'ready';
   return {
+    text: coreReady,
     image: coreReady && config.vision?.capability?.status === 'ready',
     audio: coreReady && config.audio?.capability?.status === 'ready',
   };
 }
 
-function mediaEvidencePanel(payload) {
+function mediaEvidencePanel(payload, includeHistory = true) {
   const episodeId = selectedEpisodeId || payload.investigation?.episode_id;
   const items = payload.media_evidence || [];
-  const ready = items.some(item => item.status === 'ready');
   const visible = new Set((payload.investigation?.calls || []).flatMap(call => call.visible_evidence_ids || []));
+  const ready = items.some(item => item.status === 'ready' && !visible.has('A-' + item.attachment_id));
   const rows = items.map(item => {
     const reference = 'A-' + item.attachment_id;
     const useState = item.status === 'ready' ? (visible.has(reference) ? 'included in latest assessment' : 'ready for a new assessment') : '';
     return `<article class="media-evidence-row"><div><strong>${safe(item.filename)}</strong><small>${safe(item.kind)} · ${safe(item.status)}${useState ? ' · ' + safe(useState) : ''}${item.observed_at ? ' · observed ' + safe(formatDate(item.observed_at)) : ''}</small><p>${safe(attachmentSummary(item))}</p></div><div class="media-evidence-actions"><a class="secondary button-link" href="${safe(item.artifact_url)}" target="_blank" rel="noopener">View</a>${item.status === 'ready' ? `<button class="secondary" data-correct-evidence="${safe(item.attachment_id)}">Correct</button>` : ''}</div></article>`;
   }).join('');
-  const revision = payload.investigation_revisions || [];
+  const revision = includeHistory ? payload.investigation_revisions || [] : [];
   const history = revision.length > 1 ? disclosure('assessment-history', 'Assessment history', revision.map(item=>`<div class="revision-row"><span>${safe(item.reason.replaceAll('_',' '))}</span><strong>${safe(item.summary?.summary || item.status.replaceAll('_',' '))}</strong><small>${safe(formatDate(item.completed_at || item.created_at))}</small></div>`).join(''), revision.length) : '';
   if (!items.length) return history;
-  return disclosure('operator-evidence', 'Operator evidence', `<section class="media-evidence">${ready ? `<div class="row-actions"><button data-update-evidence-investigation="${safe(episodeId || '')}">Update investigation</button></div>` : ''}${rows}${history}</section>`, items.length);
+  return disclosure('operator-evidence', 'Added context', `<section class="media-evidence">${ready ? `<div class="row-actions"><button data-update-evidence-investigation="${safe(episodeId || '')}">Review new context</button></div>` : ''}${rows}${history}</section>`, items.length);
 }
 
 function sourceReviewPanel(payload) {
@@ -586,57 +588,94 @@ function fileToBase64(file) {
 function showEvidenceDialog(episodeId) {
   if (!episodeId) return;
   const available = mediaEvidenceAvailability();
-  if (!available.image && !available.audio) {
+  if (!available.text) {
     location.assign('/settings#evidence-models');
     return;
   }
-  const accepted = [
-    ...(available.image ? ['image/png,image/jpeg,image/webp'] : []),
-    ...(available.audio ? ['audio/wav,audio/mpeg,audio/ogg,audio/webm,audio/mp4,audio/x-m4a'] : []),
-  ].join(',');
-  const typeLabel = available.image && available.audio ? 'Image or short audio from the investigation.' : available.image ? 'Image from the investigation.' : 'Short audio from the investigation.';
-  let state = {file:null, stream:null, recorder:null, objectUrl:null};
+  const imageTypes = ['image/png','image/jpeg','image/webp'];
+  const audioTypes = ['audio/wav','audio/x-wav','audio/mpeg','audio/ogg','audio/webm','audio/mp4','audio/x-m4a'];
+  const canRecord = available.audio && !!navigator.mediaDevices?.getUserMedia && !!window.MediaRecorder;
+  const state = {file:null, stream:null, recorder:null, objectUrl:null, timer:null, busy:false, closed:false};
   const dialog = document.createElement('dialog');
   dialog.className = 'evidence-dialog';
-  dialog.innerHTML = `<form method="dialog"><header><div><h2>Add evidence</h2><p>${typeLabel}</p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header><div class="dialog-body"><div class="field"><label for="evidence-file">File</label><input id="evidence-file" type="file" accept="${accepted}"><small>${available.image ? 'Images up to 6 MiB. ' : ''}${available.audio ? 'Audio up to 8 MiB.' : ''}</small></div>${available.audio ? '<div class="record-row"><button class="secondary" type="button" id="record-evidence">Record audio</button><span id="record-status" class="queue-note"></span></div>' : ''}<div id="evidence-preview" class="evidence-preview" hidden></div><div class="field"><label for="evidence-observed-at">Observed at</label><input id="evidence-observed-at" type="datetime-local"><small>Leave blank when the time is not known.</small></div><div class="field"><label for="evidence-note">Context</label><input id="evidence-note" maxlength="1000" placeholder="Optional note for the investigation"></div><label class="toggle"><input id="evidence-redacted" type="checkbox">This copy has been redacted where needed</label><p id="evidence-error" class="notice" hidden></p></div><footer><button class="secondary" value="cancel">Cancel</button><button type="button" id="submit-evidence" disabled>Analyze evidence</button></footer></form>`;
+  dialog.innerHTML = `<form method="dialog"><header><div><h2>Add context</h2><p>An observation, a log excerpt, or evidence from another tool.</p></div><button class="icon-button" value="cancel" aria-label="Close">${icon('x')}</button></header><div class="dialog-body"><div class="context-composer"><label class="text-label" for="evidence-note">What did you observe?</label><textarea id="evidence-note" maxlength="16000" rows="6" placeholder="Add context or paste an image..."></textarea><div id="evidence-preview" class="evidence-preview" hidden></div><div class="composer-tools"><div><button type="button" class="icon-button" id="attach-image" aria-label="Attach image" title="${available.image ? 'Attach image (up to 6 MiB)' : 'Validate the image model in Settings'}" ${available.image ? '' : 'disabled'}>${icon('scan-line')}</button><button type="button" class="icon-button" id="record-evidence" aria-label="Record audio" title="${canRecord ? 'Record audio (up to 60 seconds)' : 'Recording requires HTTPS or localhost and a validated audio model'}" ${canRecord ? '' : 'disabled'}>${icon('mic')}</button><button type="button" class="icon-button" id="attach-file" aria-label="Attach audio or import text" title="Attach audio or import a text/log file">${icon('paperclip')}</button></div><span id="record-status" class="queue-note" role="status">Uploaded time is saved automatically</span></div></div><input id="evidence-file" type="file" hidden><details class="context-metadata"><summary>Source details (optional)</summary><div class="field"><label for="evidence-observed-at">Time of observation</label><input id="evidence-observed-at" type="datetime-local"><small>Unknown when blank; separate from upload time.</small></div><label class="toggle"><input id="evidence-redacted" type="checkbox">I have redacted this copy where needed</label></details><p class="queue-note">Saved as operator-provided evidence. Review sensitive content before uploading.</p><p id="evidence-error" class="notice" role="alert" hidden></p></div><footer><button class="secondary" value="cancel">Cancel</button><button type="button" id="submit-evidence" disabled>Add context</button></footer></form>`;
   document.body.append(dialog);
   const fileInput = dialog.querySelector('#evidence-file'); const preview = dialog.querySelector('#evidence-preview');
-  const error = dialog.querySelector('#evidence-error'); const submit = dialog.querySelector('#submit-evidence'); const record = dialog.querySelector('#record-evidence'); const recordStatus = dialog.querySelector('#record-status');
-  const stopTracks = () => { state.stream?.getTracks().forEach(track => track.stop()); state.stream = null; state.recorder = null; };
-  const setFile = file => {
+  const note = dialog.querySelector('#evidence-note'); const error = dialog.querySelector('#evidence-error'); const submit = dialog.querySelector('#submit-evidence'); const record = dialog.querySelector('#record-evidence'); const recordStatus = dialog.querySelector('#record-status');
+  const sync = () => { submit.disabled = state.busy || state.recorder?.state === 'recording' || (!state.file && !note.value.trim()); };
+  const fail = message => { error.textContent = message; error.hidden = false; };
+  const stopTracks = () => { clearTimeout(state.timer); state.stream?.getTracks().forEach(track => track.stop()); state.stream = null; state.recorder = null; };
+  const setFile = async file => {
+    if (state.closed || state.busy) return;
+    error.hidden = true;
+    if (file && (/\.(txt|log)$/i.test(file.name) || file.type === 'text/plain')) {
+      if (file.size > 64000) return fail('Text files must be at most 16,000 characters (64 KB).');
+      const text = await file.text();
+      if (state.closed) return;
+      const combined = [note.value.trim(),text].filter(Boolean).join('\n\n');
+      if (combined.length > 16000) return fail('Context is limited to 16,000 characters. Choose a focused excerpt.');
+      note.value = combined; sync(); return;
+    }
+    if (file) {
+      const type = file.type.split(';')[0];
+      const isImage = imageTypes.includes(type); const isAudio = audioTypes.includes(type);
+      if ((!isImage && !isAudio) || (isImage && !available.image) || (isAudio && !available.audio)) return fail('This file type is unavailable. Validate its model in Settings, or add text context.');
+      if (file.size > (isImage ? 6 : 8) * 1024 * 1024) return fail(isImage ? 'Images are limited to 6 MiB.' : 'Audio is limited to 8 MiB.');
+    }
     if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
     state.file = file || null; preview.hidden = !file; preview.innerHTML = '';
-    if (file) { state.objectUrl = URL.createObjectURL(file); preview.innerHTML = file.type.startsWith('image/') ? `<img src="${safe(state.objectUrl)}" alt="Selected evidence preview">` : `<audio controls src="${safe(state.objectUrl)}"></audio><span>${safe(file.name)} · ${bytes(file.size)}</span>`; }
-    submit.disabled = !state.file;
+    if (file) {
+      state.objectUrl = URL.createObjectURL(file);
+      preview.innerHTML = (file.type.startsWith('image/') ? `<img src="${safe(state.objectUrl)}" alt="Selected evidence preview">` : `<audio controls src="${safe(state.objectUrl)}"></audio>`) + `<div class="attachment-caption"><span>${safe(file.name)} · ${bytes(file.size)}</span><button type="button" class="icon-button" aria-label="Remove attachment">${icon('x')}</button></div>`;
+      preview.querySelector('button').addEventListener('click', () => setFile(null));
+    }
+    sync();
   };
+  note.addEventListener('input', sync);
+  note.addEventListener('paste', event => {
+    const image = [...(event.clipboardData?.items || [])].find(item => item.kind === 'file' && item.type.startsWith('image/'));
+    if (image) { event.preventDefault(); setFile(image.getAsFile()); }
+  });
   fileInput.addEventListener('change', () => setFile(fileInput.files?.[0]));
-  record?.addEventListener('click', async () => {
+  dialog.querySelector('#attach-image').addEventListener('click', () => { fileInput.accept = imageTypes.join(','); fileInput.value = ''; fileInput.click(); });
+  dialog.querySelector('#attach-file').addEventListener('click', () => { fileInput.accept = ['.txt','.log',...(available.audio ? audioTypes : [])].join(','); fileInput.value = ''; fileInput.click(); });
+  record.addEventListener('click', async () => {
     if (state.recorder?.state === 'recording') { state.recorder.stop(); return; }
     try {
-      if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) throw new Error('Recording is unavailable in this browser context.');
-      state.stream = await navigator.mediaDevices.getUserMedia({audio:true}); const mime = ['audio/webm','audio/ogg'].find(value => MediaRecorder.isTypeSupported(value)) || '';
-      const chunks = []; state.recorder = new MediaRecorder(state.stream, mime ? {mimeType:mime} : undefined);
-      state.recorder.addEventListener('dataavailable', event => { if (event.data.size) chunks.push(event.data); });
-      state.recorder.addEventListener('stop', () => { const type = state.recorder?.mimeType || mime || 'audio/webm'; setFile(new File([new Blob(chunks,{type})], 'operator-observation.webm', {type})); stopTracks(); record.textContent = 'Record audio'; recordStatus.textContent = 'Recording ready.'; });
-      state.recorder.start(); record.textContent = 'Stop recording'; recordStatus.textContent = 'Recording…';
-    } catch (exception) { recordStatus.textContent = exception.message || 'Unable to start recording.'; stopTracks(); }
+      record.disabled = true;
+      const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+      if (state.closed) { stream.getTracks().forEach(track => track.stop()); return; }
+      state.stream = stream;
+      const mime = ['audio/webm','audio/ogg','audio/mp4'].find(value => MediaRecorder.isTypeSupported(value)) || '';
+      const chunks = []; let size = 0;
+      const recorder = new MediaRecorder(stream, mime ? {mimeType:mime} : undefined); state.recorder = recorder;
+      recorder.addEventListener('dataavailable', event => { if (event.data.size) { chunks.push(event.data); size += event.data.size; if (size > 8 * 1024 * 1024 && recorder.state === 'recording') recorder.stop(); } });
+      recorder.addEventListener('stop', () => {
+        const type = recorder.mimeType || mime || 'audio/webm'; stopTracks();
+        if (state.closed) return;
+        setFile(new File(chunks, 'operator-observation.' + (type.includes('ogg') ? 'ogg' : type.includes('mp4') ? 'm4a' : 'webm'), {type}));
+        record.innerHTML = icon('mic'); record.setAttribute('aria-label','Record audio'); record.title = 'Record audio (up to 60 seconds)'; recordStatus.textContent = 'Recording ready'; sync();
+      });
+      recorder.start(1000); state.timer = setTimeout(() => { if (recorder.state === 'recording') recorder.stop(); },60000);
+      record.innerHTML = icon('square'); record.setAttribute('aria-label','Stop recording'); record.title = 'Stop recording'; recordStatus.textContent = 'Recording · 60-second limit'; record.disabled = false; sync();
+    } catch (exception) { fail(exception.message || 'Unable to start recording.'); stopTracks(); record.disabled = !canRecord; sync(); }
   });
   submit.addEventListener('click', async () => {
-    if (!state.file) return; submit.disabled = true; error.hidden = true;
+    if (submit.disabled) return; state.busy = true; sync(); error.hidden = true;
     try {
-      const kind = state.file.type.startsWith('image/') ? 'image' : state.file.type.startsWith('audio/') ? 'audio' : '';
-      if (!kind) throw new Error('Choose an image or audio file.');
-      if ((kind === 'image' && !available.image) || (kind === 'audio' && !available.audio)) throw new Error('This evidence type is not enabled. Validate its model in Settings.');
+      const file = state.file;
+      const kind = !file ? 'text' : file.type.startsWith('image/') ? 'image' : 'audio';
       const localTime = dialog.querySelector('#evidence-observed-at').value;
-      const payload = {kind, filename:state.file.name, content_base64:await fileToBase64(state.file), observed_at:localTime ? new Date(localTime).toISOString() : '', context_note:dialog.querySelector('#evidence-note').value, source_redacted:dialog.querySelector('#evidence-redacted').checked};
+      const payload = {kind, filename:file?.name || 'operator-context.txt', observed_at:localTime ? new Date(localTime).toISOString() : '', source_redacted:dialog.querySelector('#evidence-redacted').checked,
+        ...(file ? {content_base64:await fileToBase64(file),context_note:note.value.trim()} : {content_text:note.value.trim()})};
       const response = await fetch('/api/episodes/' + encodeURIComponent(episodeId) + '/evidence', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}); const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Unable to submit evidence.');
-      if (selectedReport) selectedReport.media_evidence = [result, ...(selectedReport.media_evidence || [])];
-      dialog.close(); renderPreservingFocus(() => renderConsole(lastState)); await refresh();
-    } catch (exception) { error.textContent = exception.message || 'Unable to submit evidence.'; error.hidden = false; submit.disabled = false; }
+      if (selectedEpisodeId === episodeId && selectedReport) { selectedReport.media_evidence = [result, ...(selectedReport.media_evidence || [])]; openDisclosures.add('operator-evidence'); }
+      if (!state.closed) dialog.close(); renderPreservingFocus(() => renderConsole(lastState)); await refresh();
+    } catch (exception) { fail(exception.message || 'Unable to submit evidence.'); state.busy = false; sync(); }
   });
-  dialog.addEventListener('close', () => { stopTracks(); if (state.objectUrl) URL.revokeObjectURL(state.objectUrl); dialog.remove(); });
-  dialog.showModal();
+  dialog.addEventListener('close', () => { state.closed = true; if (state.recorder?.state === 'recording') state.recorder.stop(); stopTracks(); if (state.objectUrl) URL.revokeObjectURL(state.objectUrl); dialog.remove(); });
+  dialog.showModal(); note.focus();
 }
 
 async function updateWithEvidence(episodeId) {
@@ -752,18 +791,29 @@ async function copyIncidentLink(button) {
 function sparkline(signal) {
   const values = signal.values || [];
   if (values.length < 2) return '';
-  const width = 320; const height = 72; const pad = 5;
-  const numbers = values.map(point => Number(point.value));
-  const floor = Math.min(...numbers, Number(signal.baseline_value || 0));
-  const ceiling = Math.max(...numbers, Number(signal.baseline_value || 0));
+  const width = 380; const height = 110; const left = 42; const pad = 8;
+  const finite = point => point.value != null && Number.isFinite(Number(point.value)) && Number.isFinite(Date.parse(point.timestamp));
+  const valid = values.filter(finite);
+  if (!valid.length) return '';
+  const isRule = signal.signal_origin === 'alert_rule';
+  const numbers = valid.map(point => Number(point.value));
+  const guides = [signal.baseline_value, ...(isRule ? [signal.threshold] : [])].filter(value=>value != null && Number.isFinite(Number(value))).map(Number);
+  const floor = Math.min(...numbers,...guides); const ceiling = Math.max(...numbers,...guides);
   const range = Math.max(ceiling - floor, 0.01);
-  const point = (value, index) => `${(index / (values.length - 1) * (width - pad * 2) + pad).toFixed(1)},${(height - pad - ((Number(value) - floor) / range * (height - pad * 2))).toFixed(1)}`;
-  const path = values.map((item, index) => `${index ? 'L' : 'M'}${point(item.value, index)}`).join(' ');
-  const baselineY = (height - pad - ((Number(signal.baseline_value || 0) - floor) / range * (height - pad * 2))).toFixed(1);
-  const matchedIndex = values.findIndex(item => item.timestamp === signal.alert_timestamp);
-  const extremeIndex = matchedIndex >= 0 ? matchedIndex : numbers.indexOf(signal.metric === 'pod_ready' ? Math.min(...numbers) : Math.max(...numbers));
-  const extremeX = (extremeIndex / (values.length - 1) * (width - pad * 2) + pad).toFixed(1);
-  return `<svg class="spark" viewBox="0 0 ${width} ${height}" role="img" aria-label="${safe(signal.label)} across the captured window. Dashed vertical line marks ${matchedIndex >= 0 ? 'the selected deviation' : 'the window extreme'}; horizontal line shows the baseline median."><line class="axis" x1="0" y1="${height - pad}" x2="${width}" y2="${height - pad}"/><line class="baseline" x1="0" y1="${baselineY}" x2="${width}" y2="${baselineY}"/><line class="incident" x1="${extremeX}" y1="0" x2="${extremeX}" y2="${height}"/><path class="series" d="${path}"/></svg>`;
+  const timestamps = values.map(point=>Date.parse(point.timestamp)).filter(Number.isFinite);
+  const start = Math.min(...timestamps); const end = Math.max(...timestamps);
+  const x = stamp => left + (Date.parse(stamp) - start) / Math.max(end - start,1) * (width - left - pad);
+  const y = value => height - pad - (Number(value) - floor) / range * (height - 2 * pad);
+  let continuous = false;
+  const path = values.map(item=>{ if (!finite(item)) { continuous = false; return ''; } const segment = `${continuous ? 'L' : 'M'}${x(item.timestamp).toFixed(1)},${y(item.value).toFixed(1)}`; continuous = true; return segment; }).join(' ');
+  const extreme = valid.find(point=>point.timestamp === signal.alert_timestamp) || valid[numbers.indexOf(signal.metric === 'pod_ready' ? Math.min(...numbers) : Math.max(...numbers))];
+  const marker = isRule ? signal.alert_timestamp : extreme.timestamp;
+  const markerTime = Date.parse(marker);
+  const markerLine = Number.isFinite(markerTime) && markerTime >= start && markerTime <= end ? `<line class="${isRule ? 'alert-start' : 'incident'}" x1="${x(marker)}" y1="0" x2="${x(marker)}" y2="${height}"/>` : '';
+  const baseline = signal.baseline_value != null ? `<line class="baseline" x1="${left}" y1="${y(signal.baseline_value)}" x2="${width}" y2="${y(signal.baseline_value)}"/>` : '';
+  const threshold = isRule && signal.threshold != null ? `<line class="threshold" x1="${left}" y1="${y(signal.threshold)}" x2="${width}" y2="${y(signal.threshold)}"/>` : '';
+  const tick = value => Number(value).toLocaleString('en',{notation:'compact',maximumSignificantDigits:3});
+  return `<svg class="spark" viewBox="0 0 ${width} ${height}" role="img" aria-label="${safe(signal.label)} across the captured window. ${isRule ? 'Amber horizontal line: threshold. Red vertical line: alert start, when in range.' : 'Dashed vertical line: selected deviation, not alert time. Horizontal line: baseline median.'} Gaps represent missing samples."><text x="0" y="12" class="chart-tick">${tick(ceiling)}</text><text x="0" y="${height-pad}" class="chart-tick">${tick(floor)}</text><line class="axis" x1="${left}" y1="${height - pad}" x2="${width}" y2="${height - pad}"/>${baseline}${threshold}${markerLine}<path class="series" d="${path}"/>${valid.length === 1 ? `<circle class="single-sample" cx="${x(valid[0].timestamp)}" cy="${y(valid[0].value)}" r="3"/>` : ''}</svg>`;
 }
 
 function evidenceReferences(report, ids) {
@@ -804,7 +854,7 @@ function logLabel(pattern) {
     return pattern.length > 140 ? pattern.slice(0, 137) + '...' : pattern;
   }
 }
-function briefingPanel(payload) {
+function briefingPanel(payload, detailed = false) {
   const run = payload.investigation || {status:'not_started', episode_id:selectedEpisodeId};
   const assessment = run.assessment;
   const loading = ['queued','running','waiting'].includes(run.status);
@@ -853,16 +903,16 @@ function briefingPanel(payload) {
     (item.observations?.length ? disclosure('finding-' + safe(item.id), 'Observed details', item.observations.map(observation => '<pre class="compact-data">' + safe(JSON.stringify(observation, null, 2)) + '</pre>').join(''), item.observations.length) : '') + '</article>').join('');
   const atCapture = assessment.summary && !same(assessment.summary, mechanism)
     ? disclosure('assessment-context', 'Capture context', '<p class="assessment-context">' + safe(assessment.summary) + '</p>') : '';
+  if (detailed) return '<section class="investigation-details"><h3>Assessment details</h3>' + atCapture +
+    (historyHtml ? disclosure('related-history', 'Related history', historyHtml) : '') +
+    (findingDetails ? disclosure('all-findings', 'Retained findings', '<div class="findings">' + findingDetails + '</div>', run.findings.length) : '') +
+    (hypotheses ? disclosure('competing-explanations','Explanations considered',hypotheses,assessment.hypotheses.length) : '') +
+    (connections ? disclosure('alert-connections','How the alerts relate',connections,assessment.connections.length) : '') + '</section>';
   return '<section class="briefing">' + header + inconclusiveNote +
-    '<div class="assessment-decision"><div class="assessment-main"><span class="text-label">' + (run.status === 'inconclusive' ? 'Evidence assessment · inconclusive' : 'Likely explanation · model assessment') + '</span><p class="brief-lead">' + safe(mechanism || 'No supported cause yet.') + '</p><div class="citations">' + investigationRefs(run, mainIds) + '</div></div>' +
+    '<div class="assessment-decision"><div class="assessment-main"><span class="text-label">' + (run.status === 'inconclusive' ? 'Evidence assessment · inconclusive' : 'Likely explanation · model assessment') + '</span><p class="brief-lead">' + safe(mechanism || 'No supported cause yet.') + '</p>' + (assessment.basis ? '<p class="assessment-basis"><strong>Why this fits</strong> ' + safe(assessment.basis) + '</p>' : '') + '<div class="citations">' + investigationRefs(run, mainIds) + '</div></div>' +
     '<div class="next-check"><h4>Next check</h4><p><strong>' + safe(assessment.next_action) + '</strong></p><p><span class="text-label">What would confirm it</span>' + safe(assessment.expected_finding) + '</p></div>' +
     '</div>' + discrepancy + (briefObservations ? '<div class="key-observations"><h4>Key observations</h4><ul>' + briefObservations + '</ul></div>' : '') +
-    '<p class="uncertainty"><strong>Still unconfirmed:</strong> ' + safe(assessment.uncertainty) + '</p>' +
-    atCapture +
-    (historyHtml ? disclosure('related-history', 'Related history', historyHtml) : '') +
-    (findingDetails ? disclosure('all-findings', 'Full assessment', '<div class="findings">' + findingDetails + '</div>', run.findings.length) : '') +
-    disclosure('competing-explanations','Explanations considered',hypotheses,assessment.hypotheses?.length) +
-    (connections ? disclosure('alert-connections','How the alerts relate',connections,assessment.connections.length) : '') + '</section>';
+    '<p class="uncertainty"><strong>Still unconfirmed:</strong> ' + safe(assessment.uncertainty) + '</p></section>';
 }
 
 function investigationRefs(run, ids = []) {
@@ -887,20 +937,48 @@ function investigationRefs(run, ids = []) {
   }).join('');
 }
 
-function investigationProgress(run = {}) {
+function investigationScope(payload) {
+  const scope = payload.investigation?.context?.scope || {...payload.report?.incident,...payload.incident};
+  const resource = scope.pod || scope.resource?.name || scope.service;
+  const recurrence = payload.investigation?.context?.recurrence;
+  const parts = [[scope.pod ? 'Pod' : scope.resource?.kind || 'Service',resource],['Namespace',scope.namespace]];
+  if (recurrence?.previous_count > 0) parts.push(['Retained history',recurrence.previous_count + (recurrence.count_capped ? '+' : '') + ' earlier same-signature episodes']);
+  return '<dl class="assessment-scope">' + parts.filter(([,value])=>value).map(([label,value])=>'<div><dt>' + safe(label) + '</dt><dd>' + safe(value) + '</dd></div>').join('') + '</dl>';
+}
+
+function checkObservation(item) {
+  const result = item.result || {};
+  if (item.status === 'running') return 'Waiting for the source response.';
+  if (item.status !== 'completed') return String(item.error || result.error || 'No successful observation was retained.').slice(0,300);
+  if (result.error) return String(result.error).slice(0,300);
+  if (result.summary || result.message) return String(result.summary || result.message).slice(0,300);
+  const metrics = result.observations?.filter(row=>row.metric) || result.affected || [];
+  const metric = metrics.find(row=>row.metric && row.max != null);
+  if (metric) return `${metric.metric}: ${metric.min ?? '?'} to ${metric.max}${metrics.length > 1 ? ' · ' + metrics.length + ' metric series retained' : ''}`;
+  const patterns = result.patterns || result.observations?.filter(row=>row.pattern) || [];
+  if (patterns.length) return patterns.length + ' log patterns · ' + logLabel(patterns[0].pattern);
+  if (Array.isArray(result.patterns) && !result.patterns.length) return 'No matching log patterns were returned in the queried window.';
+  const configs = result.observations?.filter(row=>row.kind) || [];
+  if (configs.length) return configs.slice(0,2).map(row=>[row.kind,row.name,row.phase].filter(Boolean).join(' · ')).join('; ');
+  if (result.episode) return 'Earlier episode ' + (result.episode.reference || result.episode.episode_id) + ' retained for comparison; not proof of the same cause.';
+  const targets = result.targets || result.active_targets;
+  if (Array.isArray(targets)) return targets.length ? targets.length + ' targets returned; inspect their observed state.' : 'No matching targets returned.';
+  return Object.keys(result).length ? 'Source response retained. Open the observation for its details.' : 'No observations returned.';
+}
+
+function investigationProgress(run = {}, compact = false) {
   const checks = run.checks || [];
   const usage = run.usage;
   const budget = run.token_budget || {};
   const tokenText = usage ? (usage.complete ? '' : 'At least ') + Number(usage.total_tokens || 0).toLocaleString('en') + (run.status === 'running' ? ' reported tokens' : ' tokens') : 'Usage pending';
-  const rows = checks.map(item => '<li class="agent-step ' + safe(item.status) + '"><span class="step-marker" aria-hidden="true">' + (item.status === 'running' ? '<span class="spinner"></span>' : icon(item.status === 'completed' ? 'activity' : 'bell-ring')) + '</span><div><strong>' + safe(item.question) + '</strong><small>' + safe(item.status) + (item.finished_at ? ' · ' + formatDate(item.finished_at) : '') + '</small></div></li>').join('');
+  const rows = checks.map(item => '<li class="agent-step ' + safe(item.status) + '"><span class="step-marker" aria-hidden="true">' + (item.status === 'running' ? '<span class="spinner"></span>' : icon(item.status === 'completed' ? 'check' : 'bell-ring')) + '</span><div><strong>' + safe(item.question) + '</strong><p class="check-answer">' + safe(checkObservation(item)) + '</p><button class="evidence-link" data-investigation-ref="' + safe(item.id) + '">' + icon('chevron-right') + ' Open observation</button><small>' + safe(item.status) + (item.finished_at ? ' · ' + formatDate(item.finished_at) : '') + '</small></div></li>').join('');
   const details = '<dl class="coverage-details"><div><dt>Input tokens</dt><dd>' + Number(usage?.prompt_tokens || 0).toLocaleString('en') + '</dd></div><div><dt>Output tokens</dt><dd>' + Number(usage?.completion_tokens || 0).toLocaleString('en') + '</dd></div><div><dt>Safety reserve</dt><dd>' + Number(budget.accounted_total_tokens || 0).toLocaleString('en') + (budget.maximum_total_tokens ? ' / ' + Number(budget.maximum_total_tokens).toLocaleString('en') : '') + '</dd></div><div><dt>Budget remaining</dt><dd>' + Number(budget.remaining_tokens || 0).toLocaleString('en') + '</dd></div><div><dt>Model calls</dt><dd>' + (run.calls?.length || 0) + '</dd></div><div><dt>Earlier attempts</dt><dd>' + Number(run.lifetime_usage?.total_tokens || 0).toLocaleString('en') + ' tokens</dd></div></dl><p class="queue-note">' + (usage?.complete ? 'Provider-reported usage is shown alongside a pre-call safety reserve.' : 'Provider usage is incomplete; the safety reserve prevents unbounded follow-up calls.') + '</p>';
   const current = checks.find(item => item.status === 'running');
   const running = ['queued','running','waiting'].includes(run.status);
   const activity = running ? (current?.question || 'Checking retained evidence') : run.status === 'ready' ? 'Investigation complete' : run.status === 'inconclusive' ? 'No supported cause yet' : 'Investigation needs attention';
   return '<aside class="agent-progress"><div class="activity-heading"><div><h3>Investigation activity</h3><strong>' + safe(activity) + '</strong><small>' + checks.length + ' check' + (checks.length === 1 ? '' : 's') + (run.finished_at ? ' · ' + formatDate(run.finished_at) : '') + '</small></div>' +
-    (['ready','incomplete'].includes(run.status) ? '<button class="secondary" data-investigate="' + safe(run.episode_id) + '">' + icon('refresh-cw') + ' Reassess</button>' : '') + '</div>' +
-    disclosure('activity-checks', 'Review checks', rows ? '<ol class="agent-steps">' + rows + '</ol>' : '<p class="queue-note">No checks recorded yet.</p>', checks.length) +
-    '<div class="usage-note">' + disclosure('token-usage',tokenText,details) + '</div>' +
+    '<div class="activity-actions"><div class="usage-note">' + disclosure('token-usage',tokenText,details) + '</div>' + (['ready','incomplete','inconclusive'].includes(run.status) ? '<button class="icon-button" data-investigate="' + safe(run.episode_id) + '" title="Reassess episode" aria-label="Reassess episode">' + icon('refresh-cw') + '</button>' : '') + '</div></div>' +
+    (compact ? disclosure('activity-checks', 'Review checks', rows ? '<ol class="agent-steps">' + rows + '</ol>' : '<p class="queue-note">No checks recorded yet.</p>', checks.length) : '<ol class="agent-steps">' + rows + '</ol>') +
     (run.lifetime_usage?.complete === false ? '<p class="queue-note">Earlier-attempt usage is a lower bound; an interrupted request has no final count.</p>' : '') + '</aside>';
 }
 
@@ -933,7 +1011,7 @@ function investigationResult(result = {}, checkId = '') {
       (prior.summary ? '<p><span class="text-label">Earlier hypothesis, not proof</span>' + safe(prior.summary) + '</p>' : '<p>No earlier model hypothesis was retained.</p>') +
       '<small>' + safe((historic.captured_evidence || []).length) + ' retained incident capture(s) available for comparison.</small></section>';
   }
-  if (!series.length && !patterns.length && !configs.length) body += '<p>No observations returned.</p>';
+  if (!series.length && !patterns.length && !configs.length && !result.episode) body += '<p>' + safe(result.summary || result.message || (Object.keys(result).length ? 'Structured source response retained below.' : 'No observations returned.')) + '</p>';
   return body + '<p class="uncertainty">' + safe(result.limitation || result.comparability || '') + '</p><details class="raw-observation"><summary>Observation JSON</summary><pre class="log-lines">' + safe(JSON.stringify(result,null,2)) + '</pre></details>';
 }
 
@@ -942,13 +1020,13 @@ function investigationEvidence(run = {}, attachments = []) {
   const checks = (run.checks || []).map(item=>disclosure('agent-' + item.id,item.question,'<p>' + safe(item.distinguishes) + '</p><p class="queue-note">' + formatDate(item.started_at) + ' · ' + safe(item.status) + '</p>' + investigationResult(item.result,item.id),item.id)).join('');
   const exampleText = examples => examples.map(item => typeof item === 'string' ? item : JSON.stringify(item)).join('\n');
   const evidence = (run.context?.evidence || []).filter(item=>cited.has(item.id)).map(item=> {
-    if (['image_evidence','audio_evidence'].includes(item.domain)) {
+    if (['image_evidence','audio_evidence','audio_transcript','operator_context'].includes(item.domain)) {
       const attachment = attachments.find(entry=>entry.attachment_id === item.attachment_id);
       const extraction = attachment?.extraction;
-      const facts = (extraction?.observations || item.examples || []).map(entry=>typeof entry === 'string' ? entry : entry.fact).filter(Boolean);
+      const facts = (extraction?.content_text ? [extraction.content_text] : extraction?.observations || item.examples || []).map(entry=>typeof entry === 'string' ? entry : entry.fact).filter(Boolean);
       const observed = item.time_range?.observed_at;
       const limitation = extraction?.limitation || item.limitation;
-      const content = '<div class="media-observation-meta"><span class="queue-note">' + (item.domain === 'image_evidence' ? 'Image observation' : 'Audio observation') +
+      const content = '<div class="media-observation-meta"><span class="queue-note">' + (item.domain === 'operator_context' ? 'Operator-provided context, not verified telemetry' : item.domain === 'image_evidence' ? 'Image observation' : 'Audio observation') +
         (observed ? ' · observed ' + safe(formatDate(observed)) : ' · observation time unknown') + '</span>' +
         (attachment?.artifact_url ? '<a class="evidence-link" href="' + safe(attachment.artifact_url) + '" target="_blank" rel="noopener">' + icon('scan-line') + 'View original</a>' : '') + '</div>' +
         (facts.length ? '<ul class="media-observation-facts">' + facts.map(fact=>'<li>' + safe(fact) + '</li>').join('') + '</ul>' : '<p>' + safe(item.summary) + '</p>') +
@@ -986,6 +1064,16 @@ function metricChart(item, linkToEvidence = false) {
   const points = item.values || [];
   const start = points[0]?.timestamp; const end = points[points.length - 1]?.timestamp;
   const duration = start && end ? Math.round((new Date(end) - new Date(start)) / 60000) : 0;
+  if (item.signal_origin === 'alert_rule') {
+    const labels = Object.entries(item.labels || {}).filter(([key])=>['namespace','pod','service','instance','job'].includes(key)).map(([key,value])=>key + '=' + value).join(' · ');
+    const unit = item.unit ? ' ' + item.unit : '';
+    const missing = points.filter(point=>point.value == null).length;
+    return '<article class="metric-chart alert-signal"' + (linkToEvidence ? '' : ' id="evidence-' + safe(item.evidence_id) + '" tabindex="-1"') + '><span class="text-label">Alert signal</span><h4>' + safe(item.label) + '</h4><p class="queue-note">' + safe(labels || item.component || 'Rule result scope') + '</p>' +
+      '<div class="pm-values"><span>Before alert<b>' + safe(item.baseline || 'Unavailable') + '</b></span><span>Selected value<b>' + safe(item.peak) + '</b></span><span>Alert condition<b>' + safe(item.operator + ' ' + item.threshold + unit) + '</b></span></div>' + sparkline(item) +
+      '<div class="chart-times"><time title="' + safe(formatExactDate(start)) + '">' + shortTime(start) + '</time><span>' + duration + ' min captured</span><time title="' + safe(formatExactDate(end)) + '">' + shortTime(end) + '</time></div><div class="chart-legend"><span class="threshold-key">Dashed amber: threshold</span><span class="alert-key">Dashed red: alert start ' + safe(shortTime(item.alert_timestamp)) + '</span>' + (missing ? '<span>' + missing + ' missing samples</span>' : '') + '</div>' +
+      '<details class="metric-query"><summary>Query and provenance</summary><pre class="log-lines">' + safe(item.expression) + '</pre><p class="queue-note">Original rule: ' + safe(item.rule?.query || item.underlying_expression) + '</p><p class="queue-note">Captured ' + safe(formatExactDate(item.source?.captured_at)) + ' · step ' + safe(item.step_seconds) + 's · values are not filtered by the alert comparison.</p></details>' +
+      (linkToEvidence ? '<button class="evidence-link" data-evidence-link="' + safe(item.evidence_id) + '" data-domain="metrics">Open metric evidence</button>' : '') + '</article>';
+  }
   const extreme = item.metric === 'pod_ready' ? 'Selected low' : item.metric.endsWith('_total') ? 'Selected increase' : 'Selected deviation';
   const baselinePeriod = item.baseline_start
     ? ({pre_alert:'Before alert',split_window:'Split-window reference',single_sample:'Single-sample reference'}[item.baseline_basis] || 'Reference window') + ' · ' + shortTime(item.baseline_start) + '–' + shortTime(item.baseline_end)
@@ -996,11 +1084,13 @@ function metricChart(item, linkToEvidence = false) {
     (linkToEvidence ? '<button class="evidence-link" data-evidence-link="' + safe(item.evidence_id) + '" data-domain="metrics">Open metric evidence</button>' : '') + '</article>';
 }
 function metricsPanel(report) {
-  return '<div class="metrics-grid">' + (report.pm_signals || []).map(item => metricChart(item)).join('') + '</div>' + (report.pm_coverage_note ? '<p class="queue-note">' + safe(report.pm_coverage_note) + '</p>' : '');
+  const unavailable = (report.alert_metric_evidence || []).filter(item=>item.status !== 'available');
+  const coverage = unavailable.length ? '<p class="queue-note">Alert signal unavailable: ' + unavailable.map(item=>safe(item.alertname || 'rule') + ' (' + safe(String(item.reason || 'not captured').replaceAll('_',' ')) + ')').join('; ') + '.</p>' : !(report.pm_signals || []).some(item=>item.signal_origin === 'alert_rule') ? '<p class="queue-note">The alert-condition signal was not retained in this capture. Historical captures are not backfilled.</p>' : '';
+  return coverage + '<div class="metrics-grid">' + (report.pm_signals || []).map(item => metricChart(item)).join('') + '</div>' + (report.pm_coverage_note ? '<p class="queue-note">' + safe(report.pm_coverage_note) + '</p>' : '');
 }
 function overviewMetrics(report) {
   const supported = new Set((report.primary_hypothesis?.supporting_evidence || []).map(item => item.evidence_id));
-  const chosen = (report.pm_signals || []).filter(item => supported.has(item.evidence_id) && item.component && (item.values || []).length >= 2).slice(0, 2);
+  const chosen = (report.pm_signals || []).filter(item => (item.signal_origin === 'alert_rule' || supported.has(item.evidence_id) && item.component) && (item.values || []).length >= 2).sort((a,b)=>Number(b.signal_origin === 'alert_rule') - Number(a.signal_origin === 'alert_rule')).slice(0, 2);
   return chosen.length ? '<section class="overview-metrics"><h3>Relevant performance</h3><div class="metrics-grid">' + chosen.map(item => metricChart(item, true)).join('') + '</div></section>' : '';
 }
 function evidencePanel(report) {
@@ -1054,18 +1144,19 @@ function reportPanel(payload) {
   const incident = report.incident;
   const exports = capsuleExport(payload);
   const specialists = mediaEvidenceAvailability();
-  const evidenceAction = specialists.image || specialists.audio
-    ? '<button class="secondary" data-add-evidence="' + safe(selectedEpisodeId || '') + '">Add evidence</button>'
+  const evidenceAction = specialists.text
+    ? '<button class="secondary" data-add-evidence="' + safe(selectedEpisodeId || '') + '">' + icon('paperclip') + ' Add context</button>'
     : '<a class="button-link" href="/settings#evidence-models" title="Validate the core and specialist models in Settings to attach image or audio evidence">Evidence setup</a>';
   const ai = payload.investigation;
   const fallback = ai?.status !== 'ready' ? '<section class="observed-summary"><h3>Alert context</h3><p>' + safe(report.fault_alerts?.[0]?.description || incident.summary) + '</p></section>' : '';
   const d = report.engineering_diagnostics;
   const diagnostics = disclosure('diagnostics', 'Engineering diagnostics', '<dl class="coverage-details"><div><dt>Selected evidence</dt><dd>' + d.selected_evidence + '</dd></div><div><dt>Log reduction</dt><dd>' + pct(d.log_compression_ratio) + '</dd></div><div><dt>Signal preservation</dt><dd>' + pct(d.important_signal_preservation) + '</dd></div><div><dt>Grounding</dt><dd>' + pct(d.hypothesis_grounding_score) + '</dd></div><div><dt>Runtime</dt><dd>' + Number(d.runtime_seconds || 0).toFixed(2) + 's</dd></div></dl><p class="queue-note">Rule-based hypothesis: ' + safe(report.primary_hypothesis.statement) + '</p>');
-  const tabs = ['overview','evidence','timeline'];
+  const tabs = ['overview','investigation','evidence','timeline'];
   let content;
-  if (reportTab === 'evidence') content = (sourceReturn?.episodeId === selectedEpisodeId ? '<div class="source-return"><button type="button" data-return-source>Back to ' + safe(sourceReturn.tab === 'timeline' ? 'timeline' : 'assessment') + '</button></div>' : '') + investigationEvidence(ai || {}, payload.media_evidence || []) + '<h3 class="capture-heading">Selected alert capture</h3>' + evidencePanel(report);
+  if (reportTab === 'evidence') content = (sourceReturn?.episodeId === selectedEpisodeId ? '<div class="source-return"><button type="button" data-return-source>Back to ' + safe(sourceReturn.tab) + '</button></div>' : '') + investigationEvidence(ai || {}, payload.media_evidence || []) + '<h3 class="capture-heading">Selected alert capture</h3>' + evidencePanel(report);
   else if (reportTab === 'timeline') content = timelinePanel(report) + investigationTimeline(ai || {});
-  else content = '<div class="overview-layout"><div>' + briefingPanel(payload) + fallback + (ai?.assessment ? overviewMetrics(report) : '') + mediaEvidencePanel(payload) + sourceReviewPanel(payload) + '</div>' + investigationProgress(ai || {}) + '</div>';
+  else if (reportTab === 'investigation') content = '<div class="overview-layout">' + investigationProgress(ai || {}) + briefingPanel(payload, true) + mediaEvidencePanel(payload) + sourceReviewPanel(payload) + '</div>';
+  else content = '<div class="overview-layout"><div>' + investigationScope(payload) + briefingPanel(payload) + fallback + (ai?.assessment ? overviewMetrics(report) : '') + mediaEvidencePanel(payload, false) + '</div>' + investigationProgress(ai || {}, true) + '</div>';
   return '<section id="incident-report"><div class="report-navigation"><div role="tablist" aria-label="Investigation views">' +
     tabs.map(name=>'<button id="tab-' + name + '" role="tab" data-report-tab="' + name + '" aria-selected="' + (name === reportTab) + '" aria-controls="investigation-panel" tabindex="' + (name === reportTab ? 0 : -1) + '">' + name[0].toUpperCase() + name.slice(1) + '</button>').join('') +
     '</div><div class="report-actions">' + evidenceAction + exports + '</div></div><div id="investigation-panel" role="tabpanel" aria-labelledby="tab-' + reportTab + '" tabindex="0">' + content + '</div><div class="report-technical">' + diagnostics + '</div></section>';

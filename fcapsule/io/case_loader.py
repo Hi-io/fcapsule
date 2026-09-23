@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -69,13 +70,16 @@ def _validate_metrics(raw: Any) -> list[dict[str, Any]]:
             raise CaseValidationError(f"series[{index}].metric is required")
         require_mapping(metric.get("labels", {}), f"series[{index}].labels")
         values = require_list(metric.get("values"), f"series[{index}].values")
-        if len(values) < 2:
+        alert_series = metric.get("signal_origin") == "alert_rule"
+        if len(values) < (1 if alert_series else 2):
             raise CaseValidationError(f"series[{index}].values requires at least two points")
         for point_index, point in enumerate(values):
             if not isinstance(point, list) or len(point) != 2:
                 raise CaseValidationError(f"series[{index}].values[{point_index}] must be [timestamp, value]")
             parse_timestamp(point[0], f"series[{index}].values[{point_index}][0]")
-            if not isinstance(point[1], (int, float)):
+            if point[1] is None and alert_series:
+                continue
+            if isinstance(point[1], bool) or not isinstance(point[1], (int, float)) or not math.isfinite(point[1]):
                 raise CaseValidationError(f"series[{index}].values[{point_index}][1] must be numeric")
     return series
 

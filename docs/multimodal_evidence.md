@@ -31,17 +31,29 @@ assessment is retained so a reviewer can see what changed.
 
 1. FCAPSule captures the incident from Prometheus, OpenSearch, and Kubernetes.
 2. The normal evidence-seeking assessment starts independently of any media.
-3. In the selected episode, the operator may choose **Add evidence** and attach an
-   image or record/upload short audio. They can supply observation time, context, and
-   whether the copy has been redacted.
+3. In the selected episode, **Add context** offers one text area with image and audio
+   tools. Paste an image, import a `.txt`/`.log` excerpt, attach audio, or enter a note.
+   Text context requires only a validated core model and is ready without a specialist
+   call. Images/audio still require their matching validated specialist. Recording
+   requires browser microphone support on HTTPS or localhost; audio-file upload also
+   works from the LAN HTTP interface. Recording stops after 60 seconds.
+   Upload time is automatic. An actual observation time and redaction declaration
+   remain optional under Source details; unknown event times stay unknown.
 4. The matching specialist processes only that attachment. The original file, derived
    extraction, provider/model identity, usage record, operator note and correction
    history are kept with the episode.
-5. The operator chooses **Update investigation** only after a ready extraction exists.
+5. The operator chooses **Review new context** only after ready context exists.
    FCAPSule writes a new assessment revision rather than overwriting the original.
 
 No microphone is opened until the operator presses the recording control. No screenshot,
 audio, image, or browser content is collected automatically.
+
+Text and accompanying notes are limited to 16,000 characters and redacted before
+storage. Text is an unverified operator claim, not authenticated source telemetry.
+The retained UTF-8 original is downloadable; browser downloads use `nosniff` and an
+attachment disposition. Model context remains budgeted: the existing 1,800-character
+evidence summary and 800-character note limit may omit a long excerpt's tail. Keep the
+discriminating observation first; saving a long excerpt does not send it wholesale.
 
 ## Capability and Cost Gates
 

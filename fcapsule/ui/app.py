@@ -156,6 +156,9 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", mime_type)
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                if mime_type.startswith("text/plain"):
+                    self.send_header("Content-Disposition", f'attachment; filename="{file_path.name}"')
                 self.end_headers()
                 self.wfile.write(body)
             return

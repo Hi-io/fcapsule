@@ -329,10 +329,11 @@ for compatibility but are not the Operations assessment.
 
 ## Operator Presentation
 
-- **Overview:** one episode conclusion, one next action, one expected finding,
-  remaining uncertainty, citations and a compact progress column.
-- **Explanations considered:** expandable competing explanations with their evidence.
-- **How the alerts relate:** expandable multi-alert relationships.
+- **Overview:** retained pod/resource and namespace, one episode conclusion, an
+  evidence-based discriminator (`basis`, when supplied), next action, expected finding,
+  uncertainty and a compact activity section with right-aligned token usage.
+- **Investigation:** check questions and retained answers, expandable competing
+  explanations, multi-alert relationships, historical comparisons and detailed findings.
 - **Evidence:** executed observations, cited original capture records and the
   individually selectable alert's existing telemetry disclosures.
 - **Timeline:** historical episode alerts and a separate agent-activity sequence.
@@ -344,6 +345,24 @@ for compatibility but are not the Operations assessment.
 
 Queue timestamps are relative; exact local timestamps remain available on hover
 and in report detail. Artifact cleanup dates still refer only to FCAPSule retention.
+
+Policy `episode-investigation-1.17` pins retained resource identity, namespace and event
+time through prompt compaction. A bounded recurrence count means earlier retained
+same-signature candidates, never proof of a shared cause. Optional `assessment.basis`
+is at most 500 characters and uses the assessment's evidence IDs. It should distinguish
+the mechanism from the alert symptom with actual observations, including what remains
+unknown. Legacy assessments are still readable; they are not rewritten retroactively.
+Neither the default 2,100-token request boundary nor the total budget is increased.
+
+Supported Prometheus rules now contribute a preserved numerical discriminator:
+the expression value before the outer scalar comparison, its threshold/operator,
+labels, sampled condition counts, missing values, baseline and capture provenance.
+The planner uses the PromQL AST and limits expressions, query time, series, samples
+and incident scope. It does not let the model invent arbitrary queries. `bool`,
+composite conditions, ambiguous rules and unsafe aggregate scope return explicit
+unavailable reasons. Raw points stay in the capture; compact sampled facts are passed
+to the investigator. A condition crossing is evidence of the alert symptom, not by
+itself evidence of a cause. Old captures are not backfilled from current data.
 
 ## Trust, Privacy and Validation
 

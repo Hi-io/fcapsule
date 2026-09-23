@@ -266,13 +266,20 @@ class LiveSourceCoordinator:
         pod: dict[str, Any],
         incident_id: str,
     ) -> Path:
+        case_dir = self.case_root / incident_id
+        if case_dir.exists():
+            # Retained evidence is immutable, even if a previous store import failed.
+            if all((case_dir / name).is_file() for name in (
+                "metadata.yaml", "alert.json", "prometheus_metrics.json", "opensearch_logs.json", "kubernetes_config.json",
+            )):
+                return case_dir
+            raise FileExistsError(f"Incomplete retained capture must not be overwritten: {case_dir}")
         alert_time = parse_timestamp(alert["startsAt"], "alert.startsAt")
         now = datetime.now(timezone.utc)
-        window = timedelta(minutes=config["incident_window_minutes"])
+        window = timedelta(minutes=min(120, max(2, config["incident_window_minutes"])))
         start = alert_time - window
-        end = max(now, alert_time + timedelta(minutes=2))
-        case_dir = self.case_root / incident_id
-        case_dir.mkdir(parents=True, exist_ok=True)
+        end = min(max(now, alert_time + timedelta(minutes=2)), alert_time + window)
+        case_dir.mkdir(parents=True, exist_ok=False)
         metadata = {
             "case_id": incident_id,
             "case_title": alert.get("annotations", {}).get("summary") or alert["alertname"],
@@ -294,8 +301,13 @@ class LiveSourceCoordinator:
             "topology": [],
         }
         (case_dir / "metadata.yaml").write_text(yaml.safe_dump(metadata, sort_keys=False), encoding="utf-8")
+        alert_metrics = prometheus.collect_alert_metrics(alert, pod["namespace"], pod["name"], start, end)
+        alert = {**alert, "metric_evidence": alert_metrics["alert_evidence"]}
         write_json(case_dir / "alert.json", alert)
-        write_json(case_dir / "prometheus_metrics.json", {"window": metadata["window"], "series": prometheus.collect_pod_metrics(pod["namespace"], pod["name"], start, end)})
+        write_json(case_dir / "prometheus_metrics.json", {
+            "window": metadata["window"], "alert_evidence": alert_metrics["alert_evidence"],
+            "series": alert_metrics["series"] + prometheus.collect_pod_metrics(pod["namespace"], pod["name"], start, end),
+        })
         write_json(
             case_dir / "opensearch_logs.json",
             {"hits": opensearch.collect_logs(pod["namespace"], pod["name"], start, end, focus=alert_time)},

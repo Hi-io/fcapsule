@@ -78,6 +78,8 @@ def episode_context(
     entries: list[dict[str, Any]],
     primary_incident_id: str | None = None,
 ) -> dict[str, Any]:
+    from fcapsule.reasoning.context_budget import compact_metric_observation
+
     evidence: dict[str, dict[str, Any]] = {}
     alerts = []
     # A recurrence can reopen a retained operator episode. Put the primary
@@ -90,6 +92,46 @@ def episode_context(
         entries,
         key=lambda entry: str(entry["incident"].get("incident_id")) != primary_incident_id,
     )
+    # Scope describes the primary retained capture, not inferred dependencies or
+    # live state. Whitelist fields so labels, annotations and private case data
+    # cannot hitch a ride in this small, budget-protected identity record.
+    primary = ordered_entries[0] if ordered_entries else {}
+    case = (primary.get("capsule") or {}).get("case") or {}
+    report_incident = (primary.get("report") or {}).get("incident") or {}
+    incident = primary.get("incident") or {}
+    scope = {}
+    for key in ("cluster", "namespace", "service", "pod"):
+        value = case.get(key) or report_incident.get(key)
+        if isinstance(value, str) and value.strip():
+            scope[key] = anonymize_text(value.strip())[:253]
+    resource = incident.get("resource") or report_incident.get("resource") or {}
+    if isinstance(resource, dict):
+        retained_resource = {key: anonymize_text(resource[key].strip())[:253] for key in ("kind", "name")
+                             if isinstance(resource.get(key), str) and resource[key].strip()}
+        if retained_resource:
+            scope["resource"] = retained_resource
+    if "pod" not in scope and isinstance(resource, dict) and str(resource.get("kind", "")).casefold() == "pod":
+        name = scope.get("resource", {}).get("name")
+        if name:
+            scope["pod"] = name
+    alert_start = incident.get("started_at") or report_incident.get("started_at")
+    if isinstance(alert_start, str) and alert_start.strip():
+        scope["alert_started_at"] = alert_start.strip()[:40]
+    window = case.get("window") or {}
+    if isinstance(window, dict):
+        retained_window = {key: window[key].strip()[:40] for key in ("start", "end")
+                           if isinstance(window.get(key), str) and window[key].strip()}
+        if retained_window:
+            scope["window"] = retained_window
+    recurrence = episode.get("recurrence") or {}
+    prior_count = recurrence.get("previous_count") if isinstance(recurrence, dict) else None
+    recurrence_context = {}
+    if type(prior_count) is int and prior_count >= 0:
+        recurrence_context = {
+            "previous_count": min(prior_count, 9999),
+            "count_capped": prior_count > 9999,
+            "limitation": "Same-signature retained candidates only; not evidence of the same cause.",
+        }
     for entry in ordered_entries:
         report = entry["report"]
         incident_id = entry["incident"]["incident_id"]
@@ -105,6 +147,17 @@ def episode_context(
         alerts.append(alert_context)
         for item in report.get("supporting_evidence", []):
             identity = [item.get("type"), item.get("title"), item.get("summary"), item.get("time_range"), item.get("linked_entities"), item.get("configuration")]
+            metric_observation = compact_metric_observation(item.get("metric_observation"))
+            if metric_observation:
+                # Same prose can describe different sampled values or rules.
+                identity.append(metric_observation)
+            metric_capture = item.get("alert_metric_evidence")
+            capture_limitation = None
+            if isinstance(metric_capture, dict) and metric_capture.get("status") == "unavailable":
+                reason = metric_capture.get("reason")
+                if isinstance(reason, str) and reason.strip():
+                    capture_limitation = "Alert-rule metric capture unavailable: " + anonymize_text(reason.strip())[:120]
+                    identity.append(capture_limitation)
             ref = "E" + hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:12]
             if ref not in evidence:
                 evidence[ref] = {"id": ref, "domain": item.get("type"), "title": item.get("title"),
@@ -112,6 +165,14 @@ def episode_context(
                     "examples": item.get("representative_lines", []), "configuration": item.get("configuration"),
                     "alert": next((alert for alert in report.get("fault_alerts", []) if alert.get("evidence_id") == item["evidence_id"]), None),
                     "provenance": []}
+                if metric_observation:
+                    evidence[ref]["metric_observation"] = metric_observation
+                    if item.get("signal_origin") == "alert_rule":
+                        evidence[ref]["signal_origin"] = "alert_rule"
+                    if isinstance(item.get("series_id"), str):
+                        evidence[ref]["series_id"] = item["series_id"][:120]
+                if capture_limitation:
+                    evidence[ref]["limitation"] = capture_limitation
             evidence[ref]["provenance"].append({"incident_id": incident_id, "evidence_id": item["evidence_id"]})
     ordered_evidence = list(evidence.values())
     priority_evidence_ids = []
@@ -125,6 +186,7 @@ def episode_context(
     return scrub({"episode_id": episode["episode_id"], "live_capture": any(entry["incident"].get("source_kind") == "live" for entry in entries),
         "episode_lifecycle": {key: episode.get(key) for key in
                   ("status", "started_at", "ended_at", "last_activity_at")}, "alerts": alerts,
+        "scope": scope, "recurrence": recurrence_context,
         "evidence": ordered_evidence[:80], "priority_evidence_ids": priority_evidence_ids,
         "impact": [item for entry in ordered_entries for item in entry["report"].get("impact", [])][:15],
         "source_retention": "Unknown. Do not infer expiry from incident age or FCAPSule's own cleanup policy.",

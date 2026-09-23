@@ -231,9 +231,11 @@ test('assessment presents one primary explanation and retains distinct observati
   assert.equal((html.match(/<h4>Next check<\/h4>/g) || []).length, 1);
   assert.match(html, /Database observation/);
   assert.match(html, /Still unconfirmed:/);
-  assert.match(html, /Full assessment/);
+  assert.doesNotMatch(html, /Full assessment|Capture context|Explanations considered/);
   assert.match(html, /class="assessment-decision"/);
-  assert.match(html, /<summary>Capture context<\/summary>/);
+  const detailed = render({investigation:{status:'ready',assessment:{summary:'Alert scope',likely_mechanism:'Pool saturation',basis:'Connections reached the configured cap.',hypotheses:[{explanation:'Pool full',reason:'At cap',status:'supported'}]},findings:[{title:'Database observation',summary:'Connections rose'}]}},true);
+  assert.match(detailed,/Capture context|Retained findings/);
+  assert.doesNotMatch(detailed,/class="brief-lead"/);
 });
 
 test('conflicting investigator finding is visible rather than silently merged', () => {
@@ -361,4 +363,40 @@ test('assessment revisions without attachments do not render an empty media sect
   assert.doesNotMatch(html, /operator-evidence|Operator evidence|media-evidence/);
   assert.match(html, /first/);
   assert.match(html, /second/);
+});
+
+test('alert graph uses timestamps, preserves gaps and distinguishes threshold from start', () => {
+  const render = helper('sparkline','evidenceReferences',{safe:value=>String(value)});
+  const html = render({signal_origin:'alert_rule',label:'up',metric:'up',threshold:0,baseline_value:1,
+    alert_timestamp:'2026-09-23T00:02:00Z', values:[
+      {timestamp:'2026-09-23T00:00:00Z',value:1},
+      {timestamp:'2026-09-23T00:01:00Z',value:null},
+      {timestamp:'2026-09-23T00:02:00Z',value:0},
+      {timestamp:'2026-09-23T00:04:00Z',value:0}]});
+  assert.match(html,/class="threshold"/);
+  assert.match(html,/class="alert-start" x1="207"/);
+  assert.match(html,/d="M42.0,8.0  M207.0,102.0 L372.0,102.0"/);
+  assert.doesNotMatch(html,/NaN|undefined/);
+});
+
+test('completed checks expose observations and explicit failures, not invented answers', () => {
+  const answer = helper('checkObservation','investigationProgress',{logLabel:value=>value});
+  assert.match(answer({status:'completed',result:{observations:[{metric:'up',min:0,max:1}]}}),/up: 0 to 1/);
+  assert.match(answer({status:'unavailable',error:'Source timed out'}),/Source timed out/);
+  assert.match(answer({status:'completed',result:{targets:[]}}),/No matching targets/);
+  assert.match(answer({status:'completed',result:{other:'data'}}),/Source response retained/);
+});
+
+test('scope displays retained pod and namespace without inferring identity from prose', () => {
+  const render = helper('investigationScope','checkObservation',{safe:value=>String(value)});
+  const html = render({investigation:{context:{scope:{pod:'checkout-123',namespace:'commerce'},recurrence:{previous_count:3}}}});
+  assert.match(html,/checkout-123/); assert.match(html,/commerce/);
+  assert.match(html,/3 earlier same-signature episodes/);
+  assert.doesNotMatch(html,/same cause/);
+});
+
+test('text context availability depends on the core, not specialist models', () => {
+  const available = helper('mediaEvidenceAvailability','mediaEvidencePanel');
+  assert.equal(available({core_investigator:{capability:{status:'ready'}}}).text,true);
+  assert.equal(available({}).text,false);
 });

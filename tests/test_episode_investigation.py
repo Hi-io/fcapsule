@@ -76,6 +76,115 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(state["assessment"]["provenance"], "deterministic_abstention")
         self.assertEqual(state["usage"]["total_tokens"], 130)
 
+    def test_basis_is_optional_bounded_and_uses_assessment_citations(self):
+        original = assessment("E1")
+        self.assertNotIn("basis", validate_assessment(original, {"E1"}, {"one"}))
+        value = {**original, "basis": "  A decoder error with exit code 1 supports application failure, not an observed OOM.  ",
+                 "basis_evidence_ids": ["invented"]}
+        result = validate_assessment(value, {"E1"}, {"one"})
+        self.assertEqual(result["basis"], value["basis"].strip())
+        self.assertEqual(result["evidence_ids"], ["E1"])
+        self.assertNotIn("basis_evidence_ids", result)
+        self.assertEqual(len(validate_assessment({**original, "basis": "x" * 500}, {"E1"}, {"one"})["basis"]), 500)
+        for invalid in (None, "", "  ", "x" * 501, [], {}, 1, True):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "basis"):
+                validate_assessment({**original, "basis": invalid}, {"E1"}, {"one"})
+        with self.assertRaisesRegex(ValueError, "unavailable evidence"):
+            validate_assessment(value, {"E2"}, {"one"})
+
+    def test_basis_is_scrubbed_in_draft_review_and_final_without_extra_calls(self):
+        value = assessment()
+        value["basis"] = "Repeated decoder failure supports an application error. password=never-retain-basis"
+        state, client = self.run_case([{"action": "finish", "assessment": value}], max_checks=0)
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["policy_version"], "episode-investigation-1.17")
+        self.assertEqual(len(client.requests), 2)
+        self.assertEqual(state["assessment"]["evidence_ids"], ["Q001"])
+        self.assertNotIn("never-retain-basis", json.dumps(state))
+        review = json.loads(client.requests[-1].messages[1]["content"])
+        self.assertIn("basis", review["assessment_to_review"])
+        self.assertNotIn("never-retain-basis", json.dumps(review))
+        self.assertIn("assessment evidence_ids", review["instruction"])
+        masked = validate_assessment({**assessment(), "basis": "x" * 492 + " token=x"}, {"Q001"}, {"one"})
+        self.assertLessEqual(len(masked["basis"]), 500)
+
+    def test_prompt_requires_discriminatory_facts_not_a_prescribed_diagnosis(self):
+        for instruction in ("affected pod/resource and namespace", "capture-window qualifier", "same assessment",
+                            "no uncited new claims", "missing discriminator", "alert_rule_logic",
+                            "no required diagnosis", "same-signature prior counts do not prove"):
+            self.assertIn(instruction, SYSTEM)
+
+    def test_scope_and_recurrence_survive_full_2100_budget_with_basis_and_review(self):
+        scope = {"namespace": "checkout-production", "pod": "checkout-worker-7f7946d9b6-xlm4t",
+                 "service": "checkout-worker", "cluster": "production",
+                 "alert_started_at": "2026-09-23T02:00:00Z",
+                 "window": {"start": "2026-09-23T01:55:00Z", "end": "2026-09-23T02:05:00Z"}}
+        self.context.update({
+            "scope": scope,
+            "recurrence": {"previous_count": 7},
+            "live_capture": True,
+            "evidence": [{"id": "E1", "domain": "log_template", "summary": "Exit code 1 after decoder failure."}]
+                        + [{"id": f"E-old-{index}", "summary": "Other retained detail. " * 50} for index in range(40)],
+            "priority_evidence_ids": ["E1"],
+        })
+        value = assessment("E1")
+        value["basis"] = "Decoder failure before exit code 1 supports an application error; no OOM termination is observed."
+        state, client = self.run_case([{"action": "finish", "assessment": value}], max_checks=1,
+                                      max_prompt_tokens=2100, max_total_tokens=12000)
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["review"]["status"], "completed")
+        self.assertEqual(len(client.requests), 2)
+        for call, request in zip(state["calls"], client.requests):
+            compact = json.loads(request.messages[1]["content"])["episode"]
+            for field in ("pod", "namespace", "alert_started_at", "window"):
+                self.assertEqual(compact["scope"][field], scope[field])
+            self.assertEqual(compact["recurrence"]["previous_count"], 7)
+            self.assertIn("not evidence of the same cause", compact["recurrence"]["limitation"])
+            self.assertIn("E1", call["visible_evidence_ids"])
+            self.assertLessEqual(estimate_tokens(request.messages[0]["content"]) +
+                                 estimate_tokens(request.messages[1]["content"]), 2100)
+        self.assertEqual(state["assessment"]["basis"], value["basis"])
+
+    def test_rule_metric_survives_2100_request_and_review_with_maximum_basis(self):
+        self.context.update({
+            "scope": {"pod": "worker-1", "namespace": "production",
+                      "alert_started_at": "2026-09-23T02:00:00Z",
+                      "window": {"start": "2026-09-23T01:55:00Z", "end": "2026-09-23T02:05:00Z"}},
+            "recurrence": {"previous_count": 5},
+            "evidence": [{"id": "E-rule", "signal_origin": "alert_rule", "domain": "metric_anomaly",
+                          "summary": "Observed matching samples of the captured rule expression.",
+                          "metric_observation": {
+                              "metric": "worker_errors_total", "expression": "sum(rate(worker_errors_total[5m]))",
+                              "threshold": 3, "operator": ">", "unit": "errors/s",
+                              "rule": {"name": "WorkerErrors", "duration": 300.0, "keep_firing_for": 0.0},
+                              "labels": {"namespace": "production", "pod": "worker-1"},
+                              "time_range": {"start": "2026-09-23T01:55:00Z", "end": "2026-09-23T02:05:00Z"},
+                              "condition": {"observed_samples": 30, "matching_samples": 20, "missing_samples": 10,
+                                            "min": 1, "max": 5, "incident_observed_samples": 15, "incident_matching_samples": 12,
+                                            "latest": {"timestamp": "2026-09-23T02:05:00Z", "value": 4}},
+                          }}],
+        })
+        value = assessment("E-rule")
+        value["basis"] = ("Observed matching samples support the detected symptom, not its cause. " * 8)[:500]
+        state, client = self.run_case([{"action": "finish", "assessment": value}], max_checks=1,
+                                      max_prompt_tokens=2100, max_total_tokens=12000)
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["review"]["status"], "completed")
+        self.assertEqual(len(client.requests), 2)
+        for request in client.requests:
+            compact = json.loads(request.messages[1]["content"])["episode"]
+            self.assertEqual(compact["scope"]["pod"], "worker-1")
+            self.assertEqual(compact["scope"]["namespace"], "production")
+            metric = compact["evidence"][0]["metric_observation"]
+            self.assertEqual(metric["condition"]["matching_samples"], 20)
+            self.assertEqual(metric["condition"]["missing_samples"], 10)
+            self.assertEqual(metric["rule"]["duration"], 300.0)
+            self.assertEqual(metric["operator"], ">")
+            self.assertEqual(metric["threshold"], 3)
+            self.assertIn("rate(", metric["expression"])
+            self.assertLessEqual(estimate_tokens(request.messages[0]["content"]) +
+                                 estimate_tokens(request.messages[1]["content"]), 2100)
+
     def test_attachment_references_survive_scrubbing_in_review_and_final_assessment(self):
         ref = "A-attachment-0123456789abcdef0123456789abcdef"
         self.context["evidence"] = [{"id": ref, "summary": "Target is down"}]
@@ -643,6 +752,97 @@ class InvestigationToolTests(unittest.TestCase):
         context = episode_context({"episode_id": "episode"}, self.entries)
         self.assertIsNone(context["alerts"][0]["ended_at"])
         self.assertIn("Independent failure phases", context["grouping_basis"])
+
+    def test_scope_is_primary_retained_identity_with_field_masking(self):
+        old = copy.deepcopy(self.entries[0])
+        old["incident"]["incident_id"] = "old"
+        old["capsule"]["case"].update(pod="old-pod", namespace="old-ns")
+        current = copy.deepcopy(self.entries[0])
+        current["incident"].update(incident_id="current", started_at="2026-09-23T02:00:00Z",
+                                   resource={"kind": "Pod", "name": "worker-1", "annotations": "private-resource"})
+        current["capsule"]["case"].update(namespace="current-ns", cluster="prod", service="worker",
+                                         labels={"private_label": "private-label"}, credentials="private-case")
+        current["capsule"]["case"]["window"]["private"] = "private-window"
+        current["report"]["incident"].update(namespace="stale-report-ns", pod="stale-report-pod")
+        before = copy.deepcopy([old, current])
+        context = episode_context({"episode_id": "episode", "primary_incident_id": "current"}, [old, current])
+        self.assertEqual(context["scope"], {
+            "namespace": "current-ns", "pod": "worker-1", "cluster": "prod", "service": "worker",
+            "resource": {"kind": "Pod", "name": "worker-1"}, "alert_started_at": "2026-09-23T02:00:00Z",
+            "window": {"start": "2026-09-20T12:00:00Z", "end": "2026-09-20T12:10:00Z"},
+        })
+        self.assertEqual([old, current], before)
+        self.assertNotIn("private", json.dumps(context["scope"]))
+        focused = episode_context({"episode_id": "episode", "primary_incident_id": "current"}, [old, current], "old")
+        self.assertEqual(focused["scope"]["pod"], "old-pod")
+        self.assertEqual(focused["scope"]["namespace"], "old-ns")
+
+    def test_scope_report_resource_fallback_is_explicit_bounded_and_scrubbed(self):
+        self.entries[0]["capsule"]["case"] = {}
+        self.entries[0]["report"]["incident"].update({
+            "namespace": "report-ns", "service": "worker password=never-scope",
+            "cluster": "c" * 900, "resource": {"kind": "Pod", "name": "report-pod", "token": "never-resource"},
+        })
+        scope = episode_context({"episode_id": "episode"}, self.entries)["scope"]
+        self.assertEqual(scope["pod"], "report-pod")
+        self.assertEqual(scope["namespace"], "report-ns")
+        self.assertLessEqual(len(scope["cluster"]), 253)
+        self.assertNotIn("never-", json.dumps(scope))
+        self.entries[0]["report"]["incident"] = {"summary": "pod=guessed-pod namespace=guessed-ns"}
+        scope = episode_context({"episode_id": "episode"}, self.entries)["scope"]
+        self.assertNotIn("pod", scope)
+        self.assertNotIn("namespace", scope)
+
+    def test_recurrence_exposes_only_bounded_prior_candidate_count(self):
+        for count in (0, 4, 9999, 10000):
+            with self.subTest(count=count):
+                episode = {"episode_id": "episode", "recurrence": {
+                    "previous_count": count, "occurrence_count": 10001, "pattern_id": "private-pattern",
+                    "candidates": [{"episode_id": "prior", "cause": "unsupported cause"}],
+                    "prior_hypothesis": "unsupported diagnosis",
+                }}
+                recurrence = episode_context(episode, self.entries)["recurrence"]
+                self.assertEqual(set(recurrence), {"previous_count", "count_capped", "limitation"})
+                self.assertEqual(recurrence["previous_count"], min(count, 9999))
+                self.assertEqual(recurrence["count_capped"], count > 9999)
+                self.assertIn("not evidence of the same cause", recurrence["limitation"])
+        for invalid in (None, True, -1, "4", 1.5, []):
+            with self.subTest(invalid=invalid):
+                context = episode_context({"episode_id": "episode", "recurrence": {"previous_count": invalid}}, self.entries)
+                self.assertEqual(context["recurrence"], {})
+
+    def test_selected_rule_metric_propagates_without_raw_points_and_distinct_samples_do_not_deduplicate(self):
+        first = copy.deepcopy(self.entries[0])
+        item = first["report"]["supporting_evidence"][0]
+        item.update(signal_origin="alert_rule", series_id="rule-series", metric_observation={
+            "metric": "alert_rule_value", "expression": 'sum(worker_errors_total{namespace="ns"})',
+            "operator": ">", "threshold": 3,
+            "rule": {"name": "WorkerErrors", "duration": "5m", "file": "never-private-file"},
+            "condition": {"observed_samples": 4, "matching_samples": 3, "missing_samples": 1, "max": 5},
+            "values": [["now", "never-raw-point"]], "private": "never-extra-field",
+        })
+        other = copy.deepcopy(first)
+        other["incident"]["incident_id"] = "other"
+        other["report"]["supporting_evidence"][0]["metric_observation"]["condition"]["max"] = 6
+        context = episode_context({"episode_id": "episode"}, [first, other])
+        self.assertEqual(len(context["evidence"]), 2)
+        self.assertNotEqual(context["evidence"][0]["id"], context["evidence"][1]["id"])
+        for row in context["evidence"]:
+            self.assertEqual(row["signal_origin"], "alert_rule")
+            self.assertEqual(row["series_id"], "rule-series")
+            self.assertEqual(row["metric_observation"]["threshold"], 3)
+            self.assertEqual(row["metric_observation"]["rule"]["duration"], "5m")
+            self.assertIn("not proof", row["metric_observation"]["condition"]["limitation"])
+            self.assertNotIn("never-", json.dumps(row))
+
+    def test_unavailable_rule_metrics_remain_a_citable_limitation_not_a_measurement(self):
+        self.entries[0]["report"]["supporting_evidence"][0]["alert_metric_evidence"] = {
+            "status": "unavailable", "reason": "no_finite_samples", "rule": {"private": "never-private"},
+        }
+        row = episode_context({"episode_id": "episode"}, self.entries)["evidence"][0]
+        self.assertIn("metric capture unavailable: no_finite_samples", row["limitation"])
+        self.assertNotIn("metric_observation", row)
+        self.assertNotIn("never-private", json.dumps(row))
 
     def test_episode_context_retains_only_explicit_discovery_identities(self):
         self.entries[0]["report"]["fault_alerts"] = [

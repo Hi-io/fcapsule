@@ -8,7 +8,7 @@ version = "1.0.0"
 description = "Evidence capsules for production incident investigation after telemetry expires"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["PyYAML>=6.0"]
+dependencies = ["PyYAML>=6.0", "promql-parser==0.10.0"]
 
 [project.scripts]
 fcapsule = "fcapsule.cli:main"

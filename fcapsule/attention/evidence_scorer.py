@@ -6,6 +6,7 @@ from typing import Any
 
 from fcapsule.domains import domain_for_evidence_type
 from fcapsule.models.schemas import CaseBundle
+from fcapsule.processing.metrics_analyzer import ALERT_METRIC_FIELDS
 
 ALERT_SEVERITY = {"critical": 1.0, "error": 0.85, "warning": 0.65, "warn": 0.65, "info": 0.25}
 SUSPICIOUS_TERMS = (
@@ -55,7 +56,11 @@ def score_evidence(
                 "domain": domain_for_evidence_type("alert"),
                 "source_id": f"alert_{index:03d}",
                 "title": str(alert["alertname"]),
-                "summary": alert.get("annotations", {}).get("description", "Alert fired"),
+                "summary": alert.get("annotations", {}).get("description", "Alert fired") + (
+                    f" Alert metric evidence unavailable: {alert['metric_evidence'].get('reason')}."
+                    if alert.get("metric_evidence", {}).get("status") == "unavailable" else ""
+                ),
+                **({"alert_metric_evidence": alert["metric_evidence"]} if alert.get("metric_evidence") else {}),
                 "score": round(score, 4),
                 "score_components": components,
                 "why_selected": "Alert defines the incident trigger and affected entities.",
@@ -109,6 +114,8 @@ def score_evidence(
                 "pool", "exhaust", "slow", "circuit", "saturation", "attempt",
             )
         ) else 0.4
+        if metric.get("signal_origin") == "alert_rule":
+            semantic = 1.0
         components = {
             "severity_weight": 0.5,
             "anomaly_score": metric["anomaly_score"],
@@ -135,6 +142,14 @@ def score_evidence(
                 "why_selected": "Metric score combines anomaly magnitude, relevance, timing, and entity match.",
                 "linked_entities": entities,
                 "time_range": {"start": metric["peak_timestamp"], "end": metric["peak_timestamp"]},
+                **{key: metric[key] for key in ALERT_METRIC_FIELDS if key in metric},
+                **({"metric_observation": {
+                    "metric": metric["metric"],
+                    **{key: metric[key] for key in ALERT_METRIC_FIELDS if key in metric and key != "rule"},
+                    "rule": {key: metric.get("rule", {}).get(key) for key in (
+                        "name", "query", "duration", "keep_firing_for", "group", "file",
+                    )},
+                }} if metric.get("signal_origin") == "alert_rule" else {}),
             }
         )
 

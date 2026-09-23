@@ -898,8 +898,8 @@ class FCAPSuleStore:
 
     def record_evidence_attachment(self, payload: dict[str, Any]) -> dict[str, Any]:
         kind = str(payload.get("kind") or "")
-        if kind not in {"image", "audio"}:
-            raise ValueError("Evidence attachment kind must be image or audio")
+        if kind not in {"image", "audio", "text"}:
+            raise ValueError("Evidence attachment kind must be image, audio, or text")
         now = utc_now()
         with self._connect() as connection:
             connection.execute(
@@ -914,7 +914,7 @@ class FCAPSuleStore:
                     str(payload["attachment_id"]), str(payload["episode_id"]), kind,
                     str(payload["filename"]), str(payload["mime_type"]), str(payload["storage_path"]),
                     int(payload["size_bytes"]), str(payload["sha256"]), payload.get("observed_at"),
-                    str(payload.get("context_note") or "")[:1000], int(bool(payload.get("source_redacted"))),
+                    str(payload.get("context_note") or "")[:16000], int(bool(payload.get("source_redacted"))),
                     str(payload.get("status") or "queued"), _json(payload.get("extraction") or {}),
                     str(payload.get("correction") or "")[:2000], payload.get("provider"), payload.get("model"),
                     _json(payload.get("usage") or {}), now, now,
@@ -968,7 +968,7 @@ class FCAPSuleStore:
             "model": model if model is not None else current["model"],
             "usage": _json(usage if usage is not None else current["usage"]),
             "observed_at": observed_at if observed_at is not None else current["observed_at"],
-            "context_note": str(context_note if context_note is not None else current["context_note"])[:1000],
+            "context_note": str(context_note if context_note is not None else current["context_note"])[:16000],
             "updated_at": utc_now(),
             "attachment_id": attachment_id,
         }
