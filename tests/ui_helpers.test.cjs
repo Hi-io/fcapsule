@@ -8,7 +8,7 @@ const source = fs.readFileSync(path.join(__dirname, '../fcapsule/ui/assets/app.j
 const uiStates = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/ui_states.json'), 'utf8'));
 function helper(name, next, context = {}) {
   const code = source.slice(source.indexOf(`function ${name}(`), source.indexOf(`function ${next}(`));
-  return vm.runInNewContext(code + '\n' + name, context);
+  return vm.runInNewContext(code + '\n' + name, {investigationReferenceMatches:()=>[], ...context});
 }
 
 test('image citations show readable observations and original evidence before raw extraction', () => {
@@ -143,7 +143,7 @@ test('episode lifecycle does not label an incomplete investigation as saved', ()
 test('representative investigation states have distinct operator guidance', () => {
   const render = helper('briefingPanel', 'investigationRefs', {
     safe:value=>String(value ?? ''), formatDate:value=>value, selectedEpisodeId:'episode-example',
-    investigationRefs:()=>'', disclosure:(id,title,body)=>'<details><summary>'+title+'</summary>'+body+'</details>',
+    investigationRefs:()=>'', investigationText:(_run,text)=>String(text ?? ''), disclosure:(id,title,body)=>'<details><summary>'+title+'</summary>'+body+'</details>',
   });
   const ready = render({investigation:uiStates.ready});
   const inconclusive = render({investigation:uiStates.inconclusive});
@@ -219,7 +219,7 @@ test('queue keeps common filters visible and names hidden restrictions', () => {
 test('assessment presents one primary explanation and retains distinct observations', () => {
   const render = helper('briefingPanel', 'investigationRefs', {
     safe:value=>String(value ?? ''), formatDate:value=>value, selectedEpisodeId:'episode',
-    investigationRefs:()=>'', disclosure:(id,title,body)=>'<details><summary>'+title+'</summary>'+body+'</details>',
+    investigationRefs:()=>'', investigationText:(_run,text)=>String(text ?? ''), disclosure:(id,title,body)=>'<details><summary>'+title+'</summary>'+body+'</details>',
   });
   const html = render({investigation:{status:'ready',model:'test-model',finished_at:'done',
     assessment:{summary:'Alert scope',likely_mechanism:'Pool saturation',next_action:'Check pool usage',
@@ -230,6 +230,8 @@ test('assessment presents one primary explanation and retains distinct observati
   assert.equal((html.match(/class="brief-lead">Pool saturation/g) || []).length, 1);
   assert.equal((html.match(/<h4>Next check<\/h4>/g) || []).length, 1);
   assert.match(html, /Database observation/);
+  assert.match(html, /<details><summary>Key observations<\/summary>/);
+  assert.match(html, /<details><summary>Why this fits<\/summary>/);
   assert.match(html, /Still unconfirmed:/);
   assert.doesNotMatch(html, /Full assessment|Capture context|Explanations considered/);
   assert.match(html, /class="assessment-decision"/);
@@ -241,7 +243,7 @@ test('assessment presents one primary explanation and retains distinct observati
 test('conflicting investigator finding is visible rather than silently merged', () => {
   const render = helper('briefingPanel', 'investigationRefs', {
     safe:value=>String(value ?? ''), formatDate:value=>value, selectedEpisodeId:'episode',
-    investigationRefs:()=>'', disclosure:(id,title,body)=>'<details><summary>'+title+'</summary>'+body+'</details>',
+    investigationRefs:()=>'', investigationText:(_run,text)=>String(text ?? ''), disclosure:(id,title,body)=>'<details><summary>'+title+'</summary>'+body+'</details>',
   });
   const html = render({investigation:{status:'ready', assessment:{summary:'Alert context',likely_mechanism:'Connection pressure',
     next_action:'Check active connections',expected_finding:'Near limit',uncertainty:'Caller unknown',hypotheses:[],connections:[]},
@@ -252,19 +254,26 @@ test('conflicting investigator finding is visible rather than silently merged', 
   assert.match(html, /Still unconfirmed:/);
 });
 
-test('overview promotes only cited performance evidence', () => {
+test('overview previews one relevant series and links to all retained performance evidence', () => {
   const render = helper('overviewMetrics','evidencePanel', {
-    metricChart:item=>item.label,
+    safe:value=>String(value ?? ''), icon:()=>'', sparkline:()=>'<svg></svg>',
+    shortTime:value=>value, formatExactDate:value=>value,
   });
+  const values = [{timestamp:'2026-09-23T00:00:00Z',value:1},{timestamp:'2026-09-23T00:10:00Z',value:2}];
   const signals = [
-    {evidence_id:'metric-a',label:'Memory',component:'pod-a',values:[{},{}]},
-    {evidence_id:'metric-b',label:'CPU',component:'pod-a',values:[{},{}]},
-    {evidence_id:'metric-c',label:'Restarts',component:'pod-a',values:[{},{}]},
+    {evidence_id:'metric-a',label:'Memory',component:'pod-a',values},
+    {evidence_id:'metric-b',label:'CPU',component:'pod-a',values},
+    {evidence_id:'metric-c',label:'Restarts',component:'pod-a',values},
   ];
   assert.equal(render({pm_signals:signals,primary_hypothesis:{supporting_evidence:[]}}), '');
   const html = render({pm_signals:signals,primary_hypothesis:{supporting_evidence:[{evidence_id:'metric-a'},{evidence_id:'metric-b'},{evidence_id:'metric-c'}]}});
-  assert.match(html, /MemoryCPU/);
-  assert.doesNotMatch(html, /Restarts/);
+  assert.match(html, /Memory/);
+  assert.doesNotMatch(html, /CPU|Restarts/);
+  assert.match(html, /1 of 3 captured series/);
+  assert.match(html, /data-evidence-link="metric-a" data-domain="metrics"/);
+  assert.match(html, /All performance evidence/);
+  assert.equal((html.match(/<svg>/g) || []).length, 1);
+  assert.equal(render({pm_signals:[{...signals[0],signal_origin:'alert_rule',values:[{value:null},{value:null}]}]}), '');
 });
 
 test('metric chart distinguishes the reference period and selected deviation', () => {
