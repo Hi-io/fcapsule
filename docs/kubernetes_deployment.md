@@ -66,12 +66,12 @@ kubectl rollout status deployment/fcapsule -n fcapsule
 Make source changes on a dedicated branch, not on `master`:
 
 ```bash
-git switch -c codex/your-change
+git switch -c feature/your-change
 python3 -m pip install -e .
 python3 -m unittest discover -s tests -v
 node --check fcapsule/ui/assets/app.js
 node --test tests/ui_*.test.cjs
-git push -u origin codex/your-change
+git push -u origin feature/your-change
 ```
 
 Review the diff and wait for the branch's GitHub Actions **Test** workflow to pass.
@@ -85,7 +85,7 @@ local merge), then deploy:
 
 ```bash
 git switch master
-git merge --no-ff codex/your-change
+git merge --no-ff feature/your-change
 git push origin master
 kubectl rollout restart deployment/fcapsule -n fcapsule
 kubectl rollout status deployment/fcapsule -n fcapsule
@@ -159,9 +159,13 @@ In **Targets**, all three targets should be healthy. **Application coverage** sh
 
 ## Current Constraints
 
+For microphone recording from a node IP, use the optional [HTTPS proxy](https_access.md).
+Alternatively, use a localhost port-forward. The browser requires a secure context
+and normal microphone permission in addition to a validated audio model.
+
 - one replica, SQLite, and in-process background threads;
 - no UI authentication or authorization;
-- no native TLS termination;
+- TLS termination is optional through a separate reverse proxy, not native to the application;
 - no durable job queue or distributed locking;
 - OpenSearch mapping currently targets Filebeat Kubernetes fields;
 - Prometheus queries assume kube-state-metrics and container metrics;

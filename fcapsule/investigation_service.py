@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from fcapsule.episode_investigation import now, run_investigation
-from fcapsule.investigation_tools import InvestigationTools, episode_context
+from fcapsule.investigation_tools import InvestigationTools, episode_context, historical_episode_result
 from fcapsule.io.archive_writer import create_archive
 from fcapsule.reasoning.findings import derive_findings
 from fcapsule.reasoning.source_review import run_source_disconnected_review
@@ -42,7 +42,17 @@ class InvestigationService:
         return self.plane.store.list_investigation_revisions(episode_id)
 
     def source_disconnected_reviews(self, episode_id: str) -> list[dict[str, Any]]:
-        return self.plane.store.list_source_disconnected_reviews(episode_id)
+        reviews = self.plane.store.list_source_disconnected_reviews(episode_id)
+        for review in reviews:
+            path = self.source_review_path(episode_id, str(review["review_id"]))
+            try:
+                state = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if isinstance(state, dict):
+                review.update({key: state[key] for key in
+                               ("retained_context", "retained_checks", "model_context", "available_evidence_ids") if key in state})
+        return reviews
 
     def _record_revision(self, state: dict[str, Any]) -> None:
         revision_id = str(state.get("revision_id") or "")
@@ -124,9 +134,14 @@ class InvestigationService:
             root = Path(record["output_dir"])
             if not (root / "incident_report.json").is_file() or not (root / "capsule.json").is_file():
                 continue
-            entries.append({"incident": self.plane.store.get_incident(signal["incident_id"]), "record": record,
-                "capsule": json.loads((root / "capsule.json").read_text(encoding="utf-8")),
-                "report": json.loads((root / "incident_report.json").read_text(encoding="utf-8"))})
+            try:
+                capsule = json.loads((root / "capsule.json").read_text(encoding="utf-8"))
+                report = json.loads((root / "incident_report.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            incident = self.plane.store.get_incident(signal["incident_id"])
+            if incident and isinstance(capsule, dict) and isinstance(report, dict):
+                entries.append({"incident": incident, "record": record, "capsule": capsule, "report": report})
         return entries
 
     def historical_candidates(self, episode: dict[str, Any]) -> list[dict[str, Any]]:
@@ -151,8 +166,19 @@ class InvestigationService:
                         "configuration": report.get("configuration_evidence", [])[:3],
                     }
                 )
-            prior_run = self.read(str(prior["episode_id"]))
-            assessment = prior_run.get("assessment") or {}
+            try:
+                prior_run = self.read(str(prior["episode_id"]))
+            except (OSError, ValueError):
+                prior_run = {}
+            # Use the same retained observation projection as the current episode:
+            # display-only impact/configuration summaries omit measured rule values.
+            observations = episode_context(prior, prior_entries[-4:])["evidence"] if prior_entries else []
+            retained_checks = [item for item in (prior_run.get("checks", []) if isinstance(prior_run, dict) else [])
+                               if isinstance(item, dict) and item.get("status") == "completed"
+                               and item.get("tool") in InvestigationTools.CATALOG
+                               and item.get("tool") != "historical_episode"][-4:]
+            assessment = prior_run.get("assessment") if isinstance(prior_run, dict) else None
+            assessment = assessment if isinstance(assessment, dict) else {}
             prior_hypothesis = {
                 key: assessment.get(key)
                 for key in ("summary", "likely_mechanism", "uncertainty")
@@ -167,6 +193,10 @@ class InvestigationService:
                     "ended_at": prior.get("ended_at"),
                     "status": prior["status"],
                     "resource": prior.get("resource"),
+                    "observations": observations,
+                    "retained_checks": retained_checks,
+                    "availability": "retained" if observations or retained_checks else "unavailable",
+                    "capture_limit": "At most four retained member reports, 80 observations and four completed source checks. Missing records or samples are unknown, not evidence of health or the same cause.",
                     "prior_hypothesis": (
                         {"provenance": "Earlier model output; not independent evidence and not citable.", **prior_hypothesis}
                         if prior_hypothesis else {}
@@ -205,11 +235,12 @@ class InvestigationService:
                 raise ValueError("Build at least one report before asking a retained-capsule question")
             if not self.plane.ai_configuration()["api_key_configured"]:
                 raise ValueError("Add a provider key in Settings to review a retained capsule")
-            retained = self.read(episode_id)
+            context, checks = self._retained_review_context(episode_id)
             fingerprint = hashlib.sha256(json.dumps({
                 "base": self.fingerprint(entries, self.plane.evidence.manifest(episode_id)),
                 "question": clean_question,
-                "checks": retained.get("checks", []),
+                "context": context,
+                "checks": checks,
             }, sort_keys=True).encode()).hexdigest()
             for existing in self.source_disconnected_reviews(episode_id):
                 if existing.get("input_fingerprint") == fingerprint and existing.get("status") in {"queued", "running", "ready"}:
@@ -223,7 +254,7 @@ class InvestigationService:
             }
             self._write_source_review(state)
             self.source_review_jobs.add(review_id)
-            self.plane.briefing_executor.submit(self._run_source_disconnected_review, episode_id, state)
+            self.plane.briefing_executor.submit(self._run_source_disconnected_review, episode_id, state, context, checks)
             return state
 
     def _write_source_review(self, state: dict[str, Any]) -> None:
@@ -250,20 +281,41 @@ class InvestigationService:
         context = episode_context(episode, entries)
         context["evidence"].extend(self.plane.evidence.model_evidence(episode_id))
         latest = self.read(episode_id)
-        checks = [item for item in latest.get("checks", []) if isinstance(item, dict) and item.get("status") == "completed"]
+        checks = [item for item in latest.get("checks", []) if isinstance(item, dict)
+                  and item.get("status") == "completed" and item.get("tool") != "historical_episode"]
+        # Resolve candidates again from retained artifacts, not stale historical
+        # checks or an earlier assessment. No live-source object is involved.
+        used_ids = {str(item.get("id")) for item in checks}
+        for candidate in self.historical_candidates(episode):
+            number = 1
+            while f"Q{number:03d}" in used_ids:
+                number += 1
+            check_id = f"Q{number:03d}"
+            used_ids.add(check_id)
+            checks.append({
+                "id": check_id, "tool": "historical_episode", "status": "completed",
+                "required_observation": True,
+                "arguments": {"episode_id": candidate["episode_id"]},
+                "result": historical_episode_result(candidate, include_hypothesis=False),
+            })
         context["capture_limit"] = "Retained records only. No live telemetry, source API, or prior assessment is available to this review."
         return context, checks
 
-    def _run_source_disconnected_review(self, episode_id: str, queued: dict[str, Any]) -> None:
+    def _run_source_disconnected_review(self, episode_id: str, queued: dict[str, Any],
+                                        context: dict[str, Any] | None = None,
+                                        checks: list[dict[str, Any]] | None = None) -> None:
         review_id = str(queued["review_id"])
+        original_ids: set[str] = set()
         try:
-            context, checks = self._retained_review_context(episode_id)
+            if context is None or checks is None:
+                context, checks = self._retained_review_context(episode_id)
+            original_ids = {str(item["incident_id"]) for item in context.get("alerts", [])}
             config = self.plane.ai_configuration()
 
             def publish(state: dict[str, Any]) -> None:
                 with self.plane.briefing_lock:
                     current = self.plane.store.get_episode(episode_id)
-                    if self.stopping or not current:
+                    if self.stopping or not current or not original_ids.issubset({item["incident_id"] for item in current["signals"]}):
                         raise RuntimeError("Source-disconnected review cancelled after shutdown or deletion")
                     state.update(review_id=review_id, episode_id=episode_id, question=queued["question"],
                                  input_fingerprint=queued["input_fingerprint"], model=config["model"],
@@ -280,6 +332,9 @@ class InvestigationService:
             )
         except Exception as error:
             with self.plane.briefing_lock:
+                current = self.plane.store.get_episode(episode_id)
+                if self.stopping or not current or not original_ids.issubset({item["incident_id"] for item in current["signals"]}):
+                    return
                 state = dict(queued)
                 state.update(status="incomplete", finished_at=now(), error_type=type(error).__name__,
                              message="The retained-capsule review could not complete. Try again explicitly.")

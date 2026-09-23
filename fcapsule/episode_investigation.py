@@ -150,6 +150,28 @@ def validate_assessment(
     return result
 
 
+def ground_historical_comparison(assessment: dict[str, Any], checks: list[dict[str, Any]],
+                                model_context: dict[str, Any]) -> dict[str, Any]:
+    """A valid current citation cannot substitute for the selected prior capsule."""
+    comparison = assessment.get("historical_comparison")
+    if not comparison or comparison.get("status") == "insufficient_evidence":
+        return assessment
+    selected = {check["id"] for check in checks if check.get("tool") == "historical_episode"
+                and check.get("arguments", {}).get("episode_id") == comparison["episode_id"]
+                and check.get("status") == "completed"}
+    visible = {check["id"] for check in model_context.get("prior_checks", [])
+               if isinstance(check.get("observation"), dict)
+               and check["observation"].get("observations")
+               and check["observation"].get("availability") != "unavailable"}
+    if selected & visible & set(comparison["evidence_ids"]):
+        return assessment
+    return {**assessment, "historical_comparison": {
+        **comparison, "status": "insufficient_evidence",
+        "summary": "The comparison did not cite visible retained observations from this earlier episode. A shared or different mechanism is not established.",
+        "provenance": "grounding_guard",
+    }}
+
+
 def relationship_schema_repairable(value: Any, error: ValueError, evidence_ids: set[str],
                                   incident_ids: set[str], historical_episode_ids: set[str]) -> bool:
     """Allow review of a broken display link, not repair of invented evidence."""
@@ -305,7 +327,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
     if max_prompt_tokens < 1200 or max_prompt_tokens > 12000:
         raise ValueError("max_prompt_tokens must be between 1200 and 12000")
     state = {"version": "1", "episode_id": context["episode_id"], "status": "running", "started_at": now(),
-              "policy_version": "episode-investigation-1.19", "max_completion_tokens_per_call": max_tokens,
+              "policy_version": "episode-investigation-1.20", "max_completion_tokens_per_call": max_tokens,
              "model": model, "context": context, "checks": [], "calls": [], "assessment": None,
              "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
              "token_budget": {"maximum_total_tokens": max_total_tokens, "maximum_prompt_tokens": max_prompt_tokens,
@@ -528,6 +550,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                                                                 {item["incident_id"] for item in context["alerts"]},
                                                                 {item["episode_id"] for item in context.get("historical_candidates", [])},
                                                                 require_connections=require_connections)
+                    state["assessment"] = ground_historical_comparison(state["assessment"], state["checks"], payload["episode"])
             except ValueError as error:
                 call["validation_error"] = str(error)[:240]
                 relationship_repair = relationship_schema_repairable(
@@ -625,6 +648,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                     require_connections=require_connections,
                 )
                 repaired_review = True
+            reviewed = ground_historical_comparison(reviewed, state["checks"], payload["episode"])
             state.update(assessment=reviewed, status="ready", review={"status": "completed", "changed": reviewed != draft,
                          "schema_repair": review_candidate is not None or repaired_review,
                          "limitation": "Model-assisted consistency review, not independent proof."})

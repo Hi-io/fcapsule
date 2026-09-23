@@ -54,6 +54,40 @@ class SourceDisconnectedReviewTests(unittest.TestCase):
                 "supporting_evidence_ids": ["unknown"],
             }, {"E001"})
 
+    def test_valid_attachment_reference_is_preserved_without_unmasking_unrelated_ids(self):
+        reference = "A-attachment-12345678123456781234567812345678"
+        result = validate_source_review({
+            "sufficiency": "partially_sufficient", "answer": "Unconfirmed operator claim ffffffffffffffff",
+            "missing_discriminator": "Independent telemetry", "supporting_evidence_ids": [reference],
+        }, {reference})
+        self.assertEqual(result["supporting_evidence_ids"], [reference])
+        self.assertNotIn("ffffffffffffffff", result["answer"])
+
+    def test_empty_record_can_abstain_but_cannot_claim_sufficiency(self):
+        value = {"sufficiency": "unresolved", "answer": "No usable observation was retained.",
+                 "missing_discriminator": "Incident-time measurements", "supporting_evidence_ids": []}
+        self.assertEqual(validate_source_review(value, set())["supporting_evidence_ids"], [])
+        for state in ("sufficient", "partially_sufficient"):
+            with self.subTest(state=state), self.assertRaises(ValueError):
+                validate_source_review({**value, "sufficiency": state}, set())
+
+    def test_nested_prior_hypotheses_and_unavailable_checks_are_not_evidence(self):
+        client = FakeClient({"sufficiency": "unresolved", "answer": "Only the current symptom is retained.",
+            "missing_discriminator": "Historical measurements", "supporting_evidence_ids": ["E001"]})
+        checks = [
+            {"id": "Q001", "tool": "historical_episode", "status": "completed", "result": {"episode": {
+                "episode_id": "prior", "prior_hypothesis": {"summary": "UnsupportedEarlierCause"}}}},
+            {"id": "Q002", "tool": "search_logs", "status": "unavailable", "result": {"error": "UnusableFailure"}},
+        ]
+        result = run_source_disconnected_review(self.context, checks, "What is established?", "test-model", 600,
+                                                 lambda state: None, client=client)
+        self.assertEqual(result["status"], "ready")
+        self.assertNotIn("UnsupportedEarlierCause", client.requests[0].messages[1]["content"])
+        self.assertNotIn("UnusableFailure", client.requests[0].messages[1]["content"])
+        self.assertNotIn("Q002", result["available_evidence_ids"])
+        self.assertNotIn("UnsupportedEarlierCause", json.dumps(result["retained_checks"]))
+        self.assertIn("prior_hypothesis", checks[0]["result"]["episode"])
+
     def test_review_request_includes_system_instruction_within_the_input_cap(self):
         self.context["evidence"] = [
             {"id": f"E{index:03d}", "domain": "log_template", "title": "Event",

@@ -5,6 +5,7 @@
 - [Quickstart and scope](../README.md)
 - [Operations, Targets, Patterns and Settings](operations.md)
 - [Kubernetes installation and development workflow](kubernetes_deployment.md)
+- [HTTPS and microphone access](https_access.md)
 - [Privacy, credentials, capture storage and retention](data_privacy.md)
 - [Current product requirements](../FCAPSule_AI_Project_Guide.md)
 
@@ -12,6 +13,7 @@
 
 - [Architecture](architecture.md) and [engineering design](../PROJECT_DESIGN.md)
 - [AI investigation techniques and limits](ai_investigation_techniques.md)
+- [Historical capsule retrieval and retained-only reasoning](historical_capsule_retrieval.md)
 - [Implemented Operations evolution](operations_evolution_plan.md)
 - [Data and artifact contracts](../DATA_SCHEMA.md)
 - [Design decisions](design_decisions.md)

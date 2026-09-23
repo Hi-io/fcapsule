@@ -16,9 +16,11 @@ const widths = [1920, 1366, 1024, 720, 390, 320];
   try {
     const page = await browser.newPage();
     page.on('pageerror', error => errors.push(error.message));
+    await page.route('**/api/**', route => ['GET','HEAD'].includes(route.request().method()) ? route.continue() : route.abort('blockedbyclient'));
     if (process.env.LIVE_ASSETS !== '1') {
       await page.route('**/assets/app.css', route => route.fulfill({contentType:'text/css', body:['app.css','visual.css'].map(file=>fs.readFileSync(path.join(root,'fcapsule/ui/assets',file),'utf8')).join('\n')}));
       await page.route('**/assets/app.js', route => route.fulfill({contentType:'text/javascript', body:fs.readFileSync(path.join(root,'fcapsule/ui/assets/app.js'),'utf8')}));
+      await page.route('**/assets/icons/image.svg', route => route.fulfill({contentType:'image/svg+xml',body:fs.readFileSync(path.join(root,'fcapsule/ui/assets/icons/image.svg'),'utf8')}));
     }
     const capture = async name => {
       const bounds = await page.evaluate(()=>({viewport:innerWidth,content:document.documentElement.scrollWidth}));
@@ -68,6 +70,15 @@ const widths = [1920, 1366, 1024, 720, 390, 320];
             await page.getByRole('tab',{name:tab,exact:true}).click();
             await page.locator('#incident-report').scrollIntoViewIfNeeded();
             await capture(tab.toLowerCase() + '-' + width);
+            if (tab === 'Evidence') {
+              assert.equal(await page.locator('#evidence-view-captured').getAttribute('aria-pressed'),'true');
+              assert.equal(await page.locator('.investigation-sources').count(),0);
+              assert.ok(await page.evaluate(()=>Math.abs(document.querySelector('.evidence-views').getBoundingClientRect().left - document.querySelector('.capture-context').getBoundingClientRect().left) < 2), 'Segments align with telemetry reading column');
+              if (width >= 720) assert.ok(await page.locator('.evidence-views button').evaluateAll(buttons=>buttons.every(button=>button.offsetHeight < 44)), 'Desktop segment labels stay on one line');
+              await page.locator('#evidence-view-sources').click();
+              await capture('investigation-sources-' + width);
+              assert.equal(await page.locator('.evidence-view').count(),0);
+            }
           }
           await page.getByRole('tab',{name:'Overview',exact:true}).click();
           const basisDetails = page.locator('[data-disclosure="assessment-basis"]');
@@ -76,6 +87,7 @@ const widths = [1920, 1366, 1024, 720, 390, 320];
           if (await citation.count()) {
             const id = await citation.getAttribute('data-investigation-ref');
             await citation.click();
+            assert.equal(await page.locator('#evidence-view-sources').getAttribute('aria-pressed'),'true');
             assert.ok(await page.locator('[id="disclosure-agent-' + id + '"]').isVisible(), 'Citation must open a retained source');
             assert.equal(await page.evaluate(()=>document.activeElement.id),'disclosure-agent-' + id);
             await page.locator('[data-return-source]').click();
@@ -85,13 +97,15 @@ const widths = [1920, 1366, 1024, 720, 390, 320];
           }
           const evidenceButton = page.locator('[data-add-evidence]');
           if (await evidenceButton.count()) {
-            assert.equal(await evidenceButton.evaluate(el=>Boolean(el.closest('.context-workspace'))),true, 'Context belongs beside the assessment');
+            assert.equal(await evidenceButton.evaluate(el=>Boolean(el.closest('.evidence-prompt'))),true, 'Evidence prompt belongs beside the next action');
             await evidenceButton.click();
             await page.locator('dialog[open]').waitFor();
             assert.equal(await page.locator('#evidence-preview').isVisible(),false, 'No empty preview before a file is chosen');
+            assert.ok(await page.locator('#evidence-note').evaluate(el=>el.getBoundingClientRect().height)<60, 'Composer starts at one row');
             await capture('evidence-dialog-' + width);
             await page.keyboard.press('Escape');
             assert.equal(await page.locator('dialog[open]').count(),0);
+            assert.equal(await page.evaluate(()=>document.activeElement.id),'add-evidence-action');
           }
           await page.locator('.export-menu > summary').click();
           await capture('export-' + width);
