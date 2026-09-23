@@ -54,7 +54,7 @@ An alert is a signal, not automatically a separate operator task. Pending rules 
 
 ### Incident report
 
-The following information must be accessible without a wall of text. The implementation uses Overview (assessment and material impact), Evidence (domain disclosures) and Timeline, rather than displaying every section simultaneously:
+The following information must be accessible without a wall of text. The implementation uses Overview (scope, assessment and material impact), Investigation (checks, alternative explanations and history), Evidence (domain disclosures) and Timeline, rather than displaying every section simultaneously:
 
 1. **Incident status and impact:** severity, service, environment, start time, user-facing symptom, and material impact metrics.
 2. **Likely failure path:** evidence-grounded, probabilistic hypothesis with explicit confidence and uncertainty.

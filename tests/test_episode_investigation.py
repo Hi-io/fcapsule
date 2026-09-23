@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import Mock
 
-from fcapsule.episode_investigation import SYSTEM, assessment_payload, run_investigation, validate_assessment
+from fcapsule.episode_investigation import SYSTEM, RELATIONSHIP_REVIEW_SYSTEM, assessment_payload, run_investigation, validate_assessment
 from fcapsule.investigation_tools import InvestigationTools, episode_context, log_patterns, metric_summary, scrub, stamp
 from fcapsule.processing.anonymizer import anonymize_text, template_for_message
 from fcapsule.reasoning.context_budget import estimate_tokens
@@ -97,7 +97,7 @@ class InvestigationEngineTests(unittest.TestCase):
         value["basis"] = "Repeated decoder failure supports an application error. password=never-retain-basis"
         state, client = self.run_case([{"action": "finish", "assessment": value}], max_checks=0)
         self.assertEqual(state["status"], "ready")
-        self.assertEqual(state["policy_version"], "episode-investigation-1.17")
+        self.assertEqual(state["policy_version"], "episode-investigation-1.18")
         self.assertEqual(len(client.requests), 2)
         self.assertEqual(state["assessment"]["evidence_ids"], ["Q001"])
         self.assertNotIn("never-retain-basis", json.dumps(state))
@@ -334,6 +334,140 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(state["status"], "inconclusive")
         self.assertNotEqual(state["assessment"], draft)
         self.assertEqual(len(client.requests), 1)
+
+    def test_malformed_relationship_uses_reserved_review_without_inventing_links(self):
+        connection = {"from": "one", "to": "two", "relationship": "possibly_related",
+                      "reason": "No common cause established.", "evidence_ids": ["Q001"]}
+        for malformed in ({"to": "historical-episode"}, {"to": "one"}, {"from": None},
+                          {"from": ["one"]}, {"relationship": "causes"}, {"relationship": {}}, {"reason": None}):
+            with self.subTest(malformed=malformed):
+                self.context["alerts"] = [{"incident_id": "one", "alert_identity": "ScrapeFailed"},
+                                          {"incident_id": "two", "alert_identity": "ScrapeFailed"}]
+                draft = assessment()
+                draft["connections"] = [{**connection, **malformed}]
+                corrected = assessment()
+                corrected["hypotheses"][0]["status"] = "unresolved"
+                state, client = self.run_case([{"action": "finish", "assessment": draft},
+                                              {"action": "finish", "assessment": corrected}], max_checks=0)
+                self.assertEqual(state["status"], "ready")
+                self.assertTrue(state["review"]["schema_repair"])
+                self.assertFalse(state["draft_validated"])
+                self.assertEqual(state["assessment"]["connections"], [])
+                self.assertEqual(state["assessment"]["hypotheses"][0]["status"], "unresolved")
+                self.assertEqual(state["draft_assessment"]["connections"], draft["connections"])
+                self.assertEqual([call["phase"] for call in state["calls"]], ["investigation", "evidence_review"])
+                self.assertEqual(len(state["checks"]), 1)
+                review = json.loads(client.requests[-1].messages[1]["content"])
+                self.assertEqual(review["available_incident_ids"], ["one", "two"])
+                self.assertTrue(review["draft_validation_error"])
+                for request in client.requests:
+                    self.assertIn("possibly_related|same_symptom|no_link_established", request.messages[0]["content"])
+
+    def test_live_sized_historical_endpoint_error_is_reviewed_within_2100_tokens(self):
+        self.context.update({
+            "alerts": [{"incident_id": "one", "alert_identity": "ScrapeFailed"},
+                       {"incident_id": "two", "alert_identity": "ScrapeFailed"}],
+            "scope": {"namespace": "production", "pod": "exporter-worker-123",
+                      "alert_started_at": "2026-09-23T10:40:57Z",
+                      "window": {"start": "2026-09-23T10:30:57Z", "end": "2026-09-23T10:42:57Z"}},
+            "recurrence": {"previous_count": 1}, "historical_candidates": [{"episode_id": "historical-episode"}],
+            "evidence": [{"id": "E1", "domain": "metric_anomaly", "signal_origin": "alert_rule",
+                          "summary": "Scrapes failed during sampled incident times.", "metric_observation": {
+                              "metric": "up", "operator": "==", "threshold": 0, "unit": "state",
+                              "expression": 'up{namespace="production",pod="exporter-worker-123"}',
+                              "condition": {"observed_samples": 49, "matching_samples": 9, "missing_samples": 0,
+                                            "incident_observed_samples": 8, "incident_matching_samples": 8,
+                                            "min": 0, "max": 1, "latest": {"timestamp": "2026-09-23T10:42:57Z", "value": 0}},
+                          }}],
+        })
+        draft = assessment("E1")
+        draft["basis"] = ("Retained samples establish scrape failure but cannot distinguish its cause. " * 8)[:500]
+        draft["hypotheses"] = [{"explanation": ("The endpoint may have been temporarily unreachable. " * 4)[:180],
+                                "status": "unresolved", "reason": ("Incident-time network evidence is unavailable. " * 4)[:180],
+                                "evidence_ids": ["E1"]} for _ in range(3)]
+        draft["connections"] = [{"from": "one", "to": "historical-episode", "relationship": "possibly_related",
+                                 "reason": "Same alert signature, but no evidence links causes.", "evidence_ids": ["Q002"]}]
+        draft["historical_comparison"] = {"episode_id": "historical-episode", "status": "insufficient_evidence",
+                                           "summary": ("Prior episode has the same signature; no repeated cause is established. " * 3)[:200],
+                                           "evidence_ids": ["Q002"]}
+        self.assertGreater(estimate_tokens(draft), 800)
+        corrected = copy.deepcopy(draft)
+        corrected["connections"] = []
+        state, client = self.run_case([
+            {"action": "check", "tool": "alert_rule_logic", "arguments": {},
+             "question": "What detection logic is retained?", "distinguishes": "Detection versus cause"},
+            {"action": "finish", "assessment": draft}, {"action": "finish", "assessment": corrected},
+        ], max_checks=1, max_total_tokens=12000, max_prompt_tokens=2100)
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["review"]["status"], "completed")
+        self.assertEqual(len(client.requests), 3)
+        self.assertEqual(client.requests[-1].messages[0]["content"], RELATIONSHIP_REVIEW_SYSTEM)
+        self.assertEqual(state["assessment"]["connections"], [])
+        self.assertEqual(state["assessment"]["historical_comparison"], corrected["historical_comparison"])
+        self.assertEqual(state["calls"][1]["validation_error"], "Unknown alert relationship")
+        for request in client.requests:
+            self.assertLessEqual(estimate_tokens(request.messages[0]["content"]) +
+                                 estimate_tokens(request.messages[1]["content"]), 2100)
+        self.assertFalse(any(row.get("status") == "ready" and row.get("assessment") == draft for row in self.progress))
+
+    def test_relationship_repair_cannot_hide_unknown_citations_or_invalid_history(self):
+        self.context["historical_candidates"] = [{"episode_id": "prior"}]
+        for invalid in ("assessment", "hypothesis", "connection", "historical", "episode"):
+            with self.subTest(invalid=invalid):
+                draft = assessment()
+                draft["connections"] = [{"from": "one", "to": "prior", "relationship": "possibly_related",
+                                         "reason": "Timing only", "evidence_ids": ["Q001"]}]
+                draft["historical_comparison"] = {"episode_id": "prior", "status": "insufficient_evidence",
+                                                   "summary": "Cause unknown.", "evidence_ids": ["Q002"]}
+                field = {"assessment": draft, "hypothesis": draft["hypotheses"][0],
+                         "connection": draft["connections"][0], "historical": draft["historical_comparison"]}
+                if invalid == "episode":
+                    draft["historical_comparison"]["episode_id"] = "invented"
+                else:
+                    field[invalid]["evidence_ids"] = ["invented"]
+                state, client = self.run_case([{"action": "finish", "assessment": draft}], max_checks=0)
+                self.assertEqual(state["status"], "inconclusive")
+                self.assertEqual(len(client.requests), 1)
+                self.assertNotIn("review", state)
+
+    def test_relationship_repair_failure_never_publishes_the_invalid_draft(self):
+        draft = assessment()
+        draft["connections"] = [{"from": "one", "to": "one", "relationship": "same_symptom",
+                                 "reason": "Same incident", "evidence_ids": ["Q001"]}]
+        for reply in (RuntimeError("review unavailable"), {"action": "finish", "assessment": draft}):
+            with self.subTest(reply=type(reply).__name__):
+                state, client = self.run_case([{"action": "finish", "assessment": draft}, reply], max_checks=0)
+                self.assertEqual(state["status"], "inconclusive")
+                self.assertEqual(state["review"]["status"], "failed")
+                self.assertFalse(state["draft_validated"])
+                self.assertEqual(state["assessment"]["provenance"], "deterministic_abstention")
+                self.assertLessEqual(len(client.requests), 3)
+                self.assertEqual(len(state["checks"]), 1)
+
+    def test_relationship_review_can_use_only_one_existing_repair_call(self):
+        draft = assessment()
+        draft["connections"] = [{"from": "one", "to": "prior", "relationship": "possibly_related",
+                                 "reason": "Same signature", "evidence_ids": ["Q001"]}]
+        state, client = self.run_case([{"action": "finish", "assessment": draft},
+                                      {"action": "finish", "assessment": draft},
+                                      {"action": "finish", "assessment": assessment()}], max_checks=0)
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual([call["phase"] for call in state["calls"]],
+                         ["investigation", "evidence_review", "evidence_review_repair"])
+        self.assertEqual(client.requests[-1].messages[0]["content"], RELATIONSHIP_REVIEW_SYSTEM)
+        self.assertEqual(client.requests[-1].max_tokens, 700)
+        self.assertEqual(len(state["checks"]), 1)
+
+    def test_relationship_repair_still_respects_total_token_budget(self):
+        draft = assessment()
+        draft["connections"] = [{"from": "one", "to": "prior", "relationship": "possibly_related",
+                                 "reason": "Same signature", "evidence_ids": ["Q001"]}]
+        state, client = self.run_case([{"action": "finish", "assessment": draft},
+                                      {"action": "finish", "assessment": assessment()}], max_checks=0,
+                                      max_total_tokens=4000, max_prompt_tokens=2100)
+        self.assertLessEqual(state["token_budget"]["accounted_total_tokens"], 4000)
+        self.assertLessEqual(len(client.requests), 2)
+        self.assertNotEqual(state["assessment"], draft)
 
     def test_review_accepts_misplaced_arrays_and_records_original_layout(self):
         misplaced = {"action": "finish", "assessment": assessment()}

@@ -354,6 +354,15 @@ the mechanism from the alert symptom with actual observations, including what re
 unknown. Legacy assessments are still readable; they are not rewritten retroactively.
 Neither the default 2,100-token request boundary nor the total budget is increased.
 
+Policy `episode-investigation-1.18` adds bounded recovery for malformed relationship
+endpoints, enum values or reasons. A historical episode ID in a current-alert connection
+is not silently mapped to an incident. If the remaining assessment is valid and its
+connection citations are visible, the existing reserved review can repair only the
+structure against supplied current incident IDs. The original invalid draft is retained.
+A compact review instruction preserves the full-request budget; one existing repair
+attempt remains the limit. Unavailable citations are rejected, and unsuccessful repair
+ends as an explicit inconclusive assessment, not an invented relationship.
+
 Supported Prometheus rules now contribute a preserved numerical discriminator:
 the expression value before the outer scalar comparison, its threshold/operator,
 labels, sampled condition counts, missing values, baseline and capture provenance.

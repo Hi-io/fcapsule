@@ -43,7 +43,7 @@ const widths = [1920, 1366, 1024, 720, 390, 320];
           });
           assert.ok(centered, 'Report reading area must be centered at ' + width);
           await capture('overview-' + width);
-          for (const tab of ['Evidence','Timeline']) {
+          for (const tab of ['Investigation','Evidence','Timeline']) {
             await page.getByRole('tab',{name:tab,exact:true}).click();
             await page.locator('#incident-report').scrollIntoViewIfNeeded();
             await capture(tab.toLowerCase() + '-' + width);

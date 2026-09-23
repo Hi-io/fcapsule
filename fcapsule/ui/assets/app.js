@@ -549,11 +549,11 @@ function mediaEvidencePanel(payload, includeHistory = true) {
   const episodeId = selectedEpisodeId || payload.investigation?.episode_id;
   const items = payload.media_evidence || [];
   const visible = new Set((payload.investigation?.calls || []).flatMap(call => call.visible_evidence_ids || []));
-  const ready = items.some(item => item.status === 'ready' && !visible.has('A-' + item.attachment_id));
+  const changed = item => !visible.has('A-' + item.attachment_id) || Date.parse(item.updated_at) > Date.parse(payload.investigation?.started_at || payload.investigation?.created_at);
+  const ready = items.some(item => item.status === 'ready' && changed(item));
   const rows = items.map(item => {
-    const reference = 'A-' + item.attachment_id;
-    const useState = item.status === 'ready' ? (visible.has(reference) ? 'included in latest assessment' : 'ready for a new assessment') : '';
-    return `<article class="media-evidence-row"><div><strong>${safe(item.filename)}</strong><small>${safe(item.kind)} · ${safe(item.status)}${useState ? ' · ' + safe(useState) : ''}${item.observed_at ? ' · observed ' + safe(formatDate(item.observed_at)) : ''}</small><p>${safe(attachmentSummary(item))}</p></div><div class="media-evidence-actions"><a class="secondary button-link" href="${safe(item.artifact_url)}" target="_blank" rel="noopener">View</a>${item.status === 'ready' ? `<button class="secondary" data-correct-evidence="${safe(item.attachment_id)}">Correct</button>` : ''}</div></article>`;
+    const useState = item.status === 'ready' ? (changed(item) ? 'ready for a new assessment' : 'provided to latest investigation') : '';
+    return `<article class="media-evidence-row"><div><strong>${safe(item.filename)}</strong><small>${safe(item.kind)} · ${safe(item.status)}${useState ? ' · ' + safe(useState) : ''}${item.uploaded_at ? ' · uploaded ' + safe(formatDate(item.uploaded_at)) : ''}${item.observed_at ? ' · observed ' + safe(formatDate(item.observed_at)) : ''}</small><p>${safe(attachmentSummary(item))}</p></div><div class="media-evidence-actions"><a class="secondary button-link" href="${safe(item.artifact_url)}" target="_blank" rel="noopener">View</a>${item.status === 'ready' ? `<button class="secondary" data-correct-evidence="${safe(item.attachment_id)}">Correct</button>` : ''}</div></article>`;
   }).join('');
   const revision = includeHistory ? payload.investigation_revisions || [] : [];
   const history = revision.length > 1 ? disclosure('assessment-history', 'Assessment history', revision.map(item=>`<div class="revision-row"><span>${safe(item.reason.replaceAll('_',' '))}</span><strong>${safe(item.summary?.summary || item.status.replaceAll('_',' '))}</strong><small>${safe(formatDate(item.completed_at || item.created_at))}</small></div>`).join(''), revision.length) : '';
@@ -798,7 +798,9 @@ function sparkline(signal) {
   const isRule = signal.signal_origin === 'alert_rule';
   const numbers = valid.map(point => Number(point.value));
   const guides = [signal.baseline_value, ...(isRule ? [signal.threshold] : [])].filter(value=>value != null && Number.isFinite(Number(value))).map(Number);
-  const floor = Math.min(...numbers,...guides); const ceiling = Math.max(...numbers,...guides);
+  let floor = Math.min(...numbers,...guides); let ceiling = Math.max(...numbers,...guides);
+  if (signal.metric === 'up' || signal.metric === 'pod_ready') { floor = 0; ceiling = 1; }
+  else if (floor === ceiling) { const margin = Math.max(Math.abs(floor) * 0.1,0.1); floor = floor >= 0 ? Math.max(0,floor-margin) : floor-margin; ceiling += margin; }
   const range = Math.max(ceiling - floor, 0.01);
   const timestamps = values.map(point=>Date.parse(point.timestamp)).filter(Number.isFinite);
   const start = Math.min(...timestamps); const end = Math.max(...timestamps);
@@ -812,7 +814,11 @@ function sparkline(signal) {
   const markerLine = Number.isFinite(markerTime) && markerTime >= start && markerTime <= end ? `<line class="${isRule ? 'alert-start' : 'incident'}" x1="${x(marker)}" y1="0" x2="${x(marker)}" y2="${height}"/>` : '';
   const baseline = signal.baseline_value != null ? `<line class="baseline" x1="${left}" y1="${y(signal.baseline_value)}" x2="${width}" y2="${y(signal.baseline_value)}"/>` : '';
   const threshold = isRule && signal.threshold != null ? `<line class="threshold" x1="${left}" y1="${y(signal.threshold)}" x2="${width}" y2="${y(signal.threshold)}"/>` : '';
-  const tick = value => Number(value).toLocaleString('en',{notation:'compact',maximumSignificantDigits:3});
+  const tick = value => {
+    const metric = String(signal.metric || '');
+    const divisor = metric.endsWith('_bytes') ? 1048576 : 1;
+    return Number(value / divisor).toLocaleString('en',{notation:'compact',maximumSignificantDigits:3}) + (divisor > 1 ? ' MiB' : '');
+  };
   return `<svg class="spark" viewBox="0 0 ${width} ${height}" role="img" aria-label="${safe(signal.label)} across the captured window. ${isRule ? 'Amber horizontal line: threshold. Red vertical line: alert start, when in range.' : 'Dashed vertical line: selected deviation, not alert time. Horizontal line: baseline median.'} Gaps represent missing samples."><text x="0" y="12" class="chart-tick">${tick(ceiling)}</text><text x="0" y="${height-pad}" class="chart-tick">${tick(floor)}</text><line class="axis" x1="${left}" y1="${height - pad}" x2="${width}" y2="${height - pad}"/>${baseline}${threshold}${markerLine}<path class="series" d="${path}"/>${valid.length === 1 ? `<circle class="single-sample" cx="${x(valid[0].timestamp)}" cy="${y(valid[0].value)}" r="3"/>` : ''}</svg>`;
 }
 
@@ -857,6 +863,7 @@ function logLabel(pattern) {
 function briefingPanel(payload, detailed = false) {
   const run = payload.investigation || {status:'not_started', episode_id:selectedEpisodeId};
   const assessment = run.assessment;
+  if (detailed && !assessment) return '';
   const loading = ['queued','running','waiting'].includes(run.status);
   const saved = run.finished_at ? (run.status === 'ready' ? 'Assessment ready ' : run.status === 'inconclusive' ? 'Assessment inconclusive ' : 'Last attempt ') + formatDate(run.finished_at) : '';
   const header = '<div class="section-heading"><h3>Episode assessment</h3><span class="queue-note">' + safe([run.model, saved].filter(Boolean).join(' · ')) + '</span></div>';
@@ -942,7 +949,7 @@ function investigationScope(payload) {
   const resource = scope.pod || scope.resource?.name || scope.service;
   const recurrence = payload.investigation?.context?.recurrence;
   const parts = [[scope.pod ? 'Pod' : scope.resource?.kind || 'Service',resource],['Namespace',scope.namespace]];
-  if (recurrence?.previous_count > 0) parts.push(['Retained history',recurrence.previous_count + (recurrence.count_capped ? '+' : '') + ' earlier same-signature episodes']);
+  if (recurrence?.previous_count > 0) parts.push(['Retained history',recurrence.previous_count + (recurrence.count_capped ? '+' : '') + ' earlier same-signature episode' + (recurrence.previous_count === 1 ? '' : 's')]);
   return '<dl class="assessment-scope">' + parts.filter(([,value])=>value).map(([label,value])=>'<div><dt>' + safe(label) + '</dt><dd>' + safe(value) + '</dd></div>').join('') + '</dl>';
 }
 
@@ -952,11 +959,16 @@ function checkObservation(item) {
   if (item.status !== 'completed') return String(item.error || result.error || 'No successful observation was retained.').slice(0,300);
   if (result.error) return String(result.error).slice(0,300);
   if (result.summary || result.message) return String(result.summary || result.message).slice(0,300);
+  const rule = result.retained_definitions?.at(-1)?.rule;
+  if (rule?.query) return 'Retained condition: ' + String(rule.query).slice(0,230) + ' · must hold for ' + (rule.duration || 0) + 's';
   const metrics = result.observations?.filter(row=>row.metric) || result.affected || [];
   const metric = metrics.find(row=>row.metric && row.max != null);
   if (metric) return `${metric.metric}: ${metric.min ?? '?'} to ${metric.max}${metrics.length > 1 ? ' · ' + metrics.length + ' metric series retained' : ''}`;
   const patterns = result.patterns || result.observations?.filter(row=>row.pattern) || [];
-  if (patterns.length) return patterns.length + ' log patterns · ' + logLabel(patterns[0].pattern);
+  if (patterns.length) {
+    const salient = patterns.find(row=>/ERROR|FATAL|WARN|timeout|failed/i.test(row.pattern)) || patterns[0];
+    return patterns.length + ' log patterns · ' + logLabel(salient.pattern);
+  }
   if (Array.isArray(result.patterns) && !result.patterns.length) return 'No matching log patterns were returned in the queried window.';
   const configs = result.observations?.filter(row=>row.kind) || [];
   if (configs.length) return configs.slice(0,2).map(row=>[row.kind,row.name,row.phase].filter(Boolean).join(' · ')).join('; ');
@@ -1065,13 +1077,14 @@ function metricChart(item, linkToEvidence = false) {
   const start = points[0]?.timestamp; const end = points[points.length - 1]?.timestamp;
   const duration = start && end ? Math.round((new Date(end) - new Date(start)) / 60000) : 0;
   if (item.signal_origin === 'alert_rule') {
-    const labels = Object.entries(item.labels || {}).filter(([key])=>['namespace','pod','service','instance','job'].includes(key)).map(([key,value])=>key + '=' + value).join(' · ');
-    const unit = item.unit ? ' ' + item.unit : '';
+    const labels = Object.entries(item.labels || {}).filter(([key])=>['namespace','pod','service'].includes(key)).map(([key,value])=>key + '=' + value).join(' · ');
+    const replica = item.labels?.prometheus_replica || item.labels?.replica || 'not labelled';
+    const unit = item.unit && item.unit !== 'state' ? ' ' + item.unit : '';
     const missing = points.filter(point=>point.value == null).length;
-    return '<article class="metric-chart alert-signal"' + (linkToEvidence ? '' : ' id="evidence-' + safe(item.evidence_id) + '" tabindex="-1"') + '><span class="text-label">Alert signal</span><h4>' + safe(item.label) + '</h4><p class="queue-note">' + safe(labels || item.component || 'Rule result scope') + '</p>' +
+    return '<article class="metric-chart alert-signal"' + (linkToEvidence ? '' : ' id="evidence-' + safe(item.evidence_id) + '" tabindex="-1"') + '><span class="text-label">Alert signal · replica ' + safe(replica) + '</span><h4>' + safe(item.metric === 'up' ? 'Target scrape health' : item.label) + '</h4><p class="queue-note">' + safe(labels || item.component || 'Rule result scope') + '</p>' +
       '<div class="pm-values"><span>Before alert<b>' + safe(item.baseline || 'Unavailable') + '</b></span><span>Selected value<b>' + safe(item.peak) + '</b></span><span>Alert condition<b>' + safe(item.operator + ' ' + item.threshold + unit) + '</b></span></div>' + sparkline(item) +
-      '<div class="chart-times"><time title="' + safe(formatExactDate(start)) + '">' + shortTime(start) + '</time><span>' + duration + ' min captured</span><time title="' + safe(formatExactDate(end)) + '">' + shortTime(end) + '</time></div><div class="chart-legend"><span class="threshold-key">Dashed amber: threshold</span><span class="alert-key">Dashed red: alert start ' + safe(shortTime(item.alert_timestamp)) + '</span>' + (missing ? '<span>' + missing + ' missing samples</span>' : '') + '</div>' +
-      '<details class="metric-query"><summary>Query and provenance</summary><pre class="log-lines">' + safe(item.expression) + '</pre><p class="queue-note">Original rule: ' + safe(item.rule?.query || item.underlying_expression) + '</p><p class="queue-note">Captured ' + safe(formatExactDate(item.source?.captured_at)) + ' · step ' + safe(item.step_seconds) + 's · values are not filtered by the alert comparison.</p></details>' +
+      '<div class="chart-times"><time title="' + safe(formatExactDate(start)) + '">' + shortTime(start) + '</time><span>' + duration + ' min window</span><time title="' + safe(formatExactDate(end)) + '">' + shortTime(end) + '</time></div><div class="chart-legend">' + (item.metric === 'up' ? '<span>0: failed scrape · 1: successful scrape</span>' : '') + '<span class="threshold-key">Dashed amber: threshold</span><span class="alert-key">Dashed red: alert start ' + safe(shortTime(item.alert_timestamp)) + '</span>' + (missing ? '<span>' + missing + ' missing samples</span>' : '') + '</div>' +
+      '<details class="metric-query"><summary>Query and provenance</summary><pre class="log-lines">' + safe(item.expression) + '</pre><p class="queue-note">Original rule: ' + safe(item.rule?.query || item.underlying_expression) + '</p><p class="queue-note">Captured ' + safe(formatExactDate(item.source?.captured_at)) + ' · step ' + safe(item.step_seconds) + 's · values are not filtered by the alert comparison.</p><pre class="log-lines">' + safe(JSON.stringify(item.labels || {},null,2)) + '</pre></details>' +
       (linkToEvidence ? '<button class="evidence-link" data-evidence-link="' + safe(item.evidence_id) + '" data-domain="metrics">Open metric evidence</button>' : '') + '</article>';
   }
   const extreme = item.metric === 'pod_ready' ? 'Selected low' : item.metric.endsWith('_total') ? 'Selected increase' : 'Selected deviation';

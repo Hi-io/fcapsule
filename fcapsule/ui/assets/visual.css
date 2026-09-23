@@ -612,6 +612,7 @@ tbody tr:hover { background:#fafbfe; }
 .spark .alert-start { stroke:var(--red); stroke-dasharray:3 3; stroke-width:1.5; }
 .spark .chart-tick { font-size:9px; fill:var(--muted); font-family:inherit; }
 .spark .single-sample { fill:var(--accent); }
+.metric-chart .spark { width:100%; height:auto; aspect-ratio:380 / 110; }
 .alert-signal h4 { overflow-wrap:anywhere; }
 .alert-signal .queue-note { overflow-wrap:anywhere; }
 .alert-signal .pm-values { flex-wrap:wrap; gap:12px 24px; }
@@ -624,7 +625,7 @@ tbody tr:hover { background:#fafbfe; }
   .activity-heading { flex-wrap:wrap; gap:12px; }
   .activity-actions { width:100%; justify-content:space-between; }
   .activity-actions .disclosure-body { left:0; right:auto; }
-  .report-navigation [role="tablist"] { display:flex; width:100%; gap:12px; }
-  .report-navigation [role="tab"] { font-size:11px; padding-inline:0; }
+  .report-navigation [role="tablist"] { display:flex; width:100%; justify-content:space-between; gap:8px; }
+  .report-navigation [role="tab"] { min-width:0; font-size:11px; padding-inline:0; }
   .assessment-scope { gap:12px; }
 }

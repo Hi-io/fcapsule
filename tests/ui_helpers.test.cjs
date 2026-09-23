@@ -400,3 +400,23 @@ test('text context availability depends on the core, not specialist models', () 
   assert.equal(available({core_investigator:{capability:{status:'ready'}}}).text,true);
   assert.equal(available({}).text,false);
 });
+
+test('a corrected attachment can be reviewed again without claiming it changed the diagnosis', () => {
+  const render = helper('mediaEvidencePanel','sourceReviewPanel',{
+    selectedEpisodeId:'episode', safe:value=>String(value ?? ''), formatDate:value=>value,
+    attachmentSummary:()=> 'An observation', disclosure:(id,title,body)=>title+body,
+  });
+  const payload={investigation:{started_at:'2026-09-23T01:00:00Z',calls:[{visible_evidence_ids:['A-note']}]},
+    media_evidence:[{attachment_id:'note',kind:'text',filename:'note.txt',status:'ready',updated_at:'2026-09-23T01:02:00Z',uploaded_at:'2026-09-23T00:59:00Z'}]};
+  assert.match(render(payload),/Review new context/);
+  assert.match(render(payload),/uploaded 2026-09-23T00:59:00Z/);
+  payload.media_evidence[0].updated_at='2026-09-23T00:59:00Z';
+  assert.doesNotMatch(render(payload),/Review new context/);
+  assert.match(render(payload),/provided to latest investigation/);
+});
+
+test('missing alert series is not presented as a healthy graph', () => {
+  const render=helper('metricsPanel','overviewMetrics',{safe:value=>String(value),metricChart:()=>''});
+  assert.match(render({pm_signals:[]}),/not retained.*not backfilled/);
+  assert.match(render({alert_metric_evidence:[{alertname:'Condition',status:'unavailable',reason:'query_failed'}]}),/Condition \(query failed\)/);
+});
