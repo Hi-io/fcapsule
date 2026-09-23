@@ -23,6 +23,7 @@
 
 ## Product and Evaluation Context
 
+- [Product capabilities and value proposition](product_value_proposition.md): user-facing explanation of the current product's distinctive value and boundaries.
 - [Stable concept and original research ambitions](../FCAPSule_AI_Concept.md): not a list of shipped model integrations.
 - [Operator-first acceptance principles](production_product_requirements.md)
 - [Current product audit](product_audit.md)
