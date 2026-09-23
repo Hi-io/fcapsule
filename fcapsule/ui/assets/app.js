@@ -58,9 +58,9 @@ function renderPreservingFocus(render) {
     if (selection && replacement instanceof HTMLInputElement) replacement.setSelectionRange(...selection);
   }
 }
-function disclosure(id, title, content, count = '') {
+function disclosure(id, title, content, count = '', statusLabel = '') {
   const domainIcon = {'domain-alerts':'bell-ring','domain-logs':'logs','domain-metrics':'chart-no-axes-combined','domain-config':'file-code-2','domain-coverage':'layers','diagnostics':'settings-2'}[id];
-  return `<details class="evidence-disclosure" data-disclosure="${safe(id)}" ${openDisclosures.has(id) ? 'open' : ''}><summary id="disclosure-${safe(id)}"><span class="disclosure-title">${domainIcon ? icon(domainIcon) : ''}<span>${safe(title)}</span></span>${count !== '' ? `<span class="detail-count">${safe(count)}</span>` : ''}</summary><div class="disclosure-body">${content}</div></details>`;
+  return `<details class="evidence-disclosure" data-disclosure="${safe(id)}" ${openDisclosures.has(id) ? 'open' : ''}><summary id="disclosure-${safe(id)}"><span class="disclosure-title">${domainIcon ? icon(domainIcon) : ''}<span>${safe(title)}</span></span>${statusLabel ? `<span class="sr-only">: ${safe(statusLabel)}</span>` : ''}${count !== '' ? `<span class="detail-count">${safe(count)}</span>` : ''}</summary><div class="disclosure-body">${content}</div></details>`;
 }
 function icon(name) { return `<span class="ui-icon" data-icon="${safe(name)}" aria-hidden="true"></span>`; }
 function quantity(count, noun) { return `${count} ${noun}${count === 1 ? '' : 's'}`; }
@@ -889,12 +889,12 @@ function briefingPanel(payload, detailed = false) {
   if (!assessment) return '<section class="briefing">' + header + '<div class="analysis-state" role="status" aria-live="polite">' +
     (loading ? '<span class="spinner"></span>' : '') + '<div><strong>' + safe(pendingTitle) + '</strong><p>' + safe(pendingCopy) + '</p>' + incompleteNote + (run.status === 'inconclusive' ? inconclusiveNote : '') +
     (!loading ? run.status === 'not_configured' ? '<a href="/settings">Open Settings</a>' : '<button class="secondary" data-investigate="' + safe(run.episode_id) + '">' + (run.status === 'not_started' ? 'Start investigation' : 'Reassess episode') + '</button>' : '') + '</div></div></section>';
-  const hypotheses = (assessment.hypotheses || []).map(item => '<article class="hypothesis-row"><div class="section-heading"><h4>' + safe(item.explanation) + '</h4><span class="hypothesis-state ' + safe(item.status) + '">' + safe(item.status) + '</span></div><p>' + safe(item.reason) + '</p><div class="citations">' + investigationRefs(run, item.evidence_ids) + '</div></article>').join('');
+  const hypotheses = (assessment.hypotheses || []).map(item => '<article class="hypothesis-row"><div class="section-heading"><h4>' + safe(item.explanation) + '</h4><span class="hypothesis-state ' + safe(item.status) + '">' + safe(item.status) + '</span></div><p>' + investigationText(run, item.reason) + '</p><div class="citations">' + investigationRefs(run, item.evidence_ids) + '</div></article>').join('');
   const name = id => run.context?.alerts?.find(item=>item.incident_id === id)?.title || id;
-  const connections = (assessment.connections || []).map(item=>'<article class="hypothesis-row"><h4>' + safe(name(item.from)) + ' / ' + safe(name(item.to)) + '</h4><small>' + safe(item.relationship.replaceAll('_',' ')) + '</small><p>' + safe(item.reason) + '</p><div class="citations">' + investigationRefs(run,item.evidence_ids) + '</div></article>').join('');
+  const connections = (assessment.connections || []).map(item=>'<article class="hypothesis-row"><h4>' + safe(name(item.from)) + ' / ' + safe(name(item.to)) + '</h4><small>' + safe(item.relationship.replaceAll('_',' ')) + '</small><p>' + investigationText(run, item.reason) + '</p><div class="citations">' + investigationRefs(run,item.evidence_ids) + '</div></article>').join('');
   const history = assessment.historical_comparison;
   const historyCandidate = run.context?.historical_candidates?.find(item => item.episode_id === history?.episode_id);
-  const historyHtml = history ? '<section class="history-comparison"><div><span class="text-label">Related history</span><h4>' + safe(history.status.replaceAll('_',' ')) + '</h4><p>' + safe(history.summary) + '</p></div><div><span class="incident-reference">' + safe(historyCandidate?.reference || history.episode_id) + '</span><div class="citations">' + investigationRefs(run, history.evidence_ids) + '</div></div></section>' : '';
+  const historyHtml = history ? '<section class="history-comparison"><div><span class="text-label">Related history</span><h4>' + safe(history.status.replaceAll('_',' ')) + '</h4><p>' + investigationText(run, history.summary) + '</p></div><div><span class="incident-reference">' + safe(historyCandidate?.reference || history.episode_id) + '</span><div class="citations">' + investigationRefs(run, history.evidence_ids) + '</div></div></section>' : '';
   const same = (left, right) => String(left || '').trim().replace(/[.\s]+$/,'').toLowerCase() === String(right || '').trim().replace(/[.\s]+$/,'').toLowerCase();
   const assessorFinding = (run.findings || []).find(item => item.category === 'investigator_assessment');
   const primary = assessorFinding || run.findings?.[0];
@@ -903,7 +903,7 @@ function briefingPanel(payload, detailed = false) {
   const inlineIds = new Set(investigationReferenceMatches(run, assessment.basis).filter(item=>!item.reference.unresolved).map(item=>item.id));
   const extraIds = mainIds.filter(id=>!inlineIds.has(id));
   const discrepancy = assessorFinding && mechanism && !same(assessorFinding.summary, mechanism)
-    ? '<section class="assessment-discrepancy" role="note"><strong>Assessment discrepancy</strong><p>The retained initial finding differs from the latest mechanism. Verify both before acting.</p><dl><div><dt>Latest mechanism</dt><dd>' + safe(mechanism) + '</dd></div><div><dt>Initial finding</dt><dd>' + safe(assessorFinding.summary) + '</dd></div></dl><div class="citations">' + investigationRefs(run, assessorFinding.evidence_ids) + '</div></section>' : '';
+    ? '<section class="assessment-discrepancy" role="note"><strong>Assessment discrepancy</strong><p>The retained initial finding differs from the latest mechanism. Verify both before acting.</p><dl><div><dt>Latest mechanism</dt><dd>' + investigationText(run, mechanism) + '</dd></div><div><dt>Initial finding</dt><dd>' + investigationText(run, assessorFinding.summary) + '</dd></div></dl><div class="citations">' + investigationRefs(run, assessorFinding.evidence_ids) + '</div></section>' : '';
   const seenObservations = new Set();
   const observations = (run.findings || []).filter(item => {
     if (item === assessorFinding && discrepancy) return false;
@@ -913,11 +913,11 @@ function briefingPanel(payload, detailed = false) {
     return true;
   });
   const briefObservations = observations.map(item => '<li><strong>' + safe(item.title) + '</strong><p>' + investigationText(run, item.summary) + '</p><div class="citations">' + investigationRefs(run, item.evidence_ids) + '</div></li>').join('');
-  const findingDetails = (run.findings || []).map(item => '<article class="finding"><h4>' + safe(item.title) + '</h4><p>' + safe(item.summary) + '</p><div class="citations">' + investigationRefs(run, item.evidence_ids) + '</div>' +
-    (item.next_check && !same(item.next_check, assessment.next_action) ? '<p><strong>Additional check:</strong> ' + safe(item.next_check) + '</p>' : '') +
+  const findingDetails = (run.findings || []).map(item => '<article class="finding"><h4>' + safe(item.title) + '</h4><p>' + investigationText(run, item.summary) + '</p><div class="citations">' + investigationRefs(run, item.evidence_ids) + '</div>' +
+    (item.next_check && !same(item.next_check, assessment.next_action) ? '<p><strong>Additional check:</strong> ' + investigationText(run, item.next_check) + '</p>' : '') +
     (item.observations?.length ? disclosure('finding-' + safe(item.id), 'Observed details', item.observations.map(observation => '<pre class="compact-data">' + safe(JSON.stringify(observation, null, 2)) + '</pre>').join(''), item.observations.length) : '') + '</article>').join('');
   const atCapture = assessment.summary && !same(assessment.summary, mechanism)
-    ? disclosure('assessment-context', 'Capture context', '<p class="assessment-context">' + safe(assessment.summary) + '</p>') : '';
+    ? disclosure('assessment-context', 'Capture context', '<p class="assessment-context">' + investigationText(run, assessment.summary) + '</p>') : '';
   if (detailed) return '<section class="investigation-details"><h3>Assessment details</h3>' + atCapture +
     (historyHtml ? disclosure('related-history', 'Related history', historyHtml) : '') +
     (findingDetails ? disclosure('all-findings', 'Retained findings', '<div class="findings">' + findingDetails + '</div>', run.findings.length) : '') +
@@ -928,7 +928,7 @@ function briefingPanel(payload, detailed = false) {
     disclosure('assessment-basis', 'Why this fits', (assessment.basis ? '<p class="assessment-basis">' + investigationText(run, assessment.basis) + '</p>' : '') + (extraIds.length ? '<div class="citations">' + investigationRefs(run, extraIds) + '</div>' : ''), mainIds.length ? mainIds.length + ' sources' : '') + '</div>' +
     '<div class="next-check"><h4>Next check</h4><p><strong>' + investigationText(run, assessment.next_action) + '</strong></p>' + (assessment.expected_finding ? disclosure('expected-finding', 'What would confirm it', '<p>' + investigationText(run, assessment.expected_finding) + '</p>') : '') + '</div>' +
     '</div>' + discrepancy + (briefObservations ? '<div class="key-observations">' + disclosure('key-observations', 'Key observations', '<ul>' + briefObservations + '</ul>', observations.length) + '</div>' : '') +
-    '<p class="uncertainty"><strong>Still unconfirmed:</strong> ' + safe(assessment.uncertainty) + '</p></section>';
+    '<p class="uncertainty"><strong>Still unconfirmed:</strong> ' + investigationText(run, assessment.uncertainty) + '</p></section>';
 }
 
 function investigationRefs(run, ids = []) {
@@ -1059,7 +1059,7 @@ function investigationProgress(run = {}, compact = false) {
     const state = item.status === 'completed' && hasError ? 'unavailable' : item.status;
     const marker = '<span class="step-marker" aria-hidden="true">' + (item.status === 'running' ? '<span class="spinner"></span>' : icon(hasError ? 'bell-ring' : 'check')) + '</span>';
     const answer = '<p class="check-answer">' + safe(checkObservation(item)) + '</p><button class="evidence-link" data-investigation-ref="' + safe(item.id) + '">' + icon('chevron-right') + ' Open observation</button><small>' + safe(state) + (item.finished_at ? ' · ' + formatDate(item.finished_at) : '') + '</small>';
-    if (compact) return '<li class="agent-step ' + safe(state) + '">' + marker + disclosure('activity-' + item.id, checkNames[item.tool] || item.question || 'Source check', '<strong>' + safe(item.question) + '</strong>' + answer) + '</li>';
+    if (compact) return '<li class="agent-step ' + safe(state) + '">' + marker + disclosure('activity-' + item.id, checkNames[item.tool] || item.question || 'Source check', '<strong>' + safe(item.question) + '</strong>' + answer, hasError && state !== 'running' ? state : '', !hasError || state === 'running' ? state : '') + '</li>';
     return '<li class="agent-step ' + safe(state) + '">' + marker + '<div><strong>' + safe(item.question) + '</strong>' + answer + '</div></li>';
   }).join('');
   const details = '<dl class="coverage-details"><div><dt>Input tokens</dt><dd>' + Number(usage?.prompt_tokens || 0).toLocaleString('en') + '</dd></div><div><dt>Output tokens</dt><dd>' + Number(usage?.completion_tokens || 0).toLocaleString('en') + '</dd></div><div><dt>Safety reserve</dt><dd>' + Number(budget.accounted_total_tokens || 0).toLocaleString('en') + (budget.maximum_total_tokens ? ' / ' + Number(budget.maximum_total_tokens).toLocaleString('en') : '') + '</dd></div><div><dt>Budget remaining</dt><dd>' + Number(budget.remaining_tokens || 0).toLocaleString('en') + '</dd></div><div><dt>Model calls</dt><dd>' + (run.calls?.length || 0) + '</dd></div><div><dt>Earlier attempts</dt><dd>' + Number(run.lifetime_usage?.total_tokens || 0).toLocaleString('en') + ' tokens</dd></div></dl><p class="queue-note">' + (usage?.complete ? 'Provider-reported usage is shown alongside a pre-call safety reserve.' : 'Provider usage is incomplete; the safety reserve prevents unbounded follow-up calls.') + '</p>';

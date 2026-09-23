@@ -42,6 +42,8 @@ test('compact activity uses individually expandable checks, real statuses and a 
   assert.match(html, /Is the workload running\?/);
   assert.match(html, /Pod running/);
   assert.match(html, /agent-step unavailable/);
+  assert.match(html, /<summary id="disclosure-activity-Q001">.*sr-only.*completed.*<\/summary>/);
+  assert.match(html, /<summary id="disclosure-activity-Q002">.*detail-count.*unavailable.*<\/summary>/);
   assert.match(html, /Source unavailable/);
   assert.equal((html.match(/data-icon="check"/g) || []).length,1);
   assert.ok(html.indexOf('activity-footer') > html.indexOf('</ol>'));
@@ -51,8 +53,22 @@ test('compact activity uses individually expandable checks, real statuses and a 
 test('running and empty activity do not invent completed checks', () => {
   const running = helpers.investigationProgress({status:'running',checks:[{id:'Q001',status:'running',question:'Checking workload'}]},true);
   assert.match(running, /spinner/);
+  assert.match(running, /<summary id="disclosure-activity-Q001">.*sr-only.*running.*<\/summary>/);
   assert.doesNotMatch(running, /data-icon="check"|Reassess episode/);
   const empty = helpers.investigationProgress({status:'not_started'},true);
   assert.match(empty, /No checks recorded yet/);
   assert.match(empty, /Usage pending/);
+});
+
+test('uncertainty and detailed model prose name retained sources and escape hostile markup', () => {
+  const run = {status:'ready',context:{evidence:[{id:'E123',domain:'metric_anomaly',title:'Latency'}]},
+    assessment:{likely_mechanism:'Unconfirmed',uncertainty:'E123 does not prove <script>cause</script>',
+      hypotheses:[{explanation:'Slow dependency',status:'unresolved',reason:'E123 could also mean <img src=x> pressure'}]},
+    findings:[{title:'Observation',summary:'E123 indicates a slowdown',next_check:'Compare E123'}]};
+  const html = helpers.briefingPanel({investigation:run});
+  assert.match(html, /Still unconfirmed:<\/strong> <button/);
+  assert.match(html, /&lt;script&gt;cause&lt;\/script&gt;/);
+  const detailed = helpers.briefingPanel({investigation:run},true);
+  assert.equal((detailed.match(/data-investigation-ref="E123"/g) || []).length,3);
+  assert.doesNotMatch(detailed, /<img/);
 });

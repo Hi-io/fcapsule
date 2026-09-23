@@ -77,9 +77,11 @@ const widths = [1920, 1366, 1024, 720, 390, 320];
             const id = await citation.getAttribute('data-investigation-ref');
             await citation.click();
             assert.ok(await page.locator('[id="disclosure-agent-' + id + '"]').isVisible(), 'Citation must open a retained source');
+            assert.equal(await page.evaluate(()=>document.activeElement.id),'disclosure-agent-' + id);
             await page.locator('[data-return-source]').click();
             assert.equal(await page.getByRole('tab',{name:'Overview',exact:true}).getAttribute('aria-selected'),'true');
             assert.equal(await basisDetails.evaluate(el=>el.open),true, 'Source navigation must preserve rationale expansion');
+            assert.equal(await page.evaluate(()=>document.activeElement.dataset.investigationRef),id);
           }
           const evidenceButton = page.locator('[data-add-evidence]');
           if (await evidenceButton.count()) {
