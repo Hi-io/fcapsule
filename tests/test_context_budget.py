@@ -181,6 +181,47 @@ class ContextBudgetTests(unittest.TestCase):
         self.assertEqual(observation["top_signal"]["delivery"], "buffered")
         self.assertEqual(observation["top_signal"]["buffered_bytes"], "141432000")
 
+    def test_structured_log_fields_and_relation_tokens_survive_prompt_compaction(self):
+        fields = {"error_code": "ECONNREFUSED", "status_code": 503, "request_id": "request-4821",
+                  "authorization": "Bearer do-not-send"}
+        context = {"episode_id": "structured-logs", "evidence": [], "alerts": []}
+        checks = [{
+            "id": "Q-log", "tool": "search_logs", "status": "completed", "required_observation": True,
+            "result": {"matching_patterns": 1, "patterns": [{"count": 2, "fields": fields, "examples": [
+                {"timestamp": "2026-09-20T00:00:00Z", "level": "ERROR", "message": "dependency failed",
+                 "diagnostic_fields": fields},
+            ]}]},
+        }]
+
+        compact, _ = compact_for_model(context, checks, max_prompt_tokens=1200)
+
+        observation = compact["prior_checks"][0]["observation"]
+        token = observation["top_signal"]["request_id"]
+        self.assertRegex(token, r"^<REF:[A-Z2-7]{10}>$")
+        self.assertEqual(observation["fields"]["request_id"], token)
+        self.assertEqual(observation["top_signal"]["error_code"], "ECONNREFUSED")
+        self.assertEqual(observation["top_signal"]["status_code"], "503")
+        self.assertNotIn("request-4821", json.dumps(compact))
+        self.assertNotIn("do-not-send", json.dumps(compact))
+
+    def test_capsule_log_diagnostic_fields_survive_compaction(self):
+        context = {
+            "episode_id": "capsule-log-fields", "alerts": [],
+            "evidence": [{
+                "id": "E-log", "domain": "log_template", "title": "Dependency rejected request",
+                "summary": "A bounded log pattern contains a structured failure.",
+                "diagnostic_fields": {"error_code": "ECONNREFUSED", "request_id": "request-88"},
+                "examples": ["request failed"],
+            }],
+        }
+
+        compact, _ = compact_for_model(context, [], max_prompt_tokens=900)
+
+        fields = compact["evidence"][0]["diagnostic_fields"]
+        self.assertEqual(fields["error_code"], "ECONNREFUSED")
+        self.assertTrue(fields["request_id"].startswith("<REF:"))
+        self.assertNotIn("request-88", json.dumps(compact))
+
     def test_revision_priority_keeps_new_operator_evidence_visible(self):
         context = {
             "episode_id": "episode-3",

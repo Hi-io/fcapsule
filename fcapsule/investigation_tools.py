@@ -55,15 +55,20 @@ def metric_summary(series: list[dict[str, Any]], focus: datetime | None = None) 
 def log_patterns(logs: list[dict[str, Any]], terms: list[str] | None = None) -> dict[str, Any]:
     groups: dict[str, dict[str, Any]] = {}
     for row in logs:
-        message = str(row.get("message", ""))
+        raw_message = row.get("message", "")
+        message = json.dumps(raw_message, ensure_ascii=True, sort_keys=True, separators=(",", ":")) \
+            if isinstance(raw_message, dict) else str(raw_message)
+        fields = diagnostic_fields(message, row.get("diagnostic_fields")
+                                   if isinstance(row.get("diagnostic_fields"), dict) else None)
         if terms and not any(term.lower() in message.lower() for term in terms):
             continue
-        pattern = template_for_message(message)
+        pattern = template_for_message(message, fields)
         group = groups.setdefault(pattern, {"pattern": pattern[:1000], "count": 0,
-            "fields": diagnostic_fields(message), "examples": [], "first_seen": row.get("@timestamp")})
+            "fields": fields, "examples": [], "first_seen": row.get("@timestamp")})
         group["count"] += 1
         group["last_seen"] = row.get("@timestamp")
-        example = {"timestamp": row.get("@timestamp"), "level": row.get("level"), "message": anonymize_text(message)[:1000]}
+        example = {"timestamp": row.get("@timestamp"), "level": row.get("level"),
+                   "message": anonymize_text(message)[:1000], "diagnostic_fields": fields}
         if len(group["examples"]) < 2:
             group["examples"].append(example)
         else:

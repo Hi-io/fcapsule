@@ -26,7 +26,7 @@ def reduce_logs(bundle: CaseBundle) -> list[dict[str, Any]]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
     for event in bundle.logs:
-        grouped[template_for_message(str(event[message_field]))].append(event)
+        grouped[template_for_message(str(event[message_field]), event.get("diagnostic_fields"))].append(event)
 
     total = max(1, len(bundle.logs))
     templates: list[dict[str, Any]] = []
@@ -52,7 +52,7 @@ def reduce_logs(bundle: CaseBundle) -> list[dict[str, Any]]:
             {
                 "template_id": f"log_template_{index:03d}",
                 "template": template,
-                "diagnostic_fields": diagnostic_fields(str(events[0][message_field])),
+                "diagnostic_fields": diagnostic_fields(str(events[0][message_field]), events[0].get("diagnostic_fields")),
                 "count": count,
                 "volume_percentage": round(count / total * 100, 3),
                 "levels": dict(levels),
@@ -64,7 +64,7 @@ def reduce_logs(bundle: CaseBundle) -> list[dict[str, Any]]:
                 "rarity_score": round(rarity, 4),
                 "linked_entities": sorted(
                     {
-                        str(event[key])
+                        anonymize_text(str(event[key]))
                         for event in events
                         for key in ("service", "namespace", "cluster", "pod", "cncc_uuid")
                         if event.get(key)

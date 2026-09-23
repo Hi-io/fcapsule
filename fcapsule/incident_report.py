@@ -252,6 +252,7 @@ def _log_patterns(selected: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "summary": item.get("summary"),
             "first_seen": item.get("time_range", {}).get("start"),
             "last_seen": item.get("time_range", {}).get("end"),
+            "diagnostic_fields": item.get("diagnostic_fields", {}),
             "examples": item.get("representative_lines", []),
         }
         for item in selected

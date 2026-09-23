@@ -278,6 +278,48 @@ class LiveSourceTests(unittest.TestCase):
         self.assertEqual(logs[0]["level"], "ERROR")
         self.assertEqual(logs[0]["service"], "payments")
 
+    def test_opensearch_adapter_preserves_bounded_structured_diagnostics(self):
+        adapter = OpenSearchAdapter("http://opensearch")
+        adapter.transport = FakeTransport(
+            {
+                "/_search": {
+                    "hits": {
+                        "hits": [
+                            {
+                                "_source": {
+                                    "@timestamp": "2026-09-20T00:00:00Z",
+                                    "message": "dependency request failed",
+                                    "level": "error",
+                                    "error": {"code": "ECONNREFUSED", "message": "password=do-not-keep"},
+                                    "http": {"response": {"status_code": 503}},
+                                    "request": {"id": "request-4821"},
+                                    "authorization": "Bearer do-not-keep-this",
+                                    "unrelated_payload": "do-not-retain-arbitrary-body",
+                                    "kubernetes": {
+                                        "namespace": "shop",
+                                        "pod": {"name": "api-1"},
+                                        "container": {"name": "api"},
+                                    },
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+        )
+        end = datetime(2026, 9, 20, tzinfo=timezone.utc)
+
+        logs = adapter.collect_logs("shop", "api-1", end - timedelta(minutes=5), end)
+
+        self.assertEqual(logs[0]["message"], "dependency request failed")
+        fields = logs[0]["diagnostic_fields"]
+        self.assertEqual(fields["error_code"], "ECONNREFUSED")
+        self.assertEqual(fields["status_code"], "503")
+        self.assertRegex(fields["request_id"], r"^<REF:[A-Z2-7]{10}>$")
+        self.assertNotIn("request-4821", repr(logs))
+        self.assertNotIn("do-not-keep", repr(logs))
+        self.assertNotIn("do-not-retain-arbitrary-body", repr(logs))
+
     def test_opensearch_adapter_reserves_capacity_for_post_alert_logs(self):
         adapter = OpenSearchAdapter("http://opensearch")
         adapter.transport = FocusedLogTransport()
