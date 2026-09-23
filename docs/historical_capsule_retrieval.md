@@ -81,6 +81,26 @@ definitions, scrape errors, privacy, and invalid current citations.
 Recurrence and citation validation still do not mechanically verify
 natural-language causal claims. Tests passing do not establish model accuracy.
 
+Policy `episode-investigation-1.22` carries the full retained image extraction into
+context construction, then allocates a bounded prompt ledger across complete facts
+without keyword or diagnosis ranking. Short facts keep their extraction confidence;
+overlong or excess facts are omitted with an explicit count, never presented as
+complete truncated facts. The two highest-priority images retain separate ledgers
+and observation/upload times; additional omitted images are counted and not citable.
+This does not re-extract pixels or independently verify an image's contents.
+
+Alert identities and start/end times survive compaction. At most twelve temporal
+anchors are selected across the episode; tight budgets reduce these to the earliest
+and latest selected starts with an explicit omitted-alert count. Unknown times stay
+unknown. Log examples retain structured timestamps and the selected pattern's
+first/last-seen times even when the message has no timestamp. Draft and review
+instructions reject an earlier-cause inference based only on later observations,
+but this remains a model reasoning constraint, not a semantic proof checker.
+At small budgets the existing fallback may remove optional tools to fit these
+anchors; exceptionally large minimum ledgers can still exceed the request cap.
+`tests/test_evidence_temporal_anchors.py` covers empty logs, complete and omitted
+visual facts, two images, large episodes, privacy and full 2,100-token requests.
+
 ## Live Probe
 
 After the tested HTTPS revision is ready, repeat a known alert for the same
