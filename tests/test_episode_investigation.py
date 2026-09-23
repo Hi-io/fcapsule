@@ -76,6 +76,28 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(state["assessment"]["provenance"], "deterministic_abstention")
         self.assertEqual(state["usage"]["total_tokens"], 130)
 
+    def test_revision_evidence_survives_full_request_budget_including_review(self):
+        self.context["evidence"] = [
+            {"id": f"E-{index}", "domain": "log_template", "revision_priority": True,
+             "summary": "Error connection timeout. " * 20}
+            for index in range(40)
+        ] + [{"id": "A-new", "domain": "image_evidence", "revision_addition": True,
+              "summary": "Observed endpoint returned HTTP 404.",
+              "limitation": "Visible state only; no cause established.",
+              "time_range": {"observed_at": "2026-09-23T02:00:00Z"}}]
+        self.context["priority_evidence_ids"] = [item["id"] for item in self.context["evidence"]]
+        state, client = self.run_case([{"action": "finish", "assessment": assessment("A-new")}],
+                                      max_prompt_tokens=2100, max_checks=1, max_total_tokens=12000)
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["review"]["status"], "completed")
+        self.assertEqual(len(client.requests), 2)
+        for call, request in zip(state["calls"], client.requests):
+            self.assertIn("A-new", call["visible_evidence_ids"])
+            self.assertLessEqual(call["estimated_prompt_tokens"], 2100)
+            evidence = json.loads(request.messages[1]["content"])["episode"]["evidence"]
+            self.assertEqual(evidence[0]["id"], "A-new")
+            self.assertIn("404", evidence[0]["summary"])
+
     def test_unavailable_query_is_not_citable(self):
         self.kit.execute.side_effect = RuntimeError("password=never-persist-this")
         state, _ = self.run_case([{"action": "finish", "assessment": assessment()}], max_checks=0)

@@ -265,7 +265,13 @@ of seven calls when a repair is needed. The default per-investigation reserve is
 default full-request input cap is 2,100 tokens. The latter includes system instructions,
 the tool catalogue, citation IDs and selected evidence; it is not merely a cap on log
 text. Log-query compaction ranks failure signatures above frequent healthy heartbeats,
-and retains the compact termination, limit and declared-dependency facts from required
+and an evidence-added revision ranks operator additions ahead of older member priorities
+(newest uploads first). This is a prompt-selection priority, not a confidence or truth
+label. Extracted limitations remain alongside the bounded observation. Priority lists
+only name retained items, and the call audit records which IDs were actually shown;
+retained evidence on disk is not proof that a model received it. Very tight caps may
+still omit lower-ranked attachments. The same ranking applies to the final review.
+Compaction also retains the compact termination, limit and declared-dependency facts from required
 observations before lower-priority retained summaries. A forced final assessment omits
 the unused tool catalogue. Assessment and review calls reserve up to 1,200 completion
 tokens so their complete structured result is not cut off by the shorter check-decision

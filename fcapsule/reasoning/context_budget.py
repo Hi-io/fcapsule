@@ -71,6 +71,7 @@ def _evidence_item(item: dict[str, Any]) -> dict[str, Any]:
         "diagnostic_example": _bounded(examples[:1], max_items=1) if examples else None,
         "configuration": _bounded(item.get("configuration"), max_items=3) if item.get("configuration") else None,
         "operator_context": _bounded(item.get("operator_context"), max_items=3) if item.get("operator_context") else None,
+        "limitation": _short(item.get("limitation"), 180),
         "revision_priority": True if item.get("revision_priority") else None,
     }
     # Empty keys cost meaningful tokens across several calls without helping a
@@ -78,11 +79,15 @@ def _evidence_item(item: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in values.items() if value not in (None, "", [], {})}
 
 
-def _evidence_priority(item: dict[str, Any], priority_ids: set[str]) -> tuple[int, int, int, int]:
+def _evidence_priority(item: dict[str, Any], priority_ids: set[str]) -> tuple[int, int, int, int, int]:
     """Retain discriminating source evidence ahead of repetitive telemetry."""
 
     text = json.dumps(item, ensure_ascii=True, default=str).casefold()
     domain = str(item.get("domain") or "")
+    if item.get("revision_addition"):
+        # The service orders additions newest first. Preserve that order instead
+        # of ranking operator observations by error keywords or modality.
+        return (0, 0, 0, 0, 0)
     failure_markers = (
         "critical", "fatal", "error", "exception", "traceback", "panic", "failed",
         "failure", "refused", "timeout", "oom", "crash", "sqlstate", "errno", "exit_code",
@@ -93,6 +98,7 @@ def _evidence_priority(item: dict[str, Any], priority_ids: set[str]) -> tuple[in
         "route", "authorization", "connection", "deadlock", "lock wait", "constraint",
     )
     return (
+        1,
         0 if str(item.get("id")) in priority_ids else 1,
         -int(any(marker in text for marker in failure_markers)),
         -int(any(marker in text for marker in diagnostic_markers)),
@@ -314,6 +320,11 @@ def compact_for_model(
     payload.update({key: value for key, value in optional_fields.items() if value not in (None, "", [], {})})
 
     def refresh_visible_ids() -> list[str]:
+        # Do not spend the remaining budget listing priorities already omitted.
+        if "priority_evidence_ids" in payload:
+            payload["priority_evidence_ids"] = [
+                item["id"] for item in payload["evidence"] if item.get("revision_priority") and item.get("id")
+            ]
         ids = [str(item["id"]) for item in payload["evidence"] if item.get("id")]
         ids.extend(str(item["id"]) for item in payload["prior_checks"]
                    if item.get("id") and item.get("status") == "completed")

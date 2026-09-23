@@ -371,6 +371,11 @@ class InvestigationService:
             input_fingerprint = self.fingerprint(entries, evidence_manifest, primary_incident_id)
             context = episode_context(episode, entries, primary_incident_id)
             media_evidence = self.plane.evidence.model_evidence(episode_id)
+            if queued.get("revision_reason") == "evidence_added":
+                # Revisions must see the operator's addition before older member
+                # priorities. This is a selection preference, not a truth label.
+                media_evidence = [dict(item, revision_addition=True) for item in media_evidence]
+                media_evidence.sort(key=lambda item: str((item.get("time_range") or {}).get("uploaded_at") or ""), reverse=True)
             context["evidence"].extend(media_evidence)
             if queued.get("revision_reason") == "evidence_added":
                 context["priority_evidence_ids"] = list(dict.fromkeys([

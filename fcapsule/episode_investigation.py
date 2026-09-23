@@ -243,7 +243,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
     if max_prompt_tokens < 1200 or max_prompt_tokens > 12000:
         raise ValueError("max_prompt_tokens must be between 1200 and 12000")
     state = {"version": "1", "episode_id": context["episode_id"], "status": "running", "started_at": now(),
-              "policy_version": "episode-investigation-1.14", "max_completion_tokens_per_call": max_tokens,
+              "policy_version": "episode-investigation-1.15", "max_completion_tokens_per_call": max_tokens,
              "model": model, "context": context, "checks": [], "calls": [], "assessment": None,
              "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
              "token_budget": {"maximum_total_tokens": max_total_tokens, "maximum_prompt_tokens": max_prompt_tokens,

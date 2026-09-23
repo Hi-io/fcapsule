@@ -145,6 +145,26 @@ class ContextBudgetTests(unittest.TestCase):
             [item["id"] for item in compact["evidence"]].index("E-heartbeat-0"),
         )
 
+    def test_revision_evidence_precedes_competing_member_priorities(self):
+        for domain in ("image_evidence", "audio_evidence"):
+            with self.subTest(domain=domain):
+                sources = [{"id": f"E-{index}", "domain": "log_template", "revision_priority": True,
+                            "summary": "Error: connection timeout. " * 10} for index in range(40)]
+                addition = {"id": "A-new", "domain": domain, "revision_addition": True,
+                            "summary": "Observed endpoint returned HTTP 404.",
+                            "limitation": "Observation alone does not establish a cause.",
+                            "time_range": {"observed_at": "2026-09-23T02:00:00Z"}}
+                compact, visible = compact_for_model(
+                    {"episode_id": "episode", "evidence": sources + [addition]}, [],
+                    max_prompt_tokens=700,
+                    priority_evidence_ids=[item["id"] for item in sources] + ["A-new"],
+                )
+                self.assertEqual(compact["evidence"][0]["id"], "A-new")
+                self.assertIn("A-new", visible)
+                self.assertIn("does not establish", compact["evidence"][0]["limitation"])
+                self.assertLessEqual(estimate_tokens(compact), 700)
+                self.assertEqual(set(compact["priority_evidence_ids"]), set(visible))
+
     def test_extreme_budget_reaches_a_stable_minimum_context(self):
         context = {
             "episode_id": "episode-minimum",

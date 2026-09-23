@@ -4,6 +4,9 @@
 
 ### Changed
 
+- Kept operator-added evidence ahead of older member priorities during a requested
+  reassessment, including the bounded final review. Compaction retains media caveats
+  and no longer lists priorities already removed from the prompt.
 - Centered report reading areas and aligned the explanation with the next check on
   wide screens. Capture context remains expandable; mobile retains the same reading order.
 - Aligned recurring-pattern details, improved shared-episode links and settings

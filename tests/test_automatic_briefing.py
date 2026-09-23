@@ -58,6 +58,22 @@ class AutomaticInvestigationTests(unittest.TestCase):
         self.assertIsNotNone(result["report"])
         self.assertEqual(result["investigation"]["status"], "not_configured")
 
+    def test_evidence_revision_marks_newest_media_ahead_of_member_priorities(self):
+        self.control._build_capsule(self.id)
+        media = [{"id": "A-old", "time_range": {"uploaded_at": "2026-09-22T10:00:00Z"}},
+                 {"id": "A-new", "time_range": {"uploaded_at": "2026-09-23T10:00:00Z"}}]
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}), patch.object(
+            self.control.evidence, "model_evidence", return_value=media
+        ), patch("fcapsule.investigation_service.run_investigation") as generate:
+            self.control.investigator.start(self.episode_id, retry=True, reason="evidence_added")
+            self.control.briefing_executor.shutdown(wait=True)
+        generate.assert_called_once()
+        context = generate.call_args.args[0]
+        revisions = [item for item in context["evidence"] if item.get("revision_addition")]
+        self.assertEqual([item["id"] for item in revisions], ["A-new", "A-old"])
+        self.assertIn("A-new", context["priority_evidence_ids"])
+        self.assertNotIn("revision_addition", media[0])
+
     def test_failure_is_persisted_and_not_retried_by_resume(self):
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}), patch(
             "fcapsule.investigation_service.run_investigation", side_effect=RuntimeError("provider down")
