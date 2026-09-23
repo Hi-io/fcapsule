@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from typing import Any
 
 from fcapsule.processing.anonymizer import anonymize_text
@@ -330,12 +331,79 @@ def _safe_configuration_values(values: dict[str, Any]) -> dict[str, str]:
     return retained
 
 
+def _discovery_observation(result: dict[str, Any]) -> dict[str, Any]:
+    """Keep selectors beside their captured target labels, without diagnosing them."""
+
+    pods = set((result.get("scope") or {}).get("pods") or [])
+    targets = [item for key in ("active_targets", "dropped_targets") for item in result.get(key, [])
+               if isinstance(item, dict)]
+    sensitive = ("password", "secret", "token", "credential", "private", "certificate", "apikey", "api_key", "authorization")
+
+    def labels(value):
+        return {str(key): _short(anonymize_text(str(item)), 120) for key, item in value.items()
+                if not any(word in str(key).casefold() for word in sensitive)}
+
+    selections = []
+    represented_pools = set()
+    for selection in result.get("monitor_selection", []):
+        monitor = selection.get("monitor") or {}
+        kind = monitor.get("kind")
+        if kind not in {"ServiceMonitor", "PodMonitor"}:
+            continue
+        selector = labels(monitor.get("match_labels") or {})
+        prefix = "__meta_kubernetes_" + ("service" if kind == "ServiceMonitor" else "pod") + "_label_"
+        pool = f"{kind[0].lower() + kind[1:]}/{monitor.get('namespace')}/{monitor.get('name')}/"
+        represented_pools.add(pool)
+        matched = []
+        for target in targets:
+            if not str(target.get("scrape_pool") or "").startswith(pool):
+                continue
+            discovered = target.get("labels") or {}
+            observed = {key: discovered[prefix + re.sub(r"[^a-zA-Z0-9_]", "_", key)] for key in selector
+                        if prefix + re.sub(r"[^a-zA-Z0-9_]", "_", key) in discovered}
+            matched.append({**{key: _short(anonymize_text(str(target[key])), 120) for key in
+                              ("pod", "service", "state", "health", "last_error") if target.get(key)},
+                            "selector_labels": labels(observed)})
+        matched.sort(key=lambda item: (item.get("pod") not in pods, not bool(item.get("last_error")),
+                                       not bool(item["selector_labels"])))
+        selections.append({
+            "kind": kind, "name": _short(anonymize_text(str(monitor.get("name") or "")), 120),
+            "match_labels": dict(list(selector.items())[:8]),
+            **{key: _bounded(selection[key], max_items=3) for key in ("matched_services", "matched_pods") if key in selection},
+            "targets": matched[:2], "target_count": len(matched),
+        })
+        if kind == "PodMonitor":
+            pod_labels = [item for item in result.get("current_pod_labels", []) if isinstance(item, dict)]
+            pod_labels.sort(key=lambda item: item.get("pod") not in pods)
+            selections[-1]["current_pod_labels"] = [
+                {"pod": _short(anonymize_text(str(item.get("pod") or "")), 120),
+                 "labels": labels({key: value for key, value in (item.get("labels") or {}).items() if key in selector})}
+                for item in pod_labels[:2]]
+    selections.sort(key=lambda item: (
+        not any(target.get("pod") in pods for target in item["targets"] + item.get("current_pod_labels", [])),
+        not any(target.get("selector_labels") for target in item["targets"]),
+    ))
+    other_targets = [target for target in targets if not any(
+        str(target.get("scrape_pool") or "").startswith(pool) for pool in represented_pools)]
+    other_targets.sort(key=lambda item: (item.get("pod") not in pods, not bool(item.get("last_error"))))
+    return {
+        "monitor_selection": selections[:3], "monitor_count": len(selections),
+        "other_targets": [{key: _short(anonymize_text(str(target[key])), 120) for key in
+                           ("pod", "service", "state", "health", "last_error") if target.get(key)}
+                          for target in other_targets[:2]],
+        "target_count": len(targets),
+        "limitation": "Current bounded discovery, not incident-time state. Missing labels/targets may be omitted or filtered; absence is not proof of a cause.",
+    }
+
+
 def _check_item(check: dict[str, Any], latest: bool) -> dict[str, Any]:
     raw_result = check.get("result") if isinstance(check.get("result"), dict) else {}
     if check.get("tool") == "search_logs":
         result = _log_observation(raw_result)
     elif check.get("tool") == "workload_state":
         result = _workload_observation(raw_result)
+    elif check.get("tool") == "scrape_discovery" and check.get("status") == "completed":
+        result = _discovery_observation(raw_result)
     else:
         result = _bounded(raw_result, max_items=8 if latest else 4)
     return {
@@ -353,6 +421,13 @@ def _minimal_check_observation(check: dict[str, Any]) -> Any:
     observation = check.get("observation")
     if isinstance(observation, str) and len(observation) <= 180:
         return observation
+    if check.get("tool") == "scrape_discovery" and isinstance(observation, dict) and "monitor_selection" in observation:
+        if observation.get("compacted_discovery"):
+            return observation
+        selections = [{**item, "targets": item.get("targets", [])[:1]}
+                      for item in observation["monitor_selection"][:1]]
+        return {**observation, "compacted_discovery": True, "monitor_selection": selections,
+                "other_targets": observation.get("other_targets", [])[:1]}
     if check.get("tool") == "historical_episode" and isinstance(observation, dict):
         if observation.get("compacted_history"):
             return observation
@@ -367,6 +442,13 @@ def _minimal_check_observation(check: dict[str, Any]) -> Any:
                 facts.append(fact)
         return {"compacted_history": True, "observations": facts,
                 "limitation": "Partial retained history; missing facts cannot establish the same cause."}
+    if isinstance(observation, dict):
+        if observation.get("compacted_observation"):
+            return observation
+        facts = {key: value for key, value in observation.items()
+                 if key not in {"source", "scope", "limitation", "metric_semantics"}}
+        return {"compacted_observation": True, **_bounded(facts, max_items=2, max_depth=3),
+                "limitation": _short(observation.get("limitation") or "Partial observation; omitted fields are unknown.", 120)}
     return _short(json.dumps(observation, ensure_ascii=True), 180)
 
 
@@ -506,9 +588,11 @@ def compact_for_model(
         elif payload.get("alerts") and len(payload["alerts"]) > 1:
             payload["alerts"].pop()
         elif len(payload["prior_checks"]) > 1:
-            # A very low provider cap still needs room for an assessment. Keep
-            # the freshest bounded observation rather than failing the request.
-            payload["prior_checks"].pop(0)
+            # Prior episodes are comparisons, not replacements for observations
+            # of the current episode. Their later query time is not freshness.
+            removable = next((index for index, item in enumerate(payload["prior_checks"])
+                              if item.get("tool") == "historical_episode"), 0)
+            payload["prior_checks"].pop(removable)
             visible_ids = refresh_visible_ids()
         elif payload.get("historical_candidates"):
             payload.pop("historical_candidates", None)

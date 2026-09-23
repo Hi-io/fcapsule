@@ -123,11 +123,17 @@ def validate_assessment(
         result["connections"].append({key: item[key] for key in ("from", "to", "relationship", "reason")}
                                     | {"evidence_ids": citations(item), "provenance": "model"})
     comparison = value.get("historical_comparison")
-    if historical_episode_ids:
+    if historical_episode_ids and (comparison is None or (isinstance(comparison, dict) and (
+            not isinstance(comparison.get("episode_id"), str) or comparison["episode_id"] not in historical_episode_ids))):
+        # A failed optional comparison cannot invalidate separately validated
+        # current claims. Never replace an unknown ID with an invented match.
+        result["historical_comparison_review"] = {
+            "status": "omitted", "provenance": "grounding_guard",
+            "reason": "not_supplied" if comparison is None else "unavailable_episode",
+        }
+    elif historical_episode_ids:
         if not isinstance(comparison, dict):
             raise ValueError("A historical candidate was available; include a cited historical comparison")
-        if comparison.get("episode_id") not in historical_episode_ids:
-            raise ValueError("Historical comparison references an unavailable episode")
         if comparison.get("status") not in {"similar_mechanism", "changed_or_different", "insufficient_evidence"}:
             raise ValueError("Invalid historical comparison state")
         if not isinstance(comparison.get("summary"), str) or not 1 <= len(comparison["summary"]) <= 500:
@@ -327,7 +333,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
     if max_prompt_tokens < 1200 or max_prompt_tokens > 12000:
         raise ValueError("max_prompt_tokens must be between 1200 and 12000")
     state = {"version": "1", "episode_id": context["episode_id"], "status": "running", "started_at": now(),
-              "policy_version": "episode-investigation-1.20", "max_completion_tokens_per_call": max_tokens,
+              "policy_version": "episode-investigation-1.21", "max_completion_tokens_per_call": max_tokens,
              "model": model, "context": context, "checks": [], "calls": [], "assessment": None,
              "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
              "token_budget": {"maximum_total_tokens": max_total_tokens, "maximum_prompt_tokens": max_prompt_tokens,
@@ -410,6 +416,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
         call = {"started_at": now(), "status": "running", "reasoning_effort": effort, "phase": phase,
                 "estimated_prompt_tokens": estimated_prompt, "maximum_completion_tokens": response_limit}
         call["visible_evidence_ids"] = list(payload.get("available_evidence_ids") or [])
+        call["model_context"] = payload["episode"]
         state["calls"].append(call)
         reservation = estimated_prompt + response_limit
         budget["estimated_prompt_tokens"] += estimated_prompt
