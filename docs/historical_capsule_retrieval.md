@@ -58,11 +58,27 @@ All model responses in these tests are fake; no provider or cluster is contacted
 
 Prompt budgets still omit observations. The retained-review projection removes
 duplicate historical metadata before compaction; this is not exhaustive retrieval.
-Policy `episode-investigation-1.20` compaction retains a small structured historical observation
-before dropping the check entirely when a very tight budget requires it. A
+Policy `episode-investigation-1.21` compaction retains structured check facts instead
+of a truncated JSON prefix of source metadata. Discovery facts pair the recorded
+monitor selectors with captured target labels and states; ServiceMonitor and
+PodMonitor labels remain distinct. It ranks captured targets by scope and available
+diagnostic fields, not by whether labels agree or by an expected diagnosis. This
+projection never queries sources or expands the adapter's label allowlist.
+
+When required checks cannot all fit, prior-episode comparisons yield before current
+observations. Omitted checks lose their visible citation IDs, and an extremely small
+budget can still omit any check. Each investigation call saves `model_context`
+beside `visible_evidence_ids` so the actual bounded evidence can be audited. A
 comparison must cite a visible historical check for the selected candidate;
 otherwise it is downgraded to insufficient evidence without discarding the current
-assessment. Recurrence and citation validation still do not mechanically verify
+assessment. An absent comparison or an unknown candidate is instead omitted with a
+`historical_comparison_review` grounding-guard trace; no substitute episode is
+invented. All other assessment citations must still validate. These guards do not
+request a model repair call. `tests/test_evidence_budget_guard.py` covers the full
+2,100-token request and review paths, matching and differing labels, absent monitor
+definitions, scrape errors, privacy, and invalid current citations.
+
+Recurrence and citation validation still do not mechanically verify
 natural-language causal claims. Tests passing do not establish model accuracy.
 
 ## Live Probe

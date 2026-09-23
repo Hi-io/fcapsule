@@ -97,7 +97,7 @@ class InvestigationEngineTests(unittest.TestCase):
         value["basis"] = "Repeated decoder failure supports an application error. password=never-retain-basis"
         state, client = self.run_case([{"action": "finish", "assessment": value}], max_checks=0)
         self.assertEqual(state["status"], "ready")
-        self.assertEqual(state["policy_version"], "episode-investigation-1.20")
+        self.assertEqual(state["policy_version"], "episode-investigation-1.21")
         self.assertEqual(len(client.requests), 2)
         self.assertEqual(state["assessment"]["evidence_ids"], ["Q001"])
         self.assertNotIn("never-retain-basis", json.dumps(state))
@@ -436,7 +436,7 @@ class InvestigationEngineTests(unittest.TestCase):
 
     def test_relationship_repair_cannot_hide_unknown_citations_or_invalid_history(self):
         self.context["historical_candidates"] = [{"episode_id": "prior"}]
-        for invalid in ("assessment", "hypothesis", "connection", "historical", "episode"):
+        for invalid in ("assessment", "hypothesis", "connection", "historical"):
             with self.subTest(invalid=invalid):
                 draft = assessment()
                 draft["connections"] = [{"from": "one", "to": "prior", "relationship": "possibly_related",
@@ -445,10 +445,7 @@ class InvestigationEngineTests(unittest.TestCase):
                                                    "summary": "Cause unknown.", "evidence_ids": ["Q002"]}
                 field = {"assessment": draft, "hypothesis": draft["hypotheses"][0],
                          "connection": draft["connections"][0], "historical": draft["historical_comparison"]}
-                if invalid == "episode":
-                    draft["historical_comparison"]["episode_id"] = "invented"
-                else:
-                    field[invalid]["evidence_ids"] = ["invented"]
+                field[invalid]["evidence_ids"] = ["invented"]
                 state, client = self.run_case([{"action": "finish", "assessment": draft}], max_checks=0)
                 self.assertEqual(state["status"], "inconclusive")
                 self.assertEqual(len(client.requests), 1)

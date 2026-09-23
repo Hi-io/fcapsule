@@ -97,8 +97,9 @@ class OperationsEvolutionTests(unittest.TestCase):
             assessment("Q001", comparison), {"Q001", "Q002"}, {"incident-current"}, {"episode-prior"}
         )
         self.assertEqual(result["historical_comparison"]["status"], "changed_or_different")
-        with self.assertRaises(ValueError):
-            validate_assessment(assessment(), {"Q001"}, {"incident-current"}, {"episode-prior"})
+        result = validate_assessment(assessment(), {"Q001"}, {"incident-current"}, {"episode-prior"})
+        self.assertNotIn("historical_comparison", result)
+        self.assertEqual(result["historical_comparison_review"]["reason"], "not_supplied")
 
     def test_historical_tool_is_limited_to_recurrence_candidates(self):
         tools = InvestigationTools(
