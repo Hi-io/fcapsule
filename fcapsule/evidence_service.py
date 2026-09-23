@@ -346,7 +346,8 @@ class EvidenceService:
                     "summary": _safe_text(summary, 1800),
                     "time_range": {"observed_at": attachment.get("observed_at"), "uploaded_at": attachment.get("created_at")},
                     "examples": examples,
-                    **({"visual_observations": observations} if attachment["kind"] == "image" else {}),
+                    **({"visual_observations": observations, "visible_text": text[:8]}
+                       if attachment["kind"] == "image" else {}),
                     "attachment_id": attachment["attachment_id"],
                     "operator_context": {
                         key: value for key, value in {

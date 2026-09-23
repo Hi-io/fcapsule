@@ -65,6 +65,26 @@ class TemporalAnchorTests(unittest.TestCase):
         self.assertEqual(len(capped["facts"]), 16)
         self.assertEqual(capped["omitted_facts"], 4)
 
+    def test_ocr_visible_text_and_its_provenance_survive_minimum_prompt_compaction(self):
+        source = context(FACTS)
+        source["evidence"][0]["visible_text"] = [
+            "Prometheus target z-orders-metrics is DOWN",
+            "Last scrape error: context deadline exceeded",
+            "password=do-not-send",
+        ]
+
+        for budget in (900, 650):
+            with self.subTest(budget=budget):
+                bounded, _ = compact_for_model(source, [], max_prompt_tokens=budget)
+                observation = bounded["evidence"][0]["visual_observation"]
+                visible = [row["text"] for row in observation["visible_text"]]
+                self.assertIn("Prometheus target z-orders-metrics is DOWN", visible)
+                self.assertIn("context deadline exceeded", " ".join(visible))
+                self.assertTrue(all(row["source"] == "Vision-model text extraction" for row in observation["visible_text"]))
+                self.assertIn("OCR-style text", observation["provenance"]["visible_text"])
+                self.assertNotIn("do-not-send", json.dumps(observation))
+                self.assertLessEqual(estimate_tokens(bounded), budget)
+
     def test_log_time_is_structured_even_when_message_has_no_timestamp(self):
         for message in ("Request rejected", '{"level":"ERROR","message":"Request rejected"}'):
             check = _check_item({"id": "Q1", "tool": "search_logs", "status": "completed", "result": {

@@ -102,6 +102,7 @@ def score_evidence(
                 "time_range": {"start": template["first_seen"], "end": template["last_seen"]},
                 "diagnostic_fields": template.get("diagnostic_fields", {}),
                 "representative_lines": template["representative_lines"],
+                "representative_events": template.get("representative_events", []),
             }
         )
 

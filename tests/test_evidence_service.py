@@ -396,6 +396,7 @@ class EvidenceServiceTests(unittest.TestCase):
         evidence = self.plane.evidence.model_evidence(self.episode_id)
         self.assertEqual(evidence[0]["domain"], "image_evidence")
         self.assertTrue(evidence[0]["id"].startswith("A-attachment-"))
+        self.assertEqual(evidence[0]["visible_text"], ["Target down"])
         public = self.plane.evidence.list(self.episode_id)[0]
         self.assertNotIn("storage_path", public)
         self.assertIn("artifact_url", public)

@@ -46,19 +46,38 @@ def reduce_logs(bundle: CaseBundle) -> list[dict[str, Any]]:
         for event in sample[:REPRESENTATIVE_LINES_PER_TEMPLATE]:
             line = f"{event[time_field]} {anonymize_text(str(event[message_field]))}"
             representatives.append(line)
+        representative_events = [
+            {
+                "timestamp": event[time_field],
+                "level": str(event.get(level_field, "UNKNOWN")).upper(),
+                "message": anonymize_text(str(event[message_field]))[:1000],
+                "diagnostic_fields": diagnostic_fields(
+                    str(event[message_field]), event.get("diagnostic_fields")
+                ),
+            }
+            for event in sample[:REPRESENTATIVE_LINES_PER_TEMPLATE]
+        ]
+        per_event_fields = [item["diagnostic_fields"] for item in representative_events]
+        common_fields = dict(per_event_fields[0]) if per_event_fields else {}
+        for key, value in list(common_fields.items()):
+            if any(fields.get(key) != value for fields in per_event_fields[1:]):
+                common_fields.pop(key)
         count = len(events)
         rarity = 1.0 if count <= 2 else max(0.0, 1.0 - count / total)
         templates.append(
             {
                 "template_id": f"log_template_{index:03d}",
                 "template": template,
-                "diagnostic_fields": diagnostic_fields(str(events[0][message_field]), events[0].get("diagnostic_fields")),
+                # Group-level fields contain only facts stable across the group.
+                # Per-event values stay paired with their own timestamps below.
+                "diagnostic_fields": common_fields,
                 "count": count,
                 "volume_percentage": round(count / total * 100, 3),
                 "levels": dict(levels),
                 "first_seen": isoformat_utc(times[0]),
                 "last_seen": isoformat_utc(times[-1]),
                 "representative_lines": representatives,
+                "representative_events": representative_events,
                 "temporal_proximity": _proximity(times, bundle.alert_time),
                 "severity_score": max_severity,
                 "rarity_score": round(rarity, 4),

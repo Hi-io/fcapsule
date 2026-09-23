@@ -6,6 +6,24 @@ from fcapsule.reasoning.context_budget import _log_observation, _workload_observ
 
 
 class ContextBudgetTests(unittest.TestCase):
+    def test_log_diagnostics_stay_paired_with_representative_events_in_model_context(self):
+        context = {"episode_id": "diag-pair", "live_capture": True, "evidence": [{
+            "id": "E-log", "domain": "log_template", "title": "reservation failed",
+            "examples": [
+                {"timestamp": "2026-09-20T12:00:00Z", "level": "ERROR", "message": "Reservation refused",
+                 "diagnostic_fields": {"buffered_bytes": "4096", "request_id": "<REF:AAAAAAAAAA>"}},
+                {"timestamp": "2026-09-20T12:04:00Z", "level": "ERROR", "message": "Reservation refused",
+                 "diagnostic_fields": {"buffered_bytes": "8192", "request_id": "<REF:BBBBBBBBBB>"}},
+            ],
+        }]}
+
+        compact, visible = compact_for_model(context, [], max_prompt_tokens=500)
+
+        pairs = compact["evidence"][0]["diagnostic_examples"]
+        self.assertEqual([item["diagnostic_fields"]["buffered_bytes"] for item in pairs], ["4096", "8192"])
+        self.assertEqual([item["timestamp"] for item in pairs], ["2026-09-20T12:00:00Z", "2026-09-20T12:04:00Z"])
+        self.assertEqual(visible, ["E-log"])
+
     def test_primary_scope_and_candidate_count_are_protected_under_pressure(self):
         context = {
             "episode_id": "scope-budget",

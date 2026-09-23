@@ -36,24 +36,60 @@ def _observed_at() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def metric_summary(series: list[dict[str, Any]], focus: datetime | None = None) -> list[dict[str, Any]]:
+def metric_summary(
+    series: list[dict[str, Any]], focus: datetime | None = None, *, captured_at: str | None = None,
+) -> list[dict[str, Any]]:
     result = []
     for item in series[:24]:
-        points = [point for point in item.get("values", []) if math.isfinite(float(point[1]))]
+        points = []
+        for point in item.get("values", []):
+            try:
+                timestamp, value = str(point[0]), float(point[1])
+                if math.isfinite(value):
+                    points.append((stamp(timestamp), timestamp, value))
+            except (IndexError, TypeError, ValueError):
+                continue
+        points.sort(key=lambda point: point[0])
+        metric = {"metric": item.get("metric", "unknown"), "labels": item.get("labels", {}),
+                  "samples": len(points),
+                  "freshness": {"status": "sampled" if points else "no_data",
+                                "latest_sample_at": points[-1][1] if points else None,
+                                "age_seconds": None,
+                                "assessment": "Sample age is reported; no scrape-interval threshold is assumed."}}
+        if captured_at:
+            try:
+                metric["freshness"]["age_seconds"] = max(0, int((stamp(captured_at) - points[-1][0]).total_seconds())) if points else None
+                metric["freshness"]["captured_at"] = captured_at
+            except ValueError:
+                pass
         if not points:
+            result.append(metric)
             continue
-        values = [float(point[1]) for point in points]
-        result.append({"metric": item["metric"], "labels": item.get("labels", {}),
-                       "min": min(values), "max": max(values), "median": statistics.median(values),
-                       "samples": len(points), "start": points[0][0], "end": points[-1][0],
+        values = [point[2] for point in points]
+        metric.update({"min": min(values), "max": max(values), "median": statistics.median(values),
+                       "start": points[0][1], "end": points[-1][1],
                        "first": values[0], "last": values[-1],
-                       "trend": points[::max(1, len(points) // 24)][:25]})
+                       "trend": [[point[1], point[2]] for point in points[::max(1, len(points) // 24)][:25]]})
         if focus:
-            recent = [point for point in points if stamp(str(point[0])) >= focus]
-            recent_values = [float(point[1]) for point in recent]
-            result[-1]["at_or_after_latest_alert"] = ({"samples": len(recent), "start": recent[0][0], "end": recent[-1][0],
+            before = [point for point in points if point[0] < focus]
+            after = [point for point in points if point[0] > focus]
+            nearest = min(points, key=lambda point: abs((point[0] - focus).total_seconds()))
+            peak = max(points, key=lambda point: point[2])
+
+            def phase(point):
+                return {"timestamp": point[1], "value": point[2]}
+
+            metric["before_alert"] = phase(before[-1]) if before else None
+            metric["nearest_alert"] = {**phase(nearest),
+                                       "offset_seconds": round((nearest[0] - focus).total_seconds(), 1)}
+            metric["after_alert"] = phase(after[0]) if after else None
+            metric["sampled_peak"] = phase(peak)
+            recent = [point for point in points if point[0] >= focus]
+            recent_values = [point[2] for point in recent]
+            metric["at_or_after_latest_alert"] = ({"samples": len(recent), "start": recent[0][1], "end": recent[-1][1],
                 "min": min(recent_values), "max": max(recent_values), "median": statistics.median(recent_values),
                 "first": recent_values[0], "last": recent_values[-1]} if recent else {"samples": 0})
+        result.append(metric)
     return result
 
 
@@ -189,7 +225,8 @@ def episode_context(
             alert_context["alert_identity"] = alert_identity
         alerts.append(alert_context)
         for item in report.get("supporting_evidence", []):
-            identity = [item.get("type"), item.get("title"), item.get("summary"), item.get("time_range"), item.get("linked_entities"), item.get("configuration")]
+            identity = [item.get("type"), item.get("title"), item.get("summary"), item.get("time_range"),
+                        item.get("linked_entities"), item.get("configuration"), item.get("representative_events")]
             metric_observation = compact_metric_observation(item.get("metric_observation"))
             if metric_observation:
                 # Same prose can describe different sampled values or rules.
@@ -205,7 +242,9 @@ def episode_context(
             if ref not in evidence:
                 evidence[ref] = {"id": ref, "domain": item.get("type"), "title": item.get("title"),
                     "summary": item.get("summary"), "time_range": item.get("time_range"),
-                    "examples": item.get("representative_lines", []), "configuration": item.get("configuration"),
+                    "examples": item.get("representative_events") or item.get("representative_lines", []),
+                    "diagnostic_fields": item.get("diagnostic_fields", {}),
+                    "configuration": item.get("configuration"),
                     "alert": next((alert for alert in report.get("fault_alerts", []) if alert.get("evidence_id") == item["evidence_id"]), None),
                     "provenance": []}
                 if metric_observation:
@@ -245,10 +284,12 @@ def _discovery_labels(report: dict[str, Any]) -> dict[str, str]:
     for alert in report.get("fault_alerts", []):
         rule = alert.get("rule") if isinstance(alert.get("rule"), dict) else {}
         labels = rule.get("labels") if isinstance(rule.get("labels"), dict) else {}
+        if not labels and isinstance(alert.get("labels"), dict):
+            labels = alert["labels"]
         retained = {
-            key: str(labels[key])
+            key: str(labels[key]).strip()[:253]
             for key in ("target_service", "kubernetes_service", "target_workload")
-            if labels.get(key)
+            if isinstance(labels.get(key), str) and labels[key].strip()
         }
         if retained:
             return retained
@@ -346,6 +387,21 @@ class InvestigationTools:
             str(alert.get("name") or alert.get("alertname") or "")
             for entry in entries for alert in entry["report"].get("fault_alerts", [])
         } - {""}
+        self.discovery_targets: dict[str, str] = {}
+        latest_first = sorted(entries, key=lambda entry: str(
+            entry.get("incident", {}).get("started_at") or
+            (entry.get("report", {}).get("incident") or {}).get("started_at") or ""), reverse=True)
+        for entry in latest_first:
+            labels = _discovery_labels(entry.get("report", {}))
+            target_service = labels.get("target_service") or labels.get("kubernetes_service")
+            target_workload = labels.get("target_workload")
+            self.discovery_targets = {
+                    key: value.strip()[:253] for key, value in (
+                    ("target_service", target_service), ("target_workload", target_workload)
+                ) if isinstance(value, str) and value.strip()
+            }
+            if self.discovery_targets:
+                break
 
     def _adapters(self):
         config = self.sources.configuration()
@@ -415,7 +471,11 @@ class InvestigationTools:
             targets = prometheus.scrape_targets(self.namespace, set(self.pods))
             monitors = kubernetes.monitoring_resources({self.namespace})
             services = kubernetes.list_services(self.namespace)
-            current_pods = [item for item in kubernetes.list_pods({self.namespace}) if item.get("workload") == self.workload or item["name"] in self.pods]
+            target_workload = self.discovery_targets.get("target_workload")
+            current_pods = [item for item in kubernetes.list_pods({self.namespace})
+                            if item.get("workload") in {self.workload, target_workload} or item["name"] in self.pods]
+            current_pods.sort(key=lambda item: (item.get("workload") != target_workload if target_workload else False,
+                                                item["name"] not in self.pods, str(item.get("name") or "")))
             selections = []
             for monitor in monitors:
                 monitor_namespace = str(monitor.get("namespace") or "default")
@@ -428,16 +488,36 @@ class InvestigationTools:
                     candidates = []
                     for service in services:
                         service_namespace = str(service.get("namespace") or self.namespace)
-                        if service_namespace not in effective_namespaces:
+                        namespace_selected = service_namespace in effective_namespaces
+                        is_alert_service = service.get("name") == self.discovery_targets.get("target_service")
+                        if not namespace_selected and not is_alert_service:
                             continue
                         labels = service.get("labels", {}) if isinstance(service.get("labels"), dict) else {}
                         evaluation = _selector_observation(labels, monitor, namespace_status)
+                        service_selector = service.get("selector", {}) if isinstance(service.get("selector"), dict) else {}
+                        workload_pods = [pod for pod in current_pods
+                                         if (target_workload and pod.get("workload") == target_workload)
+                                         or pod.get("name") in self.pods]
+                        selector_matches = ([pod for pod in workload_pods if service_selector and all(
+                            (pod.get("labels") or {}).get(key) == value for key, value in service_selector.items())]
+                            if service_selector and workload_pods else [])
+                        workload_selector_match = bool(selector_matches) if service_selector and workload_pods else None
+                        target_relevance = ("alert_target_service" if is_alert_service else
+                            "alert_target_workload" if target_workload and workload_selector_match is True else None)
                         candidates.append({"name": service.get("name"), "namespace": service_namespace,
-                                           "labels": labels, "selector_evaluation": evaluation})
-                    candidates.sort(key=lambda item: (0 if item["selector_evaluation"]["status"] == "matched" else 1,
+                                           "labels": labels, "selector_evaluation": evaluation,
+                                           "namespace_selected": namespace_selected,
+                                           "service_selector": service_selector,
+                                           "workload_selector_match": workload_selector_match,
+                                           "target_relevance": target_relevance})
+                    candidates.sort(key=lambda item: (item["name"] != self.discovery_targets.get("target_service"),
+                                                        item["target_relevance"] not in {"alert_target_service", "alert_target_workload"},
+                                                        item["workload_selector_match"] is not True,
+                                                        not item["namespace_selected"],
+                                                        0 if item["selector_evaluation"]["status"] == "matched" else 1,
                                                         sum(1 for row in item["selector_evaluation"].get("requirements", []) if row.get("matches") is False),
                                                         str(item.get("name") or "")))
-                    matched = [item["name"] for item in candidates if item["selector_evaluation"]["status"] == "matched"]
+                    matched = [item["name"] for item in candidates if item["namespace_selected"] and item["selector_evaluation"]["status"] == "matched"]
                     selections.append({"monitor": monitor, "target_kind": "Service labels",
                                        "namespace_scope": {"status": namespace_status, "effective_namespaces": effective_namespaces[:12]},
                                        "matched_services": matched[:12], "matched_pods": [],
@@ -451,8 +531,11 @@ class InvestigationTools:
                         labels = pod.get("labels", {}) if isinstance(pod.get("labels"), dict) else {}
                         evaluation = _selector_observation(labels, monitor, namespace_status)
                         candidates.append({"name": pod.get("name"), "namespace": pod_namespace,
-                                           "labels": labels, "selector_evaluation": evaluation})
-                    candidates.sort(key=lambda item: (0 if item["selector_evaluation"]["status"] == "matched" else 1,
+                                           "labels": labels, "selector_evaluation": evaluation,
+                                           "target_relevance": "alert_target_workload" if target_workload and pod.get("workload") == target_workload else None})
+                    candidates.sort(key=lambda item: (item["name"] not in self.pods,
+                                                        item["target_relevance"] != "alert_target_workload",
+                                                        0 if item["selector_evaluation"]["status"] == "matched" else 1,
                                                         sum(1 for row in item["selector_evaluation"].get("requirements", []) if row.get("matches") is False),
                                                         str(item.get("name") or "")))
                     matched = [item["name"] for item in candidates if item["selector_evaluation"]["status"] == "matched"]
@@ -464,6 +547,7 @@ class InvestigationTools:
             return scrub({
                 "source": "Prometheus target discovery + Kubernetes monitoring resources",
                 "scope": {"namespace": self.namespace, "pods": self.pods, "workload": self.workload},
+                "discovery_targets": self.discovery_targets,
                 "observed_at": observed_at,
                 "provenance": [
                     {"source": "Prometheus target API", "observed_at": observed_at},
@@ -473,7 +557,8 @@ class InvestigationTools:
                 "dropped_targets": targets["dropped"],
                 "monitor_selection": selections,
                 "current_pod_labels": [{"pod": item["name"], "namespace": item.get("namespace", self.namespace), "labels": item.get("labels", {})} for item in current_pods[:12]],
-                "current_service_labels": [{"service": item.get("name"), "namespace": item.get("namespace", self.namespace), "labels": item.get("labels", {})} for item in services[:12]],
+                "current_service_labels": [{"service": item.get("name"), "namespace": item.get("namespace", self.namespace), "labels": item.get("labels", {})} for item in sorted(
+                    services, key=lambda item: (item.get("name") != self.discovery_targets.get("target_service"), str(item.get("name") or "")))[:12]],
                 "limitation": "ServiceMonitor selectors apply to Service labels; PodMonitor selectors apply to Pod labels. Supported label expressions are evaluated only for current, bounded candidates in the captured namespace. An unknown selector, Prometheus resource selector, relabeling rule, scrape configuration, or RBAC restriction can prevent a conclusion. A matched selector does not prove the target was retained or scraped.",
             })
         if name == "workload_state":
@@ -536,8 +621,11 @@ class InvestigationTools:
         if not pod and name != "database_pressure":
             raise ValueError("No captured pod identity is available")
         if name == "resource_history":
-            return scrub({"source": "Prometheus", "pod": pod, "latest_alert_at": self.focus_time.isoformat(), "observations": metric_summary(
-                prometheus.collect_pod_metrics(self.namespace, pod, self.window_start, self.window_end), self.focus_time),
+            series = prometheus.collect_pod_metrics(self.namespace, pod, self.window_start, self.window_end)
+            captured_at = _observed_at()
+            observations = metric_summary(series, self.focus_time, captured_at=captured_at)
+            return scrub({"source": "Prometheus", "pod": pod, "latest_alert_at": self.focus_time.isoformat(),
+                "captured_at": captured_at, "observations": observations,
                 "metric_semantics": {
                     "pod_oom_terminated": "Kubernetes last-termination reason OOMKilled (1=yes); a state flag, not an event count. Correlate its onset with the restart counter. A concurrent flag/restart is positive OOM evidence even if the peak was not sampled.",
                     "pod_memory_working_set_bytes": "Sampled working set is not peak total cgroup-accounted memory. Low samples cannot exclude an OOM or establish a false OOM alert.",

@@ -101,6 +101,26 @@ class ProcessingTests(unittest.TestCase):
         self.assertIn(anonymize_text(identifier), linked)
         self.assertNotIn(identifier, repr(templates))
 
+    def test_representative_log_events_keep_each_structured_diagnostic_pair(self):
+        identifier_one, identifier_two = "request-9001", "request-9002"
+        events = [
+            {"@timestamp": "2026-09-20T12:00:00Z", "message": "buffer reservation failed", "level": "ERROR",
+             "diagnostic_fields": {"buffered_bytes": 4096, "request_id": identifier_one}},
+            {"@timestamp": "2026-09-20T12:04:00Z", "message": "buffer reservation failed", "level": "ERROR",
+             "diagnostic_fields": {"buffered_bytes": 8192, "request_id": identifier_two}},
+        ]
+        bundle = replace(self.bundle, logs=events, alerts=[{"startsAt": "2026-09-20T12:04:00Z"}])
+
+        template = reduce_logs(bundle)[0]
+
+        self.assertEqual(len(template["representative_events"]), 2)
+        first, second = template["representative_events"]
+        self.assertEqual(first["diagnostic_fields"]["buffered_bytes"], "4096")
+        self.assertEqual(second["diagnostic_fields"]["buffered_bytes"], "8192")
+        self.assertNotEqual(first["diagnostic_fields"]["request_id"], second["diagnostic_fields"]["request_id"])
+        self.assertNotIn(identifier_one, repr(template))
+        self.assertNotIn(identifier_two, repr(template))
+
     def test_log_reducer_groups_repeated_failures(self):
         templates = reduce_logs(self.bundle)
         failure = next(item for item in templates if "Payment dependency" in item["template"])

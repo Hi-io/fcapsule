@@ -6,7 +6,7 @@ from unittest.mock import Mock
 from fcapsule.episode_investigation import SYSTEM, RELATIONSHIP_REVIEW_SYSTEM, EVIDENCE_REVIEW_SYSTEM, assessment_payload, run_investigation, validate_assessment
 from fcapsule.investigation_tools import InvestigationTools, episode_context, log_patterns, metric_summary, scrub, stamp
 from fcapsule.processing.anonymizer import anonymize_text, template_for_message
-from fcapsule.reasoning.context_budget import estimate_tokens
+from fcapsule.reasoning.context_budget import _check_item, _minimal_check_observation, compact_for_model, estimate_tokens
 
 
 def assessment(ref="Q001"):
@@ -859,6 +859,51 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertEqual(selection["evaluated_services"][0]["selector_evaluation"]["status"], "unknown")
         self.assertEqual(selection["namespace_scope"]["status"], "unknown")
 
+    def test_alert_target_service_and_workload_survive_large_service_discovery_compaction(self):
+        self.entries[0]["report"]["fault_alerts"] = [{"name": "TargetMissing", "rule": {"labels": {
+            "target_service": "z-orders-metrics", "target_workload": "orders-api"}}}]
+        self.kit = InvestigationTools(self.entries, {"cluster": "test", "namespace": "ns", "name": "worker"}, self.sources)
+        self.prom.scrape_targets.return_value = {"active": [], "dropped": []}
+        self.kube.monitoring_resources.return_value = [{
+            "kind": "ServiceMonitor", "name": "all-metrics", "namespace": "monitoring",
+            "effective_namespaces": ["ns"], "namespace_selector": {"status": "resolved"},
+            "match_labels": {"monitoring": "enabled"}, "match_expressions": [],
+        }]
+        unrelated = [{"name": f"a-noise-{index:02}", "namespace": "ns", "labels": {"monitoring": "enabled"}, "selector": {}}
+                     for index in range(15)]
+        target = {"name": "z-orders-metrics", "namespace": "ns", "labels": {"monitoring": "enabeld"},
+                  "selector": {"app": "orders"}}
+        self.kube.list_services.return_value = unrelated + [target]
+        self.kube.list_pods.return_value = [{"name": "orders-api-1", "namespace": "ns", "workload": "orders-api",
+                                             "labels": {"app": "orders"}}]
+
+        raw = self.kit.execute("scrape_discovery", {})
+        service = raw["monitor_selection"][0]["evaluated_services"][0]
+        self.assertEqual(service["name"], "z-orders-metrics")
+        self.assertEqual(service["selector_evaluation"]["status"], "not_matched")
+        self.assertTrue(service["workload_selector_match"])
+        self.assertEqual(raw["current_service_labels"][0]["service"], "z-orders-metrics")
+
+        check = {"id": "Q-target", "tool": "scrape_discovery", "status": "completed",
+                 "required_observation": True, "result": raw}
+        compact = _check_item(check, True)
+        minimum = _minimal_check_observation(compact)
+        resource = minimum["monitor_selection"][0]["evaluated_resources"][0]
+        self.assertEqual(resource["name"], "z-orders-metrics")
+        self.assertEqual(resource["selector_status"], "not_matched")
+        self.assertEqual(resource["service_selector"], {"app": "orders"})
+        self.assertTrue(resource["workload_selector_match"])
+        self.assertEqual(minimum["discovery_targets"], {"target_service": "z-orders-metrics", "target_workload": "orders-api"})
+
+        bounded, visible = compact_for_model({"episode_id": "discovery-minimum", "live_capture": True, "evidence": []},
+                                              [check], max_prompt_tokens=600)
+        self.assertLessEqual(estimate_tokens(bounded), 600)
+        self.assertIn("Q-target", visible)
+        self.assertTrue(bounded["prior_checks"][0]["observation"].get("minimal_discovery"))
+        minimized_service = bounded["prior_checks"][0]["observation"]["monitor_selection"][0]["evaluated_resources"][0]
+        self.assertEqual(minimized_service["name"], "z-orders-metrics")
+        self.assertEqual(minimized_service["service_selector"], {"app": "orders"})
+
     def test_alert_rule_logic_keeps_detection_separate_from_root_cause(self):
         self.entries[0]["report"]["fault_alerts"] = [{
             "name": "WorkerMissingMetrics", "rule": {"query": "absent_over_time(up{job=\"worker\"}[5m])"},
@@ -1122,6 +1167,26 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertEqual(context["alerts"][0]["labels"], {"target_service": "app-metrics", "target_workload": "orders-api"})
         self.assertEqual(context["alerts"][0]["alert_identity"], "MetricsMissing")
 
+    def test_representative_diagnostics_survive_report_episode_and_prompt_path(self):
+        events = [
+            {"timestamp": "2026-09-20T12:00:00Z", "level": "ERROR", "message": "Reservation rejected",
+             "diagnostic_fields": {"buffered_bytes": "4096"}},
+            {"timestamp": "2026-09-20T12:04:00Z", "level": "ERROR", "message": "Reservation rejected",
+             "diagnostic_fields": {"buffered_bytes": "8192"}},
+        ]
+        self.entries[0]["report"]["supporting_evidence"] = [{
+            "evidence_id": "ev_buffer", "type": "log_template", "title": "Reservation rejected",
+            "summary": "Repeated bounded diagnostic pattern", "representative_events": events,
+            "representative_lines": ["old unstructured rendering"], "diagnostic_fields": {},
+        }]
+
+        context = episode_context({"episode_id": "episode"}, self.entries)
+        compact, _ = compact_for_model(context, [], max_prompt_tokens=500)
+
+        pairs = compact["evidence"][0]["diagnostic_examples"]
+        self.assertEqual([item["diagnostic_fields"]["buffered_bytes"] for item in pairs], ["4096", "8192"])
+        self.assertEqual([item["timestamp"] for item in pairs], ["2026-09-20T12:00:00Z", "2026-09-20T12:04:00Z"])
+
     def test_diagnostic_codes_survive_reduction_and_secrets_do_not(self):
         self.assertNotEqual(template_for_message('exit_code=137 job=19'), template_for_message('exit_code=1 job=20'))
         self.assertEqual(template_for_message('exit_code=1 job=19'), template_for_message('exit_code=1 job=20'))
@@ -1129,7 +1194,9 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertNotIn("a value", masked)
         self.assertNotIn("abc", masked)
         self.assertNotIn("token", scrub({"token": "abc", "reason": "known"}))
-        self.assertEqual(metric_summary([{"metric": "empty", "values": [["now", "NaN"]]}]), [])
+        empty_summary = metric_summary([{"metric": "empty", "values": [["now", "NaN"]]}])
+        self.assertEqual(empty_summary[0]["samples"], 0)
+        self.assertEqual(empty_summary[0]["freshness"]["status"], "no_data")
         groups = log_patterns([{"message": "exit_code=1"}, {"message": "exit_code=137"}])
         self.assertEqual(groups["matching_patterns"], 2)
 

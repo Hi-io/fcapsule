@@ -3,7 +3,7 @@ import json
 import unittest
 
 from fcapsule.episode_investigation import run_investigation, validate_assessment
-from fcapsule.investigation_tools import InvestigationTools
+from fcapsule.investigation_tools import InvestigationTools, metric_summary, stamp
 from fcapsule.reasoning.context_budget import _check_item, _minimal_check_observation, compact_for_model, estimate_tokens
 
 
@@ -194,6 +194,46 @@ class EvidenceBudgetGuardTests(unittest.TestCase):
         self.assertIsInstance(observation, dict)
         self.assertEqual(observation["observations"][0]["max"], 4.25)
         self.assertEqual(_minimal_check_observation({**check, "observation": observation}), observation)
+
+    def test_resource_history_keeps_alert_phase_samples_and_explicit_freshness_in_minimum_mode(self):
+        focus = stamp("2026-09-24T12:00:00Z")
+        captured = "2026-09-24T12:05:00Z"
+        raw = {"captured_at": captured, "latest_alert_at": focus.isoformat(),
+               "observations": metric_summary([{"metric": "pod_memory_working_set_bytes", "labels": {"pod": "worker-1"},
+                   "values": [["2026-09-24T11:58:00Z", 15], ["2026-09-24T12:00:00Z", 32],
+                              ["2026-09-24T12:01:00Z", 48], ["2026-09-24T12:02:00Z", 64]]}],
+                   focus, captured_at=captured), "limitation": "Sampled history only."}
+        check = {"id": "Q-memory", "tool": "resource_history", "status": "completed",
+                 "required_observation": True, "result": raw}
+
+        compact = _check_item(check, True)
+        minimum = _minimal_check_observation(compact)
+        sample = minimum["observations"][0]
+        self.assertEqual(sample["before_alert"], {"timestamp": "2026-09-24T11:58:00Z", "value": 15.0})
+        self.assertEqual(sample["nearest_alert"]["value"], 32.0)
+        self.assertEqual(sample["after_alert"], {"timestamp": "2026-09-24T12:01:00Z", "value": 48.0})
+        self.assertEqual(sample["sampled_peak"]["value"], 64.0)
+        self.assertEqual(sample["freshness"]["status"], "sampled")
+        self.assertEqual(sample["freshness"]["age_seconds"], 180)
+
+        context = {"episode_id": "metric-minimum", "live_capture": True, "evidence": []}
+        bounded, visible = compact_for_model(context, [check], max_prompt_tokens=350)
+        self.assertLessEqual(estimate_tokens(bounded), 350)
+        self.assertIn("Q-memory", visible)
+        self.assertTrue(bounded["prior_checks"][0]["observation"].get("minimal_resource_history"))
+        self.assertEqual(bounded["prior_checks"][0]["observation"]["observations"][0]["sampled_peak"]["value"], 64.0)
+
+    def test_resource_history_missing_series_is_unknown_not_zero(self):
+        missing = {"captured_at": "2026-09-24T12:05:00Z", "observations": [
+            {"metric": "pod_memory_working_set_bytes", "labels": {}, "samples": 0,
+             "freshness": {"status": "no_data", "latest_sample_at": None, "age_seconds": None}}
+        ]}
+        compact = _check_item({"id": "Q-empty", "tool": "resource_history", "status": "completed", "result": missing}, True)
+        minimum = _minimal_check_observation(compact)
+        self.assertEqual(minimum["data_status"], "no_data")
+        self.assertEqual(minimum["observations"][0]["samples"], 0)
+        self.assertEqual(minimum["observations"][0]["freshness"]["status"], "no_data")
+        self.assertNotIn('"value":0', json.dumps(minimum))
 
     def test_pod_labels_are_not_substituted_for_service_selector_labels(self):
         for kind in ("PodMonitor", "ServiceMonitor"):
