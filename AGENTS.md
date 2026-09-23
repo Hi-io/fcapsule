@@ -1,6 +1,6 @@
 # Development Workflow
 
-- Start changes on a focused `codex/<topic>` branch, never directly on the default
+- Start changes on a focused `feature/<topic>` branch, never directly on the default
   branch (`master` in this repository). Use separate branches for unrelated work.
 - Keep user changes intact. Do not rewrite published history or alter commit dates.
 - Install dependencies from the project manifest (`python -m pip install -e .`).

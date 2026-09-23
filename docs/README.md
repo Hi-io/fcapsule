@@ -5,6 +5,7 @@
 - [Quickstart and scope](../README.md)
 - [Operations, Targets, Patterns and Settings](operations.md)
 - [Kubernetes installation and development workflow](kubernetes_deployment.md)
+- [HTTPS and microphone access](https_access.md)
 - [Privacy, credentials, capture storage and retention](data_privacy.md)
 - [Current product requirements](../FCAPSule_AI_Project_Guide.md)
 

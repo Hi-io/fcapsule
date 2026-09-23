@@ -1,0 +1,63 @@
+# Apply with kubectl patch deployment/fcapsule -n fcapsule --type=strategic --patch-file ...
+spec:
+  template:
+    spec:
+      containers:
+        - name: https-proxy
+          image: caddy:2.11.4-alpine
+          command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+          env:
+            - name: XDG_CONFIG_HOME
+              value: /tmp/config
+            - name: XDG_DATA_HOME
+              value: /tmp/data
+          ports:
+            - name: https
+              containerPort: 8443
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: https
+              scheme: HTTPS
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: https
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 200m
+              memory: 96Mi
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["NET_BIND_SERVICE"]
+          volumeMounts:
+            - name: https-config
+              mountPath: /etc/caddy
+              readOnly: true
+            - name: https-cert
+              mountPath: /etc/fcapsule-tls
+              readOnly: true
+            - name: https-tmp
+              mountPath: /tmp
+      volumes:
+        - name: https-config
+          configMap:
+            name: fcapsule-https
+        - name: https-cert
+          secret:
+            secretName: fcapsule-tls
+            defaultMode: 288
+        - name: https-tmp
+          emptyDir:
+            sizeLimit: 16Mi
