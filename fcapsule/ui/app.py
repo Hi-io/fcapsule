@@ -19,7 +19,7 @@ HTML = """<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FCAPSule</title>
-  <link rel="icon" href="/assets/icons/scan-line.svg" type="image/svg+xml">
+  <link rel="icon" href="/assets/icons/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body>
