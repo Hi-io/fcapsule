@@ -76,6 +76,20 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(state["assessment"]["provenance"], "deterministic_abstention")
         self.assertEqual(state["usage"]["total_tokens"], 130)
 
+    def test_prompt_default_and_explicit_smaller_limits_remain_distinct(self):
+        for context_limit, explicit_limit, expected in ((None, None, 3200), (2100, None, 2100), (3200, 2100, 2100)):
+            with self.subTest(context_limit=context_limit, explicit_limit=explicit_limit):
+                self.context["investigation_limits"] = ({"max_prompt_tokens": context_limit} if context_limit else {})
+                state, client = self.run_case([{"action": "finish", "assessment": assessment()}],
+                    max_prompt_tokens=explicit_limit, max_checks=1, max_total_tokens=12000, model_max_tokens=900)
+                self.assertEqual(state["status"], "ready")
+                self.assertEqual(state["token_budget"]["maximum_prompt_tokens"], expected)
+                self.assertEqual(state["token_budget"]["maximum_total_tokens"], 12000)
+                self.assertEqual(state["token_budget"]["maximum_checks"], 1)
+                self.assertEqual(state["max_completion_tokens_per_call"], 900)
+                for request in client.requests:
+                    self.assertLessEqual(sum(estimate_tokens(message["content"]) for message in request.messages), expected)
+
     def test_basis_is_optional_bounded_and_uses_assessment_citations(self):
         original = assessment("E1")
         self.assertNotIn("basis", validate_assessment(original, {"E1"}, {"one"}))

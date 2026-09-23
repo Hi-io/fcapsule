@@ -221,7 +221,7 @@ class ControlPlane:
         model = self.store.get_setting("ai_active_model", str(default["model_id"])) or str(default["model_id"])
         max_tokens = _bounded_int(self.store.get_setting("ai_max_tokens", str(default["max_tokens"])), int(default["max_tokens"]), 256, 6000)
         maximum_total_tokens = _bounded_int(self.store.get_setting("ai_max_total_tokens", "12000"), 12000, 4000, 100000)
-        maximum_prompt_tokens = _bounded_int(self.store.get_setting("ai_max_prompt_tokens", "2100"), 2100, 1600, 12000)
+        maximum_prompt_tokens = _bounded_int(self.store.get_setting("ai_max_prompt_tokens", "3200"), 3200, 1600, 12000)
         maximum_checks = _bounded_int(self.store.get_setting("ai_max_checks", "1"), 1, 0, 4)
         credential = os.environ.get("DEEPSEEK_API_KEY")
         return {

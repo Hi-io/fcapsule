@@ -8,10 +8,13 @@ an accuracy guarantee. The scenario was selected because it exercises a realisti
 observability failure in which the application continues running while Prometheus
 cannot discover its metrics target.
 
-The validation used the configured `deepseek-v4-pro` investigator with the default
+The validation used the configured `deepseek-v4-pro` investigator with the then-default
 per-investigation limits: one model-selected check, 12,000 total tokens and 2,100
 tokens for each complete model input. The optional image and audio specialists were
 validated separately with minimal canaries; they were not used for this run.
+New installations now default to 3,200 input tokens per call, with the same 12,000
+total reserve. This recorded run remains a 2,100-token evaluation, not a result under
+the newer default.
 
 ## Controlled Scenario
 

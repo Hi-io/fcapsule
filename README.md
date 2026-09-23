@@ -122,6 +122,9 @@ python3 -m fcapsule.cli compare-llms \
 
 Model comparison is an offline evaluation workflow, not an operator dashboard. The evidence report is built deterministically. With a key configured, a background investigator preserves mutable workload state, runs one model-selected bounded check by default, then concludes and verifies a cited assessment. Operators can raise the model-selected check limit to four when an episode warrants it. Tools can query resource history, literal log matches, peer/preceding-window comparisons, namespace-scoped database metrics, explicitly declared same-namespace dependencies and unselected retained log candidates. For an exact retained recurrence candidate, it can also inspect one bounded prior episode and publish a cited comparison; any earlier model hypothesis is labeled non-evidence. Valid evidence references and uncertainty are required, but citation checks do not prove the explanation. No remediation or application replication is executed. See [AI investigation techniques](docs/ai_investigation_techniques.md) for scope, budgets and limitations.
 
+The default full-request input cap is 3,200 tokens per call within a 12,000-token
+investigation reserve. Saved smaller input caps remain unchanged.
+
 Re-score stored responses after a rubric change without making provider calls:
 
 ```bash

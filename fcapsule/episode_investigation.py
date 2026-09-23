@@ -325,7 +325,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
     limits = context.get("investigation_limits") if isinstance(context.get("investigation_limits"), dict) else {}
     max_checks = int(limits.get("max_checks", 2) if max_checks is None else max_checks)
     max_total_tokens = int(limits.get("max_total_tokens", 18000) if max_total_tokens is None else max_total_tokens)
-    max_prompt_tokens = int(limits.get("max_prompt_tokens", 2600) if max_prompt_tokens is None else max_prompt_tokens)
+    max_prompt_tokens = int(limits.get("max_prompt_tokens", 3200) if max_prompt_tokens is None else max_prompt_tokens)
     # Zero is retained as an explicit, testable "preservation-only" mode. The
     # product default still requires one discriminating check beyond it.
     if max_checks < 0 or max_checks > 4:
