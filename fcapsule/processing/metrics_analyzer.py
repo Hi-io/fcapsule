@@ -30,14 +30,17 @@ def analyze_metrics(bundle: CaseBundle) -> list[dict[str, Any]]:
             ]
         baseline_points = [point for point in analyzed_points if point[0] < bundle.alert_time]
         incident_points = [point for point in analyzed_points if point[0] >= bundle.alert_time]
+        baseline_basis = "pre_alert"
         if not baseline_points or not incident_points:
             if len(analyzed_points) == 1:
                 incident_points = analyzed_points
                 baseline_points = [(analyzed_points[0][0], 0.0)] if is_counter else analyzed_points
+                baseline_basis = "single_sample"
             else:
                 midpoint = min(max(1, len(analyzed_points) // 2), len(analyzed_points) - 1)
                 baseline_points = analyzed_points[:midpoint]
                 incident_points = analyzed_points[midpoint:]
+                baseline_basis = "split_window"
 
         baseline = [value for _, value in baseline_points]
         incident = [value for _, value in incident_points]
@@ -68,6 +71,9 @@ def analyze_metrics(bundle: CaseBundle) -> list[dict[str, Any]]:
                 "entity": entity,
                 "labels": labels,
                 "baseline_median": baseline_median,
+                "baseline_start": baseline_points[0][0].isoformat().replace("+00:00", "Z"),
+                "baseline_end": baseline_points[-1][0].isoformat().replace("+00:00", "Z"),
+                "baseline_basis": baseline_basis,
                 "incident_peak": incident_peak,
                 "peak_timestamp": peak_timestamp.isoformat().replace("+00:00", "Z"),
                 "robust_z_score": round(robust_z, 4),

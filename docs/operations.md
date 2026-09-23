@@ -26,36 +26,37 @@ consecutive failures share a root cause.
 
 The view shows:
 
-- a short **Needs attention** strip only when there is an active incident, a
-  retained recurring issue, or a material evidence-based difference from a prior
-  occurrence; every item opens its episode;
 - an episode queue ordered by latest observed activity, so a newly received
   member returns its existing episode to the top even when the source alert
   carries an earlier timestamp;
-- active episodes prioritized before resolved ones;
+- an **In queue / Archived** view selector; the unarchived queue contains active
+  and resolved episodes, sorted together by latest activity;
 - severity and lifecycle state, affected resource, latest signal time, related-signal count, and report readiness; node alerts prefer the captured node-exporter Pod's Kubernetes node over collector or IP labels;
 - a compact recurrence badge when the same application, affected resource and
   normalized alert identity occurred earlier in retained history;
-- URL-persisted namespace, resource, lifecycle, age and text/short-reference
-  filters, so an operator can narrow the queue without changing retained history;
+- URL-persisted namespace and text/short-reference filters, with resource,
+  lifecycle and age filters in an expandable panel. Applied restrictions remain
+  visible below the controls;
 - a clickable episode row that expands its investigation, with an alert selector when several reports are available;
-- stable short incident and episode references, plus a direct-link control for
-  sharing the selected report with another responder;
+- a stable episode reference and direct-link control for sharing the selected
+  episode; individual alert captures have separate references in detail views;
 - archive and restore controls that keep an episode out of the active queue without deleting its signals or evidence;
 - incident impact, a cited investigation path, uncertainty, and concrete next checks;
 - FM sequence, PM changes, representative evidence, topology, and trace-source retention context;
 
-Overview presents one episode assessment, next action, uncertainty and a compact investigation progress column. When an earlier deterministic match exists, the assessment may include a cited **Related history** comparison. It compares captured evidence; it does not establish that two events share a root cause. Competing explanations and alert relationships are expandable. Evidence includes agent observations plus each alert's captured telemetry; the alert selector appears in detail views, not the shared Overview. Timeline separates historical alerts from the later agent activity. References open the cited observation directly. Charts include the captured time range, not current workload health. Queue ages are relative with exact timestamps on hover. Export provides report/investigation JSON and the capsule archive. Compression, preservation, grounding and runtime remain in collapsed engineering diagnostics.
+Overview presents one episode assessment, next action, uncertainty and a compact investigation status. When an earlier deterministic match exists, the assessment may include a cited **Related history** comparison. It compares captured evidence; it does not establish that two events share a root cause. Additional findings, competing explanations, alert relationships and detailed checks are expandable. Evidence includes agent observations plus the selected alert capture's telemetry; the alert selector appears in detail views, not the shared Overview. Timeline separates historical alerts from later agent activity. References open the cited observation, with a return control to restore the assessment. At most two cited performance charts appear in Overview; full charts remain in Evidence. New reports record the baseline reference window, while older captures may only have a median value. Charts describe the captured interval, not current workload health, and the dashed marker is not the alert time. Queue ages are relative with exact timestamps on hover. Export names the selected capture and episode-wide investigation scope. Compression, preservation, grounding and runtime remain in collapsed engineering diagnostics.
 
 ## Patterns View
 
-Patterns is historical context, not a second incident queue. It lists only groups
-with at least two retained episodes using the same application, resource and
-normalized alert identity. A row shows the affected resource, occurrence count,
-first/most-recent observation and median observed interval, then links to the
-individual episodes. Archived episodes still count until FCAPSule retention
-permanently removes them. The interval describes retained history; it is not a
-forecast and does not imply one common failure mechanism.
+Patterns is historical context, not a second incident queue. **Recurring issues**
+lists groups with at least two retained episodes using the same application,
+resource and normalized alert identity. A row shows the affected resource,
+occurrence count, first/most-recent observation and median observed gap, then
+links to individual episodes. **Shared conditions** shows a separate, tentative
+correlation view and preserves the ability to keep an episode separate from a
+suggested group. Archived episodes still count until FCAPSule retention
+permanently removes them. A gap describes retained history; it is not a
+forecast or proof of a common failure mechanism.
 
 ## Targets View
 

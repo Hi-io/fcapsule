@@ -1,5 +1,10 @@
 # Operations Evolution Plan
 
+This is a historical design record. Its proposed triage strip was later removed
+from the operator interface after usability review; the queue now leads
+Operations, and potential shared conditions live in Patterns. See
+[Operations Guide](operations.md) for current behavior.
+
 ## Goal
 
 Make Operations answer two operational questions without turning it into a

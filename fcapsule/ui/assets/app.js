@@ -25,6 +25,10 @@ let requestSequence = 0;
 let refreshing = false;
 let animateEpisodeId = null;
 let lastConsoleSignature = '';
+let lastPatternsSignature = '';
+let sourceReturn = null;
+let patternsMode = new URLSearchParams(location.search).get('view') === 'shared' ? 'shared' : 'recurring';
+let pendingSharedAnchor = location.hash.startsWith('#shared-');
 const openDisclosures = new Set();
 const closedNamespaces = new Set();
 
@@ -32,12 +36,18 @@ function renderPreservingFocus(render) {
   const focused = document.activeElement;
   const focusId = focused?.id;
   const selection = focused instanceof HTMLInputElement && focused.type === 'text' ? [focused.selectionStart, focused.selectionEnd] : null;
+  const anchorId = selectedEpisodeId ? 'toggle-' + selectedEpisodeId : null;
+  const anchorTop = anchorId ? document.getElementById(anchorId)?.getBoundingClientRect().top : null;
   document.querySelectorAll('details[data-disclosure]').forEach(node => {
     if (node.open) openDisclosures.add(node.dataset.disclosure);
     else openDisclosures.delete(node.dataset.disclosure);
   });
   render();
   document.querySelectorAll('details[data-disclosure]').forEach(node => { node.open = openDisclosures.has(node.dataset.disclosure); });
+  if (anchorId && anchorTop != null) {
+    const nextTop = document.getElementById(anchorId)?.getBoundingClientRect().top;
+    if (nextTop != null && Math.abs(nextTop - anchorTop) > 1) window.scrollBy(0, nextTop - anchorTop);
+  }
   if (focusId) {
     const replacement = document.getElementById(focusId);
     replacement?.focus({preventScroll:true});
@@ -92,7 +102,7 @@ function sources(config) {
 }
 
 function consoleSignature(state) {
-  return JSON.stringify([state.overview.episodes, state.overview.archived_episodes, state.overview.triage, state.overview.related_groups, selectedReport, selectedEpisodeId, showArchived, queueFilters, reportTab, reportLoading, reportError, state.running]);
+  return JSON.stringify([state.overview.episodes, state.overview.archived_episodes, state.overview.related_groups, selectedReport, selectedEpisodeId, showArchived, queueFilters, reportTab, reportLoading, reportError, state.running]);
 }
 function resourceLabel(item, application) {
   const resource = item.resource || {};
@@ -108,9 +118,9 @@ function recurrenceLabel(recurrence) {
 function intervalLabel(seconds, occurrenceCount = 0) {
   if (!Number.isFinite(Number(seconds)) || Number(seconds) <= 0) return '';
   const value = Number(seconds);
-  const [amount, unit] = value >= 86400 ? [Math.round(value / 86400), 'day'] : value >= 3600 ? [Math.round(value / 3600), 'hour'] : [Math.round(value / 60), 'minute'];
+  const [amount, unit] = value >= 86400 ? [Math.round(value / 86400), 'day'] : value >= 3600 ? [Math.round(value / 3600), 'hour'] : value >= 60 ? [Math.round(value / 60), 'minute'] : [Math.round(value), 'second'];
   const gap = `${amount} ${unit}${amount === 1 ? '' : 's'}`;
-  return occurrenceCount <= 2 ? `${gap} between 2 observed episodes` : `about every ${gap}`;
+  return occurrenceCount <= 2 ? `${gap} between two episodes` : `${gap} median of ${occurrenceCount - 1} gaps`;
 }
 function filteredEpisodes(items, applications) {
   const cutoff = {day:86400000, week:604800000, month:2592000000}[queueFilters.period];
@@ -133,29 +143,34 @@ function queueFiltersPanel(items, applications) {
   const namespaces = [...new Set(items.map(item => applications.get(item.app_id)?.namespace).filter(Boolean))].sort();
   const scopes = [...new Set(items.map(item => resourceLabel(item, applications.get(item.app_id))).filter(Boolean))].sort();
   const option = (value, label, selected) => `<option value="${safe(value)}" ${value === selected ? 'selected' : ''}>${safe(label)}</option>`;
+  const advanced = ['scope', 'status', 'period'].filter(key => queueFilters[key]).length;
+  const chips = Object.entries(queueFilters).filter(([, value]) => Boolean(value)).map(([key, value]) => {
+    const label = {namespace:'Namespace',scope:'Target',status:'Status',period:'Time',query:'Search'}[key];
+    const display = key === 'period' ? {day:'Last 24 hours',week:'Last 7 days',month:'Last 30 days'}[value] : value;
+    return `<button class="filter-chip" type="button" data-remove-filter="${safe(key)}" aria-label="Remove ${safe(label)} filter: ${safe(display)}">${safe(label)}: ${safe(display)} <span aria-hidden="true">×</span></button>`;
+  });
   return `<form class="queue-filters" aria-label="Filter incident queue">
-    <label><span>Namespace</span><select data-queue-filter="namespace">${option('', 'All namespaces', queueFilters.namespace)}${namespaces.map(value => option(value, value, queueFilters.namespace)).join('')}</select></label>
-    <label><span>Target</span><select data-queue-filter="scope">${option('', 'All targets', queueFilters.scope)}${scopes.map(value => option(value, value, queueFilters.scope)).join('')}</select></label>
-    <label><span>Status</span><select data-queue-filter="status">${option('', 'Any status', queueFilters.status)}${option('active', 'Active', queueFilters.status)}${option('resolved', 'Resolved', queueFilters.status)}</select></label>
-    <label><span>Time</span><select data-queue-filter="period">${option('', 'All time', queueFilters.period)}${option('day', 'Last 24 hours', queueFilters.period)}${option('week', 'Last 7 days', queueFilters.period)}${option('month', 'Last 30 days', queueFilters.period)}</select></label>
-    <label class="queue-search"><span>Search</span><input data-queue-filter="query" value="${safe(queueFilters.query)}" placeholder="ID or text"></label>
-    <button class="secondary filter-clear" type="button" data-clear-filters ${Object.values(queueFilters).some(Boolean) ? '' : 'disabled'}>Clear</button>
+    <label><span>Namespace</span><select id="queue-namespace" data-queue-filter="namespace">${option('', 'All namespaces', queueFilters.namespace)}${namespaces.map(value => option(value, value, queueFilters.namespace)).join('')}</select></label>
+    <label class="queue-search"><span>Search</span><input id="queue-search" type="text" data-queue-filter="query" value="${safe(queueFilters.query)}" placeholder="ID or text"></label>
+    <details class="queue-more" data-disclosure="queue-advanced" ${openDisclosures.has('queue-advanced') ? 'open' : ''}><summary>Filters${advanced ? ` <span class="detail-count">${advanced}</span>` : ''}</summary>
+      <div class="queue-more-fields">
+        <label><span>Target</span><select id="queue-scope" data-queue-filter="scope">${option('', 'All targets', queueFilters.scope)}${scopes.map(value => option(value, value, queueFilters.scope)).join('')}</select></label>
+        <label><span>Status</span><select id="queue-status" data-queue-filter="status">${option('', 'Any status', queueFilters.status)}${option('active', 'Active', queueFilters.status)}${option('resolved', 'Resolved', queueFilters.status)}</select></label>
+        <label><span>Time</span><select id="queue-period" data-queue-filter="period">${option('', 'All time', queueFilters.period)}${option('day', 'Last 24 hours', queueFilters.period)}${option('week', 'Last 7 days', queueFilters.period)}${option('month', 'Last 30 days', queueFilters.period)}</select></label>
+      </div></details>
+    ${chips.length ? `<div class="active-filters" aria-label="Applied filters">${chips.join('')}<button class="filter-clear" type="button" data-clear-filters>Clear all</button></div>` : ''}
   </form>`;
 }
-function triageStrip(items) {
-  if (!items.length || showArchived) return '';
-  return `<section class="triage" aria-label="Needs attention"><div class="triage-head"><h2>Needs attention</h2><span>Focused from retained incident history</span></div><div class="triage-list">${items.map(item => `<button class="triage-item" data-triage-episode="${safe(item.episode_id)}"><span class="triage-kind ${safe(item.kind)}">${safe(item.label)}</span><span><strong>${safe(item.title)}</strong><small>${safe(item.detail)}</small></span><span class="triage-open">View</span></button>`).join('')}</div></section>`;
-}
 function relatedActivity(groups) {
-  if (!groups.length || showArchived) return '';
+  if (!groups.length) return '<div class="empty">No shared conditions in retained history.</div>';
   const basisText = basis => (basis || []).filter(item => item.kind !== 'time_window').slice(0,2).map(item => {
     const label = item.kind === 'same_node' ? 'Shared node' : item.kind === 'shared_dependency' ? 'Shared dependency' : 'Shared alert';
     return label + ': ' + item.value;
   }).join(' · ');
-  return `<section class="related-activity" aria-label="Potential shared conditions"><div class="related-activity-head"><div><h2>Potential shared conditions</h2><p>Correlation cues only. They do not establish a common cause.</p></div><span>${groups.length} cue${groups.length === 1 ? '' : 's'}</span></div><div class="related-group-list">${groups.slice(0,3).map(group => {
+  return `<section class="related-activity" aria-label="Potential shared conditions"><div class="related-activity-head"><div><h2>Potential shared conditions</h2><p>These episodes share context. A common cause has not been established.</p></div><span>${groups.length} cue${groups.length === 1 ? '' : 's'}</span></div><div class="related-group-list">${groups.map(group => {
     const count = group.episode_count || group.episodes?.length || 0;
     const state = group.active_count ? `${group.active_count} active` : 'resolved';
-    return `<details class="related-group"><summary><div class="related-group-main"><span class="related-reference">${safe(group.reference)}</span><strong>${safe(group.title)}</strong><small>${safe(basisText(group.basis))}</small></div><div class="related-group-meta"><span>${safe(quantity(count, 'episode'))}</span><span>${safe(state)}</span><span>${safe(relativeTime(group.last_observed_at || group.updated_at))}</span></div></summary><div class="related-group-body"><p class="queue-note">Episodes share the alert family and retained operating context shown above. Review each report before treating the condition as causal.</p><div class="related-group-episodes">${(group.episodes || []).map(episode => `<span><button class="related-open" data-related-open="${safe(episode.episode_id)}">${safe(episode.reference)}</button><small>${safe(episode.title)} · ${safe(relativeTime(episode.last_activity_at || episode.started_at))}</small><button class="related-separate" data-related-group="${safe(group.group_id)}" data-related-separate="${safe(episode.episode_id)}" title="Keep this episode separate">Separate</button></span>`).join('')}</div></div></details>`;
+    return `<details class="related-group" id="shared-${safe(group.group_id)}"><summary><div class="related-group-main"><span class="related-reference">${safe(group.reference)}</span><strong>${safe(group.title)}</strong><small>${safe(basisText(group.basis))}</small></div><div class="related-group-meta"><span>${safe(quantity(count, 'episode'))}</span><span>${safe(state)}</span><span>${safe(relativeTime(group.last_observed_at || group.updated_at))}</span></div></summary><div class="related-group-body"><p class="queue-note">Review each episode before treating this context as causal.</p><div class="related-group-episodes">${(group.episodes || []).map(episode => `<span><button class="related-open" data-related-open="${safe(episode.episode_id)}">${safe(episode.reference)}</button><small>${safe(episode.title)} · ${safe(relativeTime(episode.last_activity_at || episode.started_at))}</small><button class="related-separate" data-related-group="${safe(group.group_id)}" data-related-separate="${safe(episode.episode_id)}" title="Keep this episode separate">Separate</button></span>`).join('')}</div></div></details>`;
   }).join('')}</div></section>`;
 }
 function renderConsole(state) {
@@ -163,19 +178,20 @@ function renderConsole(state) {
   const data = state.overview;
   const allQueueEpisodes = [...(showArchived ? data.archived_episodes : data.episodes)];
   const apps = new Map(data.applications.map(item => [item.app_id, item]));
-  const episodes = filteredEpisodes(allQueueEpisodes, apps).sort((a,b) => b.last_activity_at.localeCompare(a.last_activity_at));
+  const episodes = filteredEpisodes(allQueueEpisodes, apps).sort((a,b) => String(b.last_activity_at || b.started_at).localeCompare(String(a.last_activity_at || a.started_at)));
   const active = data.episodes.filter(item => item.status === 'active').length;
   app.innerHTML = `
-    <div class="page-head"><div><div class="eyebrow">Incident workspace</div><h1>Operations</h1><p>${active} active · ${data.episodes.length - active} resolved</p></div><a class="button-link" href="/targets">Manage targets</a></div>
-    ${triageStrip(data.triage || [])}
-    ${relatedActivity(data.related_groups || [])}
-    <section class="queue"><div class="sheet-head"><h2>${showArchived ? 'Archived episodes' : 'Incident queue'}</h2><button class="secondary" id="queue-mode">${showArchived ? 'Back to queue' : `Archived (${data.archived_episodes.length})`}</button></div>
+    <div class="page-head"><div><div class="eyebrow">Incident workspace</div><h1>Operations</h1><p>${active} active · ${data.episodes.length - active} resolved</p></div></div>
+    <section class="queue"><div class="sheet-head"><div><h2>Incident queue</h2><span class="queue-note">${quantity(episodes.length, 'episode')} shown · newest activity first</span></div><div class="queue-view" role="group" aria-label="Queue view"><button type="button" data-queue-mode="current" aria-pressed="${!showArchived}">In queue</button><button type="button" data-queue-mode="archived" aria-pressed="${showArchived}">Archived${data.archived_episodes.length ? ` (${data.archived_episodes.length})` : ''}</button></div></div>
     ${queueFiltersPanel(allQueueEpisodes, apps)}
     ${episodeTable(episodes, data.capsules, showArchived)}</section>`;
-  document.querySelector('#queue-mode').addEventListener('click', () => {
-    selectedReport = null; selectedEpisodeId = null; requestSequence++; showArchived = !showArchived;
+  document.querySelector('.queue-filters')?.addEventListener('submit', event => event.preventDefault());
+  document.querySelectorAll('[data-queue-mode]').forEach(button => button.addEventListener('click', () => {
+    const next = button.dataset.queueMode === 'archived';
+    if (next === showArchived) return;
+    selectedReport = null; selectedEpisodeId = null; requestSequence++; showArchived = next;
     updateLocation(); renderConsole(lastState);
-  });
+  }));
   document.querySelectorAll('[data-queue-filter]').forEach(field => field.addEventListener(field.tagName === 'INPUT' ? 'input' : 'change', () => {
     queueFilters[field.dataset.queueFilter] = field.value; selectedReport = null; selectedEpisodeId = null; requestSequence++;
     updateLocation(); renderPreservingFocus(() => renderConsole(lastState));
@@ -184,9 +200,10 @@ function renderConsole(state) {
     Object.keys(queueFilters).forEach(key => { queueFilters[key] = ''; });
     selectedReport = null; selectedEpisodeId = null; requestSequence++; updateLocation(); renderConsole(lastState);
   });
-  document.querySelectorAll('[data-triage-episode]').forEach(button => button.addEventListener('click', () => {
-    const episode = data.episodes.find(item => item.episode_id === button.dataset.triageEpisode);
-    if (episode) openEpisodeReport(episode.episode_id, episode.primary_incident_id);
+  document.querySelectorAll('[data-remove-filter]').forEach(button => button.addEventListener('click', () => {
+    queueFilters[button.dataset.removeFilter] = '';
+    selectedReport = null; selectedEpisodeId = null; requestSequence++;
+    updateLocation(); renderPreservingFocus(() => renderConsole(lastState));
   }));
   document.querySelectorAll('[data-related-open]').forEach(button => button.addEventListener('click', () => {
     const episode = data.episodes.find(item => item.episode_id === button.dataset.relatedOpen);
@@ -203,6 +220,7 @@ function renderConsole(state) {
   document.querySelectorAll('[data-signal-select]').forEach(select => select.addEventListener('change', () => openEpisodeReport(selectedEpisodeId, select.value, true)));
   document.querySelectorAll('[data-report-tab]').forEach(button => button.addEventListener('click', () => {
     reportTab = button.dataset.reportTab;
+    sourceReturn = null;
     renderPreservingFocus(() => renderConsole(lastState));
     document.getElementById('tab-' + reportTab)?.focus({preventScroll:true});
   }));
@@ -215,6 +233,7 @@ function renderConsole(state) {
     document.getElementById('tab-' + reportTab)?.focus({preventScroll:true});
   });
   document.querySelectorAll('[data-evidence-link]').forEach(button => button.addEventListener('click', () => {
+    sourceReturn = {episodeId:selectedEpisodeId, tab:reportTab, scrollY:window.scrollY, index:[...document.querySelectorAll('[data-evidence-link]')].indexOf(button), kind:'evidence'};
     reportTab = 'evidence';
     const id = button.dataset.evidenceLink;
     openDisclosures.add('evidence-' + id);
@@ -233,6 +252,7 @@ function renderConsole(state) {
   document.querySelectorAll('[data-source-review]').forEach(button => button.addEventListener('click', () => askSourceReview(button.dataset.sourceReview)));
   document.querySelectorAll('[data-copy-incident-link]').forEach(button => button.addEventListener('click', () => copyIncidentLink(button)));
   document.querySelectorAll('[data-investigation-ref]').forEach(button => button.addEventListener('click', () => {
+    sourceReturn = {episodeId:selectedEpisodeId, tab:reportTab, scrollY:window.scrollY, index:[...document.querySelectorAll('[data-investigation-ref]')].indexOf(button), kind:'investigation'};
     reportTab = 'evidence';
     const id = button.dataset.investigationRef;
     openDisclosures.add('agent-evidence'); openDisclosures.add('agent-' + id);
@@ -241,6 +261,16 @@ function renderConsole(state) {
     target?.scrollIntoView({block:'center', behavior:matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'});
     target?.focus({preventScroll:true});
   }));
+  document.querySelector('[data-return-source]')?.addEventListener('click', () => {
+    const previous = sourceReturn;
+    if (!previous || previous.episodeId !== selectedEpisodeId) return;
+    sourceReturn = null;
+    reportTab = previous.tab;
+    renderConsole(lastState);
+    window.scrollTo({top:previous.scrollY, behavior:'instant'});
+    const selector = previous.kind === 'evidence' ? '[data-evidence-link]' : '[data-investigation-ref]';
+    document.querySelectorAll(selector)[previous.index]?.focus({preventScroll:true});
+  });
   document.querySelectorAll('[data-archive]').forEach(button => button.addEventListener('click', () => changeEpisodeState(button.dataset.archive, 'archive')));
   document.querySelectorAll('[data-restore]').forEach(button => button.addEventListener('click', () => changeEpisodeState(button.dataset.restore, 'restore')));
   document.querySelectorAll('[data-delete]').forEach(button => button.addEventListener('click', () => deleteEpisode(button.dataset.delete)));
@@ -379,11 +409,12 @@ async function syncTargets() {
 }
 
 function episodeTable(items, capsules, archived = false) {
-  if (!items.length) return `<div class="empty">${archived ? 'No archived episodes match these filters.' : 'No incidents match these filters.'}</div>`;
+  if (!items.length) return `<div class="empty">${archived && !lastState.overview.archived_episodes.length ? 'No archived episodes yet.' : Object.values(queueFilters).some(Boolean) ? 'No episodes match these filters.' : 'No incidents in the queue.'}</div>`;
   const apps = new Map(lastState.overview.applications.map(item => [item.app_id, item]));
   return items.map(item => {
     const isOpen = selectedEpisodeId === item.episode_id;
     const application = apps.get(item.app_id);
+    const related = (lastState.overview.related_groups || []).filter(group => (group.episodes || []).some(member => member.episode_id === item.episode_id));
     const lifecycle = archived ? `<button class="secondary" data-restore="${safe(item.episode_id)}">Restore</button><button class="danger" data-delete="${safe(item.episode_id)}">Delete episode</button>` : `<button class="secondary" data-archive="${safe(item.episode_id)}">Archive</button>`;
     return `<article class="episode ${isOpen ? 'is-open' : ''}">
       <details class="episode-expander" ${isOpen ? 'open' : ''}>
@@ -392,12 +423,13 @@ function episodeTable(items, capsules, archived = false) {
         <span class="episode-state">${status(item.severity)}${status(item.status)}</span>
         <span class="episode-identity"><strong>${safe(item.title)}</strong><small>${safe(resourceLabel(item, application))} · ${safe(application?.namespace || '')}</small>${recurrenceLabel(item.recurrence) ? `<em class="recurrence-badge">${safe(recurrenceLabel(item.recurrence))}</em>` : ''}</span>
         <span class="episode-count">${item.signal_count} alert${item.signal_count === 1 ? '' : 's'}<small>${['queued','running'].includes(item.investigation?.status) ? 'Investigating' : item.investigation?.status === 'ready' ? 'Assessment ready' : item.report_count + ' reports'}</small></span>
-        <time class="episode-time" datetime="${safe(item.started_at)}" title="${safe(formatDate(item.started_at))}">${relativeTime(item.started_at)}</time>
+        <time class="episode-time" datetime="${safe(item.last_activity_at || item.started_at)}" title="Last activity: ${safe(formatExactDate(item.last_activity_at || item.started_at))}">${relativeTime(item.last_activity_at || item.started_at)}</time>
       </span></summary>
       <div class="episode-body" id="body-${safe(item.episode_id)}">
         ${isOpen ? `
         <div class="investigation-toolbar">${episodeContext(item)}<div class="row-actions">${lifecycle}</div></div>
         ${reportLoading ? '<div class="analysis-state" role="status"><span class="spinner"></span>Opening retained evidence…</div>' : reportError ? `<p class="notice" role="alert">${safe(reportError)}</p>` : selectedReport ? reportPanel(selectedReport) : ''}
+        ${related.length ? `<div class="episode-related"><span>Potential shared context · ${safe(quantity(related.length, 'cue'))}</span><div>${related.map(group => `<a href="/patterns?view=shared#shared-${encodeURIComponent(group.group_id)}" title="Review possible shared condition, not a confirmed common cause">${safe(group.reference || group.title)}${icon('chevron-right')}</a>`).join('')}</div></div>` : ''}
         <footer class="episode-footer"><span>${safe(application?.cluster || '')} / ${safe(application?.namespace || '')} · ${item.status === 'resolved' ? 'Resolved ' + formatDate(item.ended_at) : 'Last alert ' + formatDate(item.last_activity_at)}</span><span>Grouped by workload and time</span></footer>
         ` : ''}
       </div></details></article>`;
@@ -407,19 +439,25 @@ function episodeTable(items, capsules, archived = false) {
 function episodeContext(episode) {
   const id = reportId() || episode.primary_incident_id;
   const signal = episode.signals.find(item => item.incident_id === id) || episode.signals[0] || {};
-  const identity = `<span class="incident-reference">${safe(signal.reference || episode.reference || id)}</span>`;
+  const identity = `<span class="incident-reference" title="Shareable episode reference">Episode ${safe(episode.reference || episode.episode_id)}</span>`;
   const investigation = episode.investigation || {};
   const assessmentState = investigation.status === 'ready' ? `Assessment ready ${safe(relativeTime(investigation.finished_at))}`
     : investigation.status === 'incomplete' ? `Investigation needs attention ${safe(relativeTime(investigation.finished_at))}`
       : investigation.status === 'running' || investigation.status === 'queued' ? 'Investigation in progress' : '';
   const lifecycle = assessmentState || (episode.status === 'active' ? 'Currently active' : 'Currently resolved');
-  if (reportTab === 'overview') return `<span class="queue-note">${identity} · ${episode.signal_count} captured alert${episode.signal_count === 1 ? '' : 's'} · ${lifecycle}</span><button class="icon-button" data-copy-incident-link title="Copy direct incident link" aria-label="Copy direct incident link">${icon('copy')}</button>`;
-  if (episode.signals.length === 1) return '<span class="queue-note">Investigation</span>';
-  return `<div class="signal-selector"><label for="signal-report">Alert report</label><select id="signal-report" data-signal-select>${episode.signals.map((signal, index) => `<option value="${safe(signal.incident_id)}" ${id === signal.incident_id ? 'selected' : ''}>${index + 1}. ${safe(signal.summary || signal.scenario)} · ${shortTime(signal.started_at)}</option>`).join('')}</select></div>`;
+  const episodeLine = `<div class="episode-context-line">${identity}<button class="icon-button" data-copy-incident-link title="Copy direct episode link" aria-label="Copy direct episode link">${icon('copy')}</button><span class="queue-note">${episode.signal_count} captured alert${episode.signal_count === 1 ? '' : 's'} · ${lifecycle}</span></div>`;
+  if (reportTab === 'overview') return episodeLine;
+  const capture = episode.signals.length === 1
+    ? `<span class="queue-note">Selected alert capture · ${safe(signal.reference || id)} · ${safe(formatDate(signal.started_at))}</span>`
+    : `<div class="signal-selector"><label for="signal-report">Alert capture</label><select id="signal-report" data-signal-select>${episode.signals.map((item, index) => `<option value="${safe(item.incident_id)}" ${id === item.incident_id ? 'selected' : ''}>${index + 1}. ${safe(item.summary || item.scenario)} · ${shortTime(item.started_at)}</option>`).join('')}</select></div>`;
+  return episodeLine + capture;
 }
 
 function formatDate(value) {
   return value ? new Date(value).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : '--';
+}
+function formatExactDate(value) {
+  return value ? new Date(value).toLocaleString([], {year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', timeZoneName:'short'}) : '--';
 }
 
 function relativeTime(value) {
@@ -452,7 +490,7 @@ async function openEpisodeReport(episodeId, incidentId, keepOpen = false) {
     return;
   }
   selectedEpisodeId = episodeId; selectedReport = null; reportLoading = true; reportError = '';
-  if (!keepOpen) { reportTab = 'overview'; openDisclosures.clear(); animateEpisodeId = episodeId; }
+  if (!keepOpen) { reportTab = 'overview'; sourceReturn = null; openDisclosures.clear(); animateEpisodeId = episodeId; }
   renderConsole(lastState);
   try {
     const response = await fetch('/api/incidents/' + encodeURIComponent(incidentId) + '/report');
@@ -509,10 +547,6 @@ function mediaEvidencePanel(payload) {
   const episodeId = selectedEpisodeId || payload.investigation?.episode_id;
   const items = payload.media_evidence || [];
   const ready = items.some(item => item.status === 'ready');
-  const available = mediaEvidenceAvailability();
-  const addControl = available.image || available.audio
-    ? `<button class="secondary" data-add-evidence="${safe(episodeId || '')}">Add evidence</button>`
-    : '<a class="secondary button-link" href="/settings#evidence-models">Set up evidence models</a>';
   const visible = new Set((payload.investigation?.calls || []).flatMap(call => call.visible_evidence_ids || []));
   const rows = items.map(item => {
     const reference = 'A-' + item.attachment_id;
@@ -521,10 +555,8 @@ function mediaEvidencePanel(payload) {
   }).join('');
   const revision = payload.investigation_revisions || [];
   const history = revision.length > 1 ? disclosure('assessment-history', 'Assessment history', revision.map(item=>`<div class="revision-row"><span>${safe(item.reason.replaceAll('_',' '))}</span><strong>${safe(item.summary?.summary || item.status.replaceAll('_',' '))}</strong><small>${safe(formatDate(item.completed_at || item.created_at))}</small></div>`).join(''), revision.length) : '';
-  const empty = available.image || available.audio
-    ? 'No operator-supplied image or audio evidence.'
-    : 'Optional image and audio evidence is not enabled.';
-  return `<section class="media-evidence"><div class="section-heading"><h3>Additional evidence</h3><div class="row-actions">${addControl}${ready ? `<button data-update-evidence-investigation="${safe(episodeId || '')}">Update investigation</button>` : ''}</div></div>${rows || '<p class="queue-note">' + empty + '</p>'}${history}</section>`;
+  if (!items.length && !history) return '';
+  return disclosure('operator-evidence', 'Operator evidence', `<section class="media-evidence">${ready ? `<div class="row-actions"><button data-update-evidence-investigation="${safe(episodeId || '')}">Update investigation</button></div>` : ''}${rows}${history}</section>`, items.length);
 }
 
 function sourceReviewPanel(payload) {
@@ -711,9 +743,9 @@ async function copyIncidentLink(button) {
     await navigator.clipboard.writeText(link);
     button.classList.add('copied');
     button.title = 'Link copied';
-    setTimeout(() => { button.classList.remove('copied'); button.title = 'Copy direct incident link'; }, 1600);
+    setTimeout(() => { button.classList.remove('copied'); button.title = 'Copy direct episode link'; }, 1600);
   } catch (_) {
-    window.prompt('Copy this incident link:', link);
+    window.prompt('Copy this episode link:', link);
   }
 }
 
@@ -728,9 +760,10 @@ function sparkline(signal) {
   const point = (value, index) => `${(index / (values.length - 1) * (width - pad * 2) + pad).toFixed(1)},${(height - pad - ((Number(value) - floor) / range * (height - pad * 2))).toFixed(1)}`;
   const path = values.map((item, index) => `${index ? 'L' : 'M'}${point(item.value, index)}`).join(' ');
   const baselineY = (height - pad - ((Number(signal.baseline_value || 0) - floor) / range * (height - pad * 2))).toFixed(1);
-  const peakIndex = numbers.indexOf(signal.metric === 'pod_ready' ? Math.min(...numbers) : Math.max(...numbers));
-  const peakX = (peakIndex / (values.length - 1) * (width - pad * 2) + pad).toFixed(1);
-  return `<svg class="spark" viewBox="0 0 ${width} ${height}" role="img" aria-label="${safe(signal.label)} across the incident window"><line class="axis" x1="0" y1="${height - pad}" x2="${width}" y2="${height - pad}"/><line class="baseline" x1="0" y1="${baselineY}" x2="${width}" y2="${baselineY}"/><line class="incident" x1="${peakX}" y1="0" x2="${peakX}" y2="${height}"/><path class="series" d="${path}"/></svg>`;
+  const matchedIndex = values.findIndex(item => item.timestamp === signal.alert_timestamp);
+  const extremeIndex = matchedIndex >= 0 ? matchedIndex : numbers.indexOf(signal.metric === 'pod_ready' ? Math.min(...numbers) : Math.max(...numbers));
+  const extremeX = (extremeIndex / (values.length - 1) * (width - pad * 2) + pad).toFixed(1);
+  return `<svg class="spark" viewBox="0 0 ${width} ${height}" role="img" aria-label="${safe(signal.label)} across the captured window. Dashed vertical line marks ${matchedIndex >= 0 ? 'the selected deviation' : 'the window extreme'}; horizontal line shows the baseline median."><line class="axis" x1="0" y1="${height - pad}" x2="${width}" y2="${height - pad}"/><line class="baseline" x1="0" y1="${baselineY}" x2="${width}" y2="${baselineY}"/><line class="incident" x1="${extremeX}" y1="0" x2="${extremeX}" y2="${height}"/><path class="series" d="${path}"/></svg>`;
 }
 
 function evidenceReferences(report, ids) {
@@ -740,10 +773,20 @@ function evidenceReferences(report, ids) {
     ['logs', report.log_patterns || [], item=>logLabel(item.pattern)],
     ['config', report.configuration_evidence || [], item=>item.name],
   ];
+  const labels = new Map();
   return ids.map(id => {
     for (const [domain, items, label] of groups) {
       const item = items.find(entry=>entry.evidence_id === id);
-      if (item) return '<button class="evidence-link" data-evidence-link="' + safe(id) + '" data-domain="' + domain + '">' + safe(label(item)) + '</button>';
+      if (item) {
+        const prefix = {alerts:'Alert',metrics:'Metric',logs:'Logs',config:'Config'}[domain];
+        const raw = domain === 'logs' ? String(label(item)).replace(/^(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL):\s*/i,'') : String(label(item));
+        const title = raw.length > 54 ? raw.slice(0, 51) + '…' : raw;
+        const text = prefix + ': ' + title;
+        const occurrence = (labels.get(text) || 0) + 1; labels.set(text, occurrence);
+        const detail = occurrence > 1 ? ' · ' + (item.first_seen ? shortTime(item.first_seen) : String(occurrence)) : '';
+        const iconName = {alerts:'bell-ring',metrics:'chart-no-axes-combined',logs:'logs',config:'file-code-2'}[domain];
+        return '<button class="evidence-link" data-evidence-link="' + safe(id) + '" data-domain="' + domain + '" title="Open retained ' + safe(prefix.toLowerCase()) + ' evidence">' + icon(iconName) + '<span>' + safe(text + detail) + '</span></button>';
+      }
     }
     return '<span class="queue-note">' + safe(id) + '</span>';
   }).join('');
@@ -780,11 +823,34 @@ function briefingPanel(payload) {
   const history = assessment.historical_comparison;
   const historyCandidate = run.context?.historical_candidates?.find(item => item.episode_id === history?.episode_id);
   const historyHtml = history ? '<section class="history-comparison"><div><span class="text-label">Related history</span><h4>' + safe(history.status.replaceAll('_',' ')) + '</h4><p>' + safe(history.summary) + '</p></div><div><span class="incident-reference">' + safe(historyCandidate?.reference || history.episode_id) + '</span><div class="citations">' + investigationRefs(run, history.evidence_ids) + '</div></div></section>' : '';
-  const findings = (run.findings || []).map((item, index) => '<article class="finding ' + (index === 0 ? 'primary' : '') + '"><div class="section-heading"><div><span class="text-label">' + safe(String(item.state || 'observed').replaceAll('_',' ')) + '</span><h4>' + safe(item.title) + '</h4></div><span class="finding-category">' + safe(String(item.category || '').replaceAll('_',' ')) + '</span></div><p>' + safe(item.summary) + '</p><div class="citations">' + investigationRefs(run, item.evidence_ids) + '</div><p class="finding-next"><strong>Verify next:</strong> ' + safe(item.next_check) + '</p>' + (item.observations?.length ? disclosure('finding-' + safe(item.id), 'Observed details', item.observations.map(observation => '<pre class="compact-data">' + safe(JSON.stringify(observation, null, 2)) + '</pre>').join(''), item.observations.length) : '') + '</article>').join('');
-  return '<section class="briefing">' + header + inconclusiveNote + (findings ? '<div class="findings">' + findings + '</div>' : '') + '<p class="brief-lead">' + safe(assessment.summary) + '</p><h4>Likely explanation</h4><p>' + safe(assessment.likely_mechanism) + '</p>' +
-    '<div class="next-check"><h4>Next action</h4><p><strong>' + safe(assessment.next_action) + '</strong></p><p><span class="text-label">What would confirm it</span>' + safe(assessment.expected_finding) + '</p></div>' +
-    '<p class="uncertainty"><strong>Still unconfirmed:</strong> ' + safe(assessment.uncertainty) + '</p><div class="citations">' + investigationRefs(run,assessment.evidence_ids) + '</div>' +
-    historyHtml +
+  const same = (left, right) => String(left || '').trim().replace(/[.\s]+$/,'').toLowerCase() === String(right || '').trim().replace(/[.\s]+$/,'').toLowerCase();
+  const assessorFinding = (run.findings || []).find(item => item.category === 'investigator_assessment');
+  const primary = assessorFinding || run.findings?.[0];
+  const mechanism = assessment.likely_mechanism || primary?.summary || '';
+  const mainIds = [...new Set([...(assessment.evidence_ids || []), ...(primary && same(primary.summary, mechanism) ? primary.evidence_ids || [] : [])])];
+  const discrepancy = assessorFinding && mechanism && !same(assessorFinding.summary, mechanism)
+    ? '<section class="assessment-discrepancy" role="note"><strong>Assessment discrepancy</strong><p>The retained initial finding differs from the latest mechanism. Verify both before acting.</p><dl><div><dt>Latest mechanism</dt><dd>' + safe(mechanism) + '</dd></div><div><dt>Initial finding</dt><dd>' + safe(assessorFinding.summary) + '</dd></div></dl><div class="citations">' + investigationRefs(run, assessorFinding.evidence_ids) + '</div></section>' : '';
+  const seenObservations = new Set();
+  const observations = (run.findings || []).filter(item => {
+    if (item === assessorFinding && discrepancy) return false;
+    const key = String(item.summary || '').trim().toLowerCase();
+    if (!key || same(key, mechanism) || same(key, assessment.summary) || seenObservations.has(key)) return false;
+    seenObservations.add(key);
+    return true;
+  });
+  const briefObservations = observations.slice(0, 3).map(item => '<li><strong>' + safe(item.title) + '</strong><p>' + safe(item.summary) + '</p><div class="citations">' + investigationRefs(run, item.evidence_ids) + '</div></li>').join('');
+  const findingDetails = (run.findings || []).map(item => '<article class="finding"><h4>' + safe(item.title) + '</h4><p>' + safe(item.summary) + '</p><div class="citations">' + investigationRefs(run, item.evidence_ids) + '</div>' +
+    (item.next_check && !same(item.next_check, assessment.next_action) ? '<p><strong>Additional check:</strong> ' + safe(item.next_check) + '</p>' : '') +
+    (item.observations?.length ? disclosure('finding-' + safe(item.id), 'Observed details', item.observations.map(observation => '<pre class="compact-data">' + safe(JSON.stringify(observation, null, 2)) + '</pre>').join(''), item.observations.length) : '') + '</article>').join('');
+  const atCapture = assessment.summary && !same(assessment.summary, mechanism)
+    ? '<p class="assessment-context"><span class="text-label">At capture</span>' + safe(assessment.summary) + '</p>' : '';
+  return '<section class="briefing">' + header + inconclusiveNote +
+    '<div class="assessment-main"><span class="text-label">Likely explanation · ' + safe(run.status === 'inconclusive' ? 'inconclusive' : 'model assessment') + '</span><p class="brief-lead">' + safe(mechanism || 'No supported cause yet.') + '</p><div class="citations">' + investigationRefs(run, mainIds) + '</div></div>' +
+    discrepancy + atCapture + (briefObservations ? '<div class="key-observations"><h4>Key observations</h4><ul>' + briefObservations + '</ul></div>' : '') +
+    '<div class="next-check"><h4>Next check</h4><p><strong>' + safe(assessment.next_action) + '</strong></p><p><span class="text-label">What would confirm it</span>' + safe(assessment.expected_finding) + '</p></div>' +
+    '<p class="uncertainty"><strong>Still unconfirmed:</strong> ' + safe(assessment.uncertainty) + '</p>' +
+    (historyHtml ? disclosure('related-history', 'Related history', historyHtml) : '') +
+    (findingDetails ? disclosure('all-findings', 'Full assessment', '<div class="findings">' + findingDetails + '</div>', run.findings.length) : '') +
     disclosure('competing-explanations','Explanations considered',hypotheses,assessment.hypotheses?.length) +
     (connections ? disclosure('alert-connections','How the alerts relate',connections,assessment.connections.length) : '') + '</section>';
 }
@@ -794,9 +860,18 @@ function investigationRefs(run, ids = []) {
   const checks = {workload_state:'Runtime snapshot',resource_history:'Resource history',search_logs:'Source logs',compare_baseline:'Baseline comparison',database_pressure:'Database metrics',dependency_evidence:'Dependency evidence',review_omitted:'Omitted log patterns',historical_episode:'Prior episode',alert_rule_logic:'Alert logic',scrape_discovery:'Target discovery'};
   return ids.map(id => {
     const item = [...(run.checks || []), ...(run.context?.evidence || [])].find(item=>item.id === id);
-    const label = checks[item?.tool] || (item?.domain === 'log_template' ? logLabel(item.title) : item?.title) || item?.question || id;
+    if (!item) return '<span class="source-unavailable">Reference ' + safe(id) + ' unavailable in this capture</span>';
+    const log = item?.domain === 'log_template';
+    const prior = item?.tool === 'historical_episode' ? item.result?.episode?.reference : '';
+    const label = prior ? 'Prior episode ' + prior : checks[item?.tool] || (log ? 'Logs: ' + logLabel(item.title).replace(/^(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL):\s*/i,'').slice(0, 52) : item?.title) || item?.question || id;
     const occurrence = (labels.get(label) || 0) + 1; labels.set(label,occurrence);
-    return '<button class="evidence-link" data-investigation-ref="' + safe(id) + '" title="' + safe(item?.question || label) + '">' + safe(label) + (occurrence > 1 ? ' · additional capture' : '') + '</button>';
+    const kind = log || ['search_logs','review_omitted'].includes(item.tool) ? 'logs'
+      : item.domain === 'configuration' || item.tool === 'workload_state' ? 'configuration'
+        : ['resource_history','compare_baseline','database_pressure'].includes(item.tool) ? 'performance'
+          : item.tool === 'historical_episode' ? 'history' : 'observation';
+    const iconName = {logs:'logs',configuration:'file-code-2',performance:'chart-no-axes-combined',history:'layers',observation:'bell-ring'}[kind];
+    const disambiguator = occurrence > 1 ? ' · ' + (item.time_range?.start ? shortTime(item.time_range.start) : String(occurrence)) : '';
+    return '<button class="evidence-link" data-investigation-ref="' + safe(id) + '" title="Open retained ' + kind + ' evidence">' + icon(iconName) + '<span>' + safe(label + disambiguator) + '</span></button>';
   }).join('');
 }
 
@@ -807,10 +882,14 @@ function investigationProgress(run = {}) {
   const tokenText = usage ? (usage.complete ? '' : 'At least ') + Number(usage.total_tokens || 0).toLocaleString('en') + (run.status === 'running' ? ' reported tokens' : ' tokens') : 'Usage pending';
   const rows = checks.map(item => '<li class="agent-step ' + safe(item.status) + '"><span class="step-marker" aria-hidden="true">' + (item.status === 'running' ? '<span class="spinner"></span>' : icon(item.status === 'completed' ? 'activity' : 'bell-ring')) + '</span><div><strong>' + safe(item.question) + '</strong><small>' + safe(item.status) + (item.finished_at ? ' · ' + formatDate(item.finished_at) : '') + '</small></div></li>').join('');
   const details = '<dl class="coverage-details"><div><dt>Input tokens</dt><dd>' + Number(usage?.prompt_tokens || 0).toLocaleString('en') + '</dd></div><div><dt>Output tokens</dt><dd>' + Number(usage?.completion_tokens || 0).toLocaleString('en') + '</dd></div><div><dt>Safety reserve</dt><dd>' + Number(budget.accounted_total_tokens || 0).toLocaleString('en') + (budget.maximum_total_tokens ? ' / ' + Number(budget.maximum_total_tokens).toLocaleString('en') : '') + '</dd></div><div><dt>Budget remaining</dt><dd>' + Number(budget.remaining_tokens || 0).toLocaleString('en') + '</dd></div><div><dt>Model calls</dt><dd>' + (run.calls?.length || 0) + '</dd></div><div><dt>Earlier attempts</dt><dd>' + Number(run.lifetime_usage?.total_tokens || 0).toLocaleString('en') + ' tokens</dd></div></dl><p class="queue-note">' + (usage?.complete ? 'Provider-reported usage is shown alongside a pre-call safety reserve.' : 'Provider usage is incomplete; the safety reserve prevents unbounded follow-up calls.') + '</p>';
-  return '<aside class="agent-progress"><h3>Investigation activity</h3>' + (rows ? '<ol class="agent-steps">' + rows + '</ol>' : '<p class="queue-note">No checks recorded yet.</p>') +
+  const current = checks.find(item => item.status === 'running');
+  const running = ['queued','running','waiting'].includes(run.status);
+  const activity = running ? (current?.question || 'Checking retained evidence') : run.status === 'ready' ? 'Investigation complete' : run.status === 'inconclusive' ? 'No supported cause yet' : 'Investigation needs attention';
+  return '<aside class="agent-progress"><div class="activity-heading"><div><h3>Investigation activity</h3><strong>' + safe(activity) + '</strong><small>' + checks.length + ' check' + (checks.length === 1 ? '' : 's') + (run.finished_at ? ' · ' + formatDate(run.finished_at) : '') + '</small></div>' +
+    (['ready','incomplete'].includes(run.status) ? '<button class="secondary" data-investigate="' + safe(run.episode_id) + '">' + icon('refresh-cw') + ' Reassess</button>' : '') + '</div>' +
+    disclosure('activity-checks', 'Review checks', rows ? '<ol class="agent-steps">' + rows + '</ol>' : '<p class="queue-note">No checks recorded yet.</p>', checks.length) +
     '<div class="usage-note">' + disclosure('token-usage',tokenText,details) + '</div>' +
-    (run.lifetime_usage?.complete === false ? '<p class="queue-note">Earlier-attempt usage is a lower bound; an interrupted request has no final count.</p>' : '') +
-    (['ready','incomplete'].includes(run.status) ? '<button class="secondary" data-investigate="' + safe(run.episode_id) + '">' + icon('refresh-cw') + ' Reassess</button>' : '') + '</aside>';
+    (run.lifetime_usage?.complete === false ? '<p class="queue-note">Earlier-attempt usage is a lower bound; an interrupted request has no final count.</p>' : '') + '</aside>';
 }
 
 function investigationResult(result = {}, checkId = '') {
@@ -873,17 +952,30 @@ function metricMatters(item) {
 function impactRows(items) {
   return '<dl class="impact-list">' + items.map(item => '<div><dt>' + safe(item.label) + '<small>' + safe(item.meaning) + '</small></dt><dd>' + safe(item.value) + '<small>' + safe(item.baseline_text) + '</small></dd></div>').join('') + '</dl>';
 }
+function metricChart(item, linkToEvidence = false) {
+  const points = item.values || [];
+  const start = points[0]?.timestamp; const end = points[points.length - 1]?.timestamp;
+  const duration = start && end ? Math.round((new Date(end) - new Date(start)) / 60000) : 0;
+  const extreme = item.metric === 'pod_ready' ? 'Selected low' : item.metric.endsWith('_total') ? 'Selected increase' : 'Selected deviation';
+  const baselinePeriod = item.baseline_start
+    ? ({pre_alert:'Before alert',split_window:'Split-window reference',single_sample:'Single-sample reference'}[item.baseline_basis] || 'Reference window') + ' · ' + shortTime(item.baseline_start) + '–' + shortTime(item.baseline_end)
+    : 'Reference period unavailable in this capture';
+  return '<article class="metric-chart"' + (linkToEvidence ? '' : ' id="evidence-' + safe(item.evidence_id) + '" tabindex="-1"') + '><h4>' + safe(item.label) + '</h4><p class="queue-note">' + safe(item.meaning) + '</p>' +
+    '<div class="pm-values"><span>Baseline median<b>' + safe(item.baseline) + '</b><small title="' + safe(formatExactDate(item.baseline_start)) + ' to ' + safe(formatExactDate(item.baseline_end)) + '">' + safe(baselinePeriod) + '</small></span><span>' + extreme + '<b>' + safe(item.peak) + '</b></span></div>' +
+    sparkline(item) + '<div class="chart-times"><time title="' + safe(formatExactDate(start)) + '">' + shortTime(start) + '</time><span>' + duration + ' min captured</span><time title="' + safe(formatExactDate(end)) + '">' + shortTime(end) + '</time></div><small class="queue-note">' + safe(item.component || 'Affected entity not recorded') + ' · dashed marker: ' + (points.some(point => point.timestamp === item.alert_timestamp) ? 'selected deviation' : 'window extreme') + ', not alert time</small>' +
+    (linkToEvidence ? '<button class="evidence-link" data-evidence-link="' + safe(item.evidence_id) + '" data-domain="metrics">Open metric evidence</button>' : '') + '</article>';
+}
 function metricsPanel(report) {
-  return '<div class="metrics-grid">' + (report.pm_signals || []).map(item => {
-    const points = item.values || [];
-    const start = points[0]?.timestamp; const end = points[points.length - 1]?.timestamp;
-    const duration = start && end ? Math.round((new Date(end) - new Date(start)) / 60000) : 0;
-    return '<article class="metric-chart" id="evidence-' + safe(item.evidence_id) + '" tabindex="-1"><h4>' + safe(item.label) + '</h4><p class="queue-note">' + safe(item.meaning) + '</p>' +
-      '<div class="pm-values"><span>Typical<b>' + safe(item.baseline) + '</b></span><span>' + (item.metric === 'pod_ready' ? 'Lowest readiness' : item.metric.endsWith('_total') ? 'Window increase' : 'Peak') + '<b>' + safe(item.peak) + '</b></span></div>' +
-      sparkline(item) + '<div class="chart-times"><time>' + shortTime(start) + '</time><span>' + duration + ' min captured</span><time>' + shortTime(end) + '</time></div><small class="queue-note">' + safe(item.component) + '</small></article>';
-  }).join('') + '</div>' + (report.pm_coverage_note ? '<p class="queue-note">' + safe(report.pm_coverage_note) + '</p>' : '');
+  return '<div class="metrics-grid">' + (report.pm_signals || []).map(item => metricChart(item)).join('') + '</div>' + (report.pm_coverage_note ? '<p class="queue-note">' + safe(report.pm_coverage_note) + '</p>' : '');
+}
+function overviewMetrics(report) {
+  const supported = new Set((report.primary_hypothesis?.supporting_evidence || []).map(item => item.evidence_id));
+  const chosen = (report.pm_signals || []).filter(item => supported.has(item.evidence_id) && item.component && (item.values || []).length >= 2).slice(0, 2);
+  return chosen.length ? '<section class="overview-metrics"><h3>Relevant performance</h3><div class="metrics-grid">' + chosen.map(item => metricChart(item, true)).join('') + '</div></section>' : '';
 }
 function evidencePanel(report) {
+  const capture = report.incident || {};
+  const captureContext = '<p class="capture-context"><strong>Selected capture</strong>' + safe([capture.service, capture.namespace].filter(Boolean).join(' · ')) + (capture.started_at ? ' · ' + safe(formatDate(capture.started_at)) : '') + '</p>';
   const alertHtml = (report.fault_alerts || []).map(item => '<article class="evidence-record" id="evidence-' + safe(item.evidence_id) + '" tabindex="-1"><div class="section-heading"><h4>' + safe(item.name) + '</h4>' + status(item.severity) + '</div><p>' + safe(item.description) + '</p><small>' + formatDate(item.timestamp) + '</small>' +
     (item.rule?.query ? disclosure('rule-' + item.evidence_id, 'Alert condition', '<pre class="log-lines">' + safe(item.rule.query) + '</pre><p class="queue-note">Must hold for ' + safe(item.rule.duration || 0) + ' seconds</p>') : '') + '</article>').join('');
   const logs = (report.log_patterns || []).map(item => '<div id="evidence-' + safe(item.evidence_id) + '" tabindex="-1">' +
@@ -898,7 +990,7 @@ function evidencePanel(report) {
       (supporting?.configuration?.data ? '<pre class="log-lines">' + safe(JSON.stringify(supporting.configuration.data, null, 2)) + '</pre>' : '') + '</article>';
   }).join('');
   const coverage = '<dl class="coverage-details">' + (report.coverage || []).map(item=>'<div><dt>' + safe(item.domain) + '</dt><dd>' + safe(item.detail) + '</dd></div>').join('') + '</dl><p class="queue-note">' + safe(report.retention.message) + '</p>';
-  return '<div class="evidence-view">' +
+  return '<div class="evidence-view">' + captureContext +
     disclosure('domain-alerts', 'Alerts', alertHtml || '<p>No fault alert records were retained for this capture.</p>', report.fault_alerts?.length || 0) +
     disclosure('domain-logs', 'Log evidence', logs || '<p>No diagnostic log patterns were selected for this capture.</p>', report.log_patterns?.length || 0) +
     disclosure('domain-metrics', 'Performance', metricsPanel(report), report.pm_signals?.length || 0) +
@@ -922,7 +1014,7 @@ function capsuleExport(payload) {
     (storage.archive_bytes !== null ? link('fcapsule_' + payload.report.incident.incident_id + '.zip', 'Capsule archive', storage.archive_bytes) : '<p>Archive unavailable</p>') +
     link('incident_report.json', 'Report JSON', storage.report_bytes) +
     (['ready','incomplete'].includes(payload.investigation?.status) ? link('episode_investigation.json','Latest investigation',null) + link('investigation_revisions.json','Investigation revisions',null) : '') +
-    '<p>Retained evidence and analysis. Not a full telemetry backup.</p>' +
+    '<p>Capsule archive and report refer to selected capture ' + safe(payload.report.incident.reference || payload.report.incident.incident_id) + '. Investigation files cover the episode and may include several alert captures. This is not a full telemetry backup.</p>' +
     (storage.expires_at ? '<p><strong>Eligible for cleanup ' + formatDate(storage.expires_at) + '</strong>' + storage.retention_days + '-day retention, including archived incidents.</p>' : '') +
     (storage.directory ? '<details><summary>Storage location</summary><code>' + safe(storage.directory) + '</code></details>' : '') + '</div></details>';
 }
@@ -931,30 +1023,60 @@ function reportPanel(payload) {
   const report = payload.report;
   const incident = report.incident;
   const exports = capsuleExport(payload);
+  const specialists = mediaEvidenceAvailability();
+  const evidenceAction = specialists.image || specialists.audio
+    ? '<button class="secondary" data-add-evidence="' + safe(selectedEpisodeId || '') + '">Add evidence</button>'
+    : '<a class="button-link" href="/settings#evidence-models" title="Validate the core and specialist models in Settings to attach image or audio evidence">Evidence setup</a>';
   const ai = payload.investigation;
   const fallback = ai?.status !== 'ready' ? '<section class="observed-summary"><h3>Alert context</h3><p>' + safe(report.fault_alerts?.[0]?.description || incident.summary) + '</p></section>' : '';
   const d = report.engineering_diagnostics;
   const diagnostics = disclosure('diagnostics', 'Engineering diagnostics', '<dl class="coverage-details"><div><dt>Selected evidence</dt><dd>' + d.selected_evidence + '</dd></div><div><dt>Log reduction</dt><dd>' + pct(d.log_compression_ratio) + '</dd></div><div><dt>Signal preservation</dt><dd>' + pct(d.important_signal_preservation) + '</dd></div><div><dt>Grounding</dt><dd>' + pct(d.hypothesis_grounding_score) + '</dd></div><div><dt>Runtime</dt><dd>' + Number(d.runtime_seconds || 0).toFixed(2) + 's</dd></div></dl><p class="queue-note">Rule-based hypothesis: ' + safe(report.primary_hypothesis.statement) + '</p>');
   const tabs = ['overview','evidence','timeline'];
   let content;
-  if (reportTab === 'evidence') content = investigationEvidence(ai || {}) + '<h3 class="capture-heading">Selected alert capture</h3>' + evidencePanel(report);
+  if (reportTab === 'evidence') content = (sourceReturn?.episodeId === selectedEpisodeId ? '<div class="source-return"><button type="button" data-return-source>Back to ' + safe(sourceReturn.tab === 'timeline' ? 'timeline' : 'assessment') + '</button></div>' : '') + investigationEvidence(ai || {}) + '<h3 class="capture-heading">Selected alert capture</h3>' + evidencePanel(report);
   else if (reportTab === 'timeline') content = timelinePanel(report) + investigationTimeline(ai || {});
-  else content = '<div class="overview-layout"><div>' + briefingPanel(payload) + fallback + mediaEvidencePanel(payload) + sourceReviewPanel(payload) + '</div>' + investigationProgress(ai || {}) + '</div>';
+  else content = '<div class="overview-layout"><div>' + briefingPanel(payload) + fallback + (ai?.assessment ? overviewMetrics(report) : '') + mediaEvidencePanel(payload) + sourceReviewPanel(payload) + '</div>' + investigationProgress(ai || {}) + '</div>';
   return '<section id="incident-report"><div class="report-navigation"><div role="tablist" aria-label="Investigation views">' +
     tabs.map(name=>'<button id="tab-' + name + '" role="tab" data-report-tab="' + name + '" aria-selected="' + (name === reportTab) + '" aria-controls="investigation-panel" tabindex="' + (name === reportTab ? 0 : -1) + '">' + name[0].toUpperCase() + name.slice(1) + '</button>').join('') +
-    '</div>' + exports + '</div><div id="investigation-panel" role="tabpanel" aria-labelledby="tab-' + reportTab + '" tabindex="0">' + content + '</div><div class="report-technical">' + diagnostics + '</div></section>';
+    '</div><div class="report-actions">' + evidenceAction + exports + '</div></div><div id="investigation-panel" role="tabpanel" aria-labelledby="tab-' + reportTab + '" tabindex="0">' + content + '</div><div class="report-technical">' + diagnostics + '</div></section>';
 }
 
 function renderPatterns(state) {
+  lastPatternsSignature = JSON.stringify([state.overview.patterns, state.overview.related_groups, patternsMode]);
+  const openRows = new Set([...document.querySelectorAll('.related-group[open], .pattern-older[open]')].map(node => node.id));
+  const focusedId = document.activeElement?.id;
   const applications = new Map(state.overview.applications.map(item => [item.app_id, item]));
   const patterns = state.overview.patterns || [];
   const rows = patterns.map(pattern => {
     const application = applications.get(pattern.app_id);
     const target = resourceLabel({app_id:pattern.app_id, resource:pattern.resource}, application);
     const interval = intervalLabel(pattern.observed_interval_seconds, pattern.occurrence_count);
-    return `<article class="pattern-row"><div class="pattern-main"><span class="pattern-reference">${safe(pattern.pattern_id)}</span><h2>${safe(pattern.title)}</h2><p>${safe(target)} · ${safe(application?.namespace || '')}</p></div><dl class="pattern-stats"><div><dt>Occurrences</dt><dd>${safe(pattern.occurrence_count)}</dd></div><div><dt>Observed</dt><dd>${safe(relativeTime(pattern.first_seen_at))} to ${safe(relativeTime(pattern.last_seen_at))}</dd></div><div><dt>Interval</dt><dd>${safe(interval || 'No stable interval')}</dd></div></dl><div class="pattern-episodes"><span>Recent episodes</span>${pattern.episodes.map(episode => `<a href="/console?episode=${encodeURIComponent(episode.episode_id)}">${safe(episode.reference)} · ${safe(relativeTime(episode.started_at))}</a>`).join('')}</div></article>`;
+    const recent = (pattern.episodes || []).slice(0, 3);
+    const older = (pattern.episodes || []).slice(3);
+    const episodeLink = episode => `<a href="/console?episode=${encodeURIComponent(episode.episode_id)}"><strong>${safe(episode.reference)}</strong><time title="${safe(formatExactDate(episode.started_at))}">${safe(relativeTime(episode.started_at))}</time>${icon('chevron-right')}</a>`;
+    return `<article class="pattern-row"><div class="pattern-main"><h2>${safe(pattern.title)}</h2><p>${safe(target)} · ${safe(application?.namespace || '')}</p><span class="pattern-reference">${safe(pattern.pattern_id)}</span></div><dl class="pattern-stats"><div><dt>Occurrences</dt><dd>${safe(pattern.occurrence_count)}</dd></div><div><dt>Last seen</dt><dd title="${safe(formatExactDate(pattern.last_seen_at))}">${safe(relativeTime(pattern.last_seen_at))}</dd></div><div><dt>Observed gap</dt><dd>${safe(interval || 'Insufficient observations')}</dd></div></dl><div class="pattern-episodes"><span>Recent episodes</span>${recent.map(episodeLink).join('')}${older.length ? `<details class="pattern-older" id="older-${safe(pattern.pattern_id)}"><summary>Show ${older.length} more</summary>${older.map(episodeLink).join('')}</details>` : ''}<small>First seen ${safe(formatDate(pattern.first_seen_at))}</small></div></article>`;
   }).join('');
-  app.innerHTML = `<div class="page-head"><div><div class="eyebrow">Incident history</div><h1>Patterns</h1><p>Repeated episodes are kept separate and linked through their retained evidence.</p></div><a class="button-link" href="/console">Open operations</a></div><section class="patterns"><div class="sheet-head"><h2>Recurring issues</h2><span class="queue-note">${patterns.length} recurring pattern${patterns.length === 1 ? '' : 's'}</span></div>${rows || '<div class="empty">No recurring patterns in retained history.</div>'}</section>`;
+  const groups = state.overview.related_groups || [];
+  app.innerHTML = `<div class="page-head"><div><div class="eyebrow">Incident history</div><h1>Patterns</h1><p>Repeated episodes and possible shared operating conditions in retained history.</p></div></div><div class="patterns-view" role="group" aria-label="Pattern view"><button type="button" data-patterns-view="recurring" aria-pressed="${patternsMode === 'recurring'}">Recurring issues</button><button type="button" data-patterns-view="shared" aria-pressed="${patternsMode === 'shared'}">Shared conditions${groups.length ? ` (${groups.length})` : ''}</button></div>${patternsMode === 'recurring' ? `<section class="patterns"><div class="sheet-head"><h2>Recurring issues</h2><span class="queue-note">${patterns.length} recurring pattern${patterns.length === 1 ? '' : 's'}</span></div>${rows || '<div class="empty">No recurring patterns in retained history.</div>'}</section>` : relatedActivity(groups)}`;
+  document.querySelectorAll('.related-group, .pattern-older').forEach(node => { if (openRows.has(node.id)) node.open = true; });
+  if (focusedId) document.getElementById(focusedId)?.focus({preventScroll:true});
+  document.querySelectorAll('[data-patterns-view]').forEach(button => button.addEventListener('click', () => {
+    patternsMode = button.dataset.patternsView;
+    history.replaceState(null, '', patternsMode === 'shared' ? '/patterns?view=shared' : '/patterns');
+    renderPatterns(lastState);
+  }));
+  document.querySelectorAll('[data-related-open]').forEach(button => button.addEventListener('click', () => {
+    location.assign('/console?episode=' + encodeURIComponent(button.dataset.relatedOpen));
+  }));
+  document.querySelectorAll('[data-related-separate]').forEach(button => button.addEventListener('click', () => {
+    separateRelatedEpisode(button.dataset.relatedGroup, button.dataset.relatedSeparate);
+  }));
+  if (pendingSharedAnchor && patternsMode === 'shared' && location.hash.startsWith('#shared-')) {
+    const group = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    if (group && !group.open) group.open = true;
+    group?.scrollIntoView({block:'start'});
+    pendingSharedAnchor = false;
+  }
 }
 
 async function refresh() {
@@ -974,6 +1096,7 @@ async function refresh() {
         if (episode) {
           showArchived = Boolean(episode.archived_at);
           await openEpisodeReport(episode.episode_id, signal);
+          document.getElementById('toggle-' + episode.episode_id)?.scrollIntoView({block:'start'});
         }
       }
       if (selectedEpisodeId && !allEpisodes(state).some(item=>item.episode_id === selectedEpisodeId)) {
@@ -1015,7 +1138,7 @@ async function refresh() {
           document.querySelector('#coverage-count').textContent = observed.length + ' observed applications';
         }
       }
-    } else if (view === 'patterns') {
+    } else if (view === 'patterns' && JSON.stringify([state.overview.patterns, state.overview.related_groups, patternsMode]) !== lastPatternsSignature) {
       renderPatterns(state);
     }
   } catch (_) {

@@ -10,9 +10,9 @@ It does not replace Prometheus, OpenSearch, Alertmanager, Kafka, or a tracing ba
 
 FCAPSule provides one control plane with four operator views:
 
-- **Operations** (`/console`) groups related firing alerts into expandable incident episodes. A compact triage strip highlights only active, recurring, or materially changed retained work. Overview presents one evidence-seeking AI investigation per episode, a concrete next action and check progress. Evidence and Timeline expose observations and the agent's activity separately from historical events. Reports and capsules can be exported.
+- **Operations** (`/console`) groups related firing alerts into expandable incident episodes ordered by latest activity. Overview presents one evidence-seeking AI assessment, its next check and uncertainty, with observations and execution details available on demand. Evidence and Timeline separate retained sources from agent activity. Reports and capsules can be exported.
 - **Targets** (`/targets`) configures and tests Prometheus, OpenSearch, and Kubernetes API access, controls namespace scope and polling, and shows coverage for currently observed applications.
-- **Patterns** (`/patterns`) provides historical recurrence context for matching application/resource/alert episodes while keeping each incident independently auditable.
+- **Patterns** (`/patterns`) separates recurring issues from potential shared operating conditions. These are historical cues, not confirmed common causes; each incident remains independently auditable.
 - **Settings** (`/settings`) controls incident retention, the investigation model and completion budget per call, plus optional image/audio evidence specialists. With a provider key configured, new reports trigger background episode investigation. Retention defaults to 30 days. Keys remain local in `.env` and are never returned through the console or stored in SQLite.
 
 The CLI remains fully usable without the web application.

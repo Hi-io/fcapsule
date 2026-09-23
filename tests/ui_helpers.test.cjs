@@ -22,6 +22,8 @@ test('export shows actual artifact sizes and escapes retained paths', () => {
   assert.match(html, /4096 B/);
   assert.match(html, /8192 B/);
   assert.match(html, /Eligible for cleanup 2026-10-20/);
+  assert.match(html, /selected capture one/);
+  assert.match(html, /Investigation files cover the episode/);
   assert.match(html, /\/data\/&lt;source>/);
   assert.doesNotMatch(html, /<source>/);
   payload.storage.archive_bytes = null;
@@ -60,7 +62,7 @@ test('closed episodes do not duplicate the selected report controls', () => {
   const table = helper('episodeTable', 'episodeContext', {
     lastState: { overview: { applications: [] } }, selectedEpisodeId: 'second',
     selectedReport: {}, reportLoading: false, reportError: '',
-    safe: value => String(value ?? ''), status: value => value, formatDate: value => value, relativeTime: value => value,
+    safe: value => String(value ?? ''), status: value => value, formatDate: value => value, formatExactDate: value => value, relativeTime: value => value,
     resourceLabel: item => item.app_id || 'application', recurrenceLabel: () => '',
     episodeContext: () => '<select id="signal-report"></select>',
     reportPanel: () => '<div role="tablist"></div>',
@@ -71,6 +73,14 @@ test('closed episodes do not duplicate the selected report controls', () => {
   assert.equal((html.match(/role="tablist"/g) || []).length, 1);
   assert.equal((html.match(/id="signal-report"/g) || []).length, 1);
   assert.equal((html.match(/class="episode is-open"/g) || []).length, 1);
+});
+
+test('an empty archive has a different explanation from an empty filtered queue', () => {
+  const table = helper('episodeTable', 'episodeContext', {
+    lastState:{overview:{archived_episodes:[]}}, queueFilters:{namespace:'',scope:'',status:'',period:'',query:''},
+  });
+  assert.match(table([],[],true),/No archived episodes yet/);
+  assert.match(table([],[],false),/No incidents in the queue/);
 });
 
 test('domain disclosures retain native semantics, count and decorative icon', () => {
@@ -91,7 +101,8 @@ test('episode overview does not imply it is the selected individual alert', () =
     reportId:()=> 'one', reportTab:'overview', safe:value=>String(value ?? ''), relativeTime:value=>value, icon:()=>'',
   });
   const html = context({episode_id:'episode', reference:'EP-ONE', signal_count:2, status:'resolved', signals:[{incident_id:'one',reference:'INC-ONE'},{incident_id:'two'}]});
-  assert.match(html, /INC-ONE/);
+  assert.match(html, /Episode EP-ONE/);
+  assert.doesNotMatch(html, /INC-ONE/);
   assert.match(html, /2 captured alerts/);
   assert.doesNotMatch(html, /select/);
 });
@@ -120,17 +131,103 @@ test('queue filters can find a stable incident reference without hiding unrelate
   assert.equal(rows[0].reference, 'EP-AB12');
 });
 
+test('queue keeps common filters visible and names hidden restrictions', () => {
+  const panel = helper('queueFiltersPanel', 'relatedActivity', {
+    safe:value=>String(value ?? ''), openDisclosures:new Set(),
+    queueFilters:{namespace:'commerce',query:'',scope:'',status:'resolved',period:'week'},
+    resourceLabel:()=> 'orders-api',
+  });
+  const html = panel([{app_id:'orders'}], new Map([['orders',{namespace:'commerce'}]]));
+  assert.match(html, /<select id="queue-namespace"/);
+  assert.match(html, /id="queue-search" type="text"/);
+  assert.match(html, /<details class="queue-more"/);
+  assert.match(html, /Filters <span class="detail-count">2/);
+  assert.match(html, /Status: resolved/);
+  assert.match(html, /Time: Last 7 days/);
+  assert.match(html, /data-clear-filters/);
+});
+
+test('assessment presents one primary explanation and retains distinct observations', () => {
+  const render = helper('briefingPanel', 'investigationRefs', {
+    safe:value=>String(value ?? ''), formatDate:value=>value, selectedEpisodeId:'episode',
+    investigationRefs:()=>'', disclosure:(id,title,body)=>'<details><summary>'+title+'</summary>'+body+'</details>',
+  });
+  const html = render({investigation:{status:'ready',model:'test-model',finished_at:'done',
+    assessment:{summary:'Alert scope',likely_mechanism:'Pool saturation',next_action:'Check pool usage',
+      expected_finding:'Pool is full',uncertainty:'Exact caller unknown',evidence_ids:[],hypotheses:[],connections:[]},
+    findings:[{id:'primary',title:'Likely explanation',summary:'Pool saturation',evidence_ids:[]},
+      {id:'secondary',title:'Database observation',summary:'Connections rose',evidence_ids:[]}]
+  }});
+  assert.equal((html.match(/class="brief-lead">Pool saturation/g) || []).length, 1);
+  assert.equal((html.match(/<h4>Next check<\/h4>/g) || []).length, 1);
+  assert.match(html, /Database observation/);
+  assert.match(html, /Still unconfirmed:/);
+  assert.match(html, /Full assessment/);
+});
+
+test('conflicting investigator finding is visible rather than silently merged', () => {
+  const render = helper('briefingPanel', 'investigationRefs', {
+    safe:value=>String(value ?? ''), formatDate:value=>value, selectedEpisodeId:'episode',
+    investigationRefs:()=>'', disclosure:(id,title,body)=>'<details><summary>'+title+'</summary>'+body+'</details>',
+  });
+  const html = render({investigation:{status:'ready', assessment:{summary:'Alert context',likely_mechanism:'Connection pressure',
+    next_action:'Check active connections',expected_finding:'Near limit',uncertainty:'Caller unknown',hypotheses:[],connections:[]},
+    findings:[{category:'investigator_assessment',title:'Initial finding',summary:'DNS resolution failure',evidence_ids:['log-1']}] }});
+  assert.match(html, /Assessment discrepancy/);
+  assert.match(html, /Connection pressure/);
+  assert.match(html, /DNS resolution failure/);
+  assert.match(html, /Still unconfirmed:/);
+});
+
+test('overview promotes only cited performance evidence', () => {
+  const render = helper('overviewMetrics','evidencePanel', {
+    metricChart:item=>item.label,
+  });
+  const signals = [
+    {evidence_id:'metric-a',label:'Memory',component:'pod-a',values:[{},{}]},
+    {evidence_id:'metric-b',label:'CPU',component:'pod-a',values:[{},{}]},
+    {evidence_id:'metric-c',label:'Restarts',component:'pod-a',values:[{},{}]},
+  ];
+  assert.equal(render({pm_signals:signals,primary_hypothesis:{supporting_evidence:[]}}), '');
+  const html = render({pm_signals:signals,primary_hypothesis:{supporting_evidence:[{evidence_id:'metric-a'},{evidence_id:'metric-b'},{evidence_id:'metric-c'}]}});
+  assert.match(html, /MemoryCPU/);
+  assert.doesNotMatch(html, /Restarts/);
+});
+
+test('metric chart distinguishes the reference period and selected deviation', () => {
+  const render = helper('metricChart','metricsPanel', {
+    safe:value=>String(value ?? ''), shortTime:value=>value, formatExactDate:value=>value,
+    sparkline:()=>'<svg></svg>',
+  });
+  const html = render({evidence_id:'pm-1',metric:'pod_cpu_cores',label:'CPU',meaning:'Used by affected pod',
+    baseline:'100 mCPU',peak:'900 mCPU',component:'pod-a',baseline_basis:'pre_alert',
+    baseline_start:'before-start',baseline_end:'before-end',alert_timestamp:'peak',
+    values:[{timestamp:'before-start',value:0.1},{timestamp:'peak',value:0.9}]});
+  assert.match(html,/Before alert/);
+  assert.match(html,/selected deviation, not alert time/);
+  assert.match(html,/pod-a/);
+});
+
 test('investigation citations are escaped and point to unique observations', () => {
   const refs = helper('investigationRefs','investigationProgress', {
     safe: value => String(value ?? '').replaceAll('<','&lt;').replaceAll('"','&quot;'),
-    logLabel: value=>value,
+    logLabel: value=>value, icon:name=>'<i data-icon="'+name+'"></i>', shortTime:value=>value,
   });
   const html = refs({checks:[{id:'Q001',question:'<script>source text</script>'}]},['Q001']);
   assert.match(html,/data-investigation-ref="Q001"/);
   assert.doesNotMatch(html,/<script>/);
   const compact = refs({checks:[{id:'Q002',tool:'search_logs',question:'Which logs distinguish competing mechanisms?'}]},['Q002']);
-  assert.match(compact,/>Source logs<\/button>/);
-  assert.match(compact,/title="Which logs distinguish competing mechanisms\?"/);
+  assert.match(compact,/<span>Source logs<\/span>/);
+  assert.match(compact,/data-icon="logs"/);
+  assert.match(compact,/title="Open retained logs evidence"/);
+  assert.match(refs({checks:[]},['missing']),/Reference missing unavailable in this capture/);
+});
+
+test('interval labels report observed gaps without forecasting', () => {
+  const label = helper('intervalLabel', 'filteredEpisodes');
+  assert.equal(label(34, 2), '34 seconds between two episodes');
+  assert.equal(label(14400, 3), '4 hours median of 2 gaps');
+  assert.doesNotMatch(label(14400, 3), /every|next/i);
 });
 
 test('partial token usage is not displayed as complete accounting', () => {
