@@ -569,3 +569,6 @@ tbody tr:hover { background:#fafbfe; }
   .pattern-stats div { padding:0; border-left:0; }
 }
 @media (prefers-reduced-motion:reduce) { summary::after { transition:none; } }
+.media-observation-meta { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 16px; }
+.media-observation-facts { padding-left:20px; margin:14px 0; }
+.media-observation-facts li { margin:6px 0; overflow-wrap:anywhere; }

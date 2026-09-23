@@ -11,6 +11,28 @@ function helper(name, next, context = {}) {
   return vm.runInNewContext(code + '\n' + name, context);
 }
 
+test('image citations show readable observations and original evidence before raw extraction', () => {
+  const render = helper('investigationEvidence', 'investigationTimeline', {
+    safe:value=>String(value ?? '').replaceAll('<','&lt;'), formatDate:value=>value,
+    icon:name=>`<i>${name}</i>`,
+    disclosure:(id,title,body)=>`<details data-id="${id}"><summary>${title}</summary>${body}</details>`,
+  });
+  const run = {assessment:{evidence_ids:['A-image']},context:{evidence:[{
+    id:'A-image',domain:'image_evidence',attachment_id:'image',title:'Image evidence: targets.png',
+    time_range:{observed_at:'2026-09-23T02:16:00Z'},summary:'Target down',
+  }]}};
+  const html = render(run, [{attachment_id:'image',artifact_url:'/evidence/image.png',extraction:{
+    observations:[{fact:'Endpoint <metrics> returned 404'}],limitation:'Visible state only.'}}]);
+  assert.match(html, /class="media-observation-facts"/);
+  assert.match(html, /Endpoint &lt;metrics> returned 404/);
+  assert.match(html, /observed 2026-09-23T02:16:00Z/);
+  assert.match(html, /href="\/evidence\/image.png"/);
+  assert.match(html, /View original/);
+  assert.match(html, /Full extraction/);
+  assert.doesNotMatch(html, /Captured in|image_evidence/);
+  assert.ok(html.indexOf('media-observation-facts') < html.indexOf('Full extraction'));
+});
+
 test('export shows actual artifact sizes and escapes retained paths', () => {
   const render = helper('capsuleExport', 'reportPanel', {
     safe: value => String(value ?? '').replaceAll('<', '&lt;'),

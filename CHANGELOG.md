@@ -4,6 +4,9 @@
 
 ### Changed
 
+- Presented cited image/audio observations with observation time and an original-file
+  link; full extraction stays expandable. Removed empty provenance labels and
+  distinguished metric and media citations visually.
 - Preserved validated attachment citation IDs while masking model prose, so image
   evidence remains navigable. Manual revisions and startup now use the same primary
   report identity, preventing a redundant reassessment solely on restart.

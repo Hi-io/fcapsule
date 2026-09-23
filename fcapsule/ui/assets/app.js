@@ -878,9 +878,10 @@ function investigationRefs(run, ids = []) {
     const occurrence = (labels.get(label) || 0) + 1; labels.set(label,occurrence);
     const kind = log || ['search_logs','review_omitted'].includes(item.tool) ? 'logs'
       : item.domain === 'configuration' || item.tool === 'workload_state' ? 'configuration'
-        : ['resource_history','compare_baseline','database_pressure'].includes(item.tool) ? 'performance'
+        : item.domain === 'metric_anomaly' || ['resource_history','compare_baseline','database_pressure'].includes(item.tool) ? 'performance'
+          : item.domain === 'image_evidence' ? 'image' : item.domain === 'audio_evidence' ? 'audio'
           : item.tool === 'historical_episode' ? 'history' : 'observation';
-    const iconName = {logs:'logs',configuration:'file-code-2',performance:'chart-no-axes-combined',history:'layers',observation:'bell-ring'}[kind];
+    const iconName = {logs:'logs',configuration:'file-code-2',performance:'chart-no-axes-combined',image:'scan-line',audio:'activity',history:'layers',observation:'bell-ring'}[kind];
     const disambiguator = occurrence > 1 ? ' · ' + (item.time_range?.start ? shortTime(item.time_range.start) : String(occurrence)) : '';
     return '<button class="evidence-link" data-investigation-ref="' + safe(id) + '" title="Open retained ' + kind + ' evidence">' + icon(iconName) + '<span>' + safe(label + disambiguator) + '</span></button>';
   }).join('');
@@ -936,15 +937,33 @@ function investigationResult(result = {}, checkId = '') {
   return body + '<p class="uncertainty">' + safe(result.limitation || result.comparability || '') + '</p><details class="raw-observation"><summary>Observation JSON</summary><pre class="log-lines">' + safe(JSON.stringify(result,null,2)) + '</pre></details>';
 }
 
-function investigationEvidence(run = {}) {
+function investigationEvidence(run = {}, attachments = []) {
   const cited = new Set([...(run.assessment?.evidence_ids || []), ...(run.assessment?.hypotheses || []).flatMap(item=>item.evidence_ids), ...(run.assessment?.connections || []).flatMap(item=>item.evidence_ids), ...(run.assessment?.historical_comparison?.evidence_ids || [])]);
   const checks = (run.checks || []).map(item=>disclosure('agent-' + item.id,item.question,'<p>' + safe(item.distinguishes) + '</p><p class="queue-note">' + formatDate(item.started_at) + ' · ' + safe(item.status) + '</p>' + investigationResult(item.result,item.id),item.id)).join('');
   const exampleText = examples => examples.map(item => typeof item === 'string' ? item : JSON.stringify(item)).join('\n');
-  const evidence = (run.context?.evidence || []).filter(item=>cited.has(item.id)).map(item=>disclosure('agent-' + item.id, item.domain === 'log_template' ? logLabel(item.title) : item.title,
+  const evidence = (run.context?.evidence || []).filter(item=>cited.has(item.id)).map(item=> {
+    if (['image_evidence','audio_evidence'].includes(item.domain)) {
+      const attachment = attachments.find(entry=>entry.attachment_id === item.attachment_id);
+      const extraction = attachment?.extraction;
+      const facts = (extraction?.observations || item.examples || []).map(entry=>typeof entry === 'string' ? entry : entry.fact).filter(Boolean);
+      const observed = item.time_range?.observed_at;
+      const limitation = extraction?.limitation || item.limitation;
+      const content = '<div class="media-observation-meta"><span class="queue-note">' + (item.domain === 'image_evidence' ? 'Image observation' : 'Audio observation') +
+        (observed ? ' · observed ' + safe(formatDate(observed)) : ' · observation time unknown') + '</span>' +
+        (attachment?.artifact_url ? '<a class="evidence-link" href="' + safe(attachment.artifact_url) + '" target="_blank" rel="noopener">' + icon('scan-line') + 'View original</a>' : '') + '</div>' +
+        (facts.length ? '<ul class="media-observation-facts">' + facts.map(fact=>'<li>' + safe(fact) + '</li>').join('') + '</ul>' : '<p>' + safe(item.summary) + '</p>') +
+        (limitation ? '<p class="queue-note">' + safe(limitation) + '</p>' : '') +
+        (item.operator_context?.correction ? '<p><strong>Operator correction:</strong> ' + safe(item.operator_context.correction) + '</p>' : '') +
+        disclosure('extraction-' + item.id, 'Full extraction', '<pre class="log-lines">' + safe(JSON.stringify(extraction || item, null, 2)) + '</pre>');
+      return disclosure('agent-' + item.id, item.title, content);
+    }
+    const provenance = (item.provenance || []).map(ref=>safe(ref.incident_id)).filter(Boolean);
+    return disclosure('agent-' + item.id, item.domain === 'log_template' ? logLabel(item.title) : item.title,
     '<p>' + safe(item.summary) + '</p><p class="queue-note">' + safe(item.domain) + ' · ' + formatDate(item.time_range?.start) + '</p>' +
     (item.examples?.length ? '<pre class="log-lines">' + safe(exampleText(item.examples)) + '</pre>' : '') +
     (item.configuration || item.alert ? '<pre class="log-lines">' + safe(JSON.stringify(item.configuration || item.alert,null,2)) + '</pre>' : '') +
-    '<small>Captured in ' + (item.provenance || []).map(ref=>safe(ref.incident_id)).join(', ') + '</small>')).join('');
+    (provenance.length ? '<small>Captured in ' + provenance.join(', ') + '</small>' : ''));
+  }).join('');
   return disclosure('agent-evidence','Investigation evidence',checks + evidence || '<p>No investigation evidence yet.</p>', (run.checks?.length || 0) + (run.context?.evidence || []).filter(item=>cited.has(item.id)).length);
 }
 
@@ -1044,7 +1063,7 @@ function reportPanel(payload) {
   const diagnostics = disclosure('diagnostics', 'Engineering diagnostics', '<dl class="coverage-details"><div><dt>Selected evidence</dt><dd>' + d.selected_evidence + '</dd></div><div><dt>Log reduction</dt><dd>' + pct(d.log_compression_ratio) + '</dd></div><div><dt>Signal preservation</dt><dd>' + pct(d.important_signal_preservation) + '</dd></div><div><dt>Grounding</dt><dd>' + pct(d.hypothesis_grounding_score) + '</dd></div><div><dt>Runtime</dt><dd>' + Number(d.runtime_seconds || 0).toFixed(2) + 's</dd></div></dl><p class="queue-note">Rule-based hypothesis: ' + safe(report.primary_hypothesis.statement) + '</p>');
   const tabs = ['overview','evidence','timeline'];
   let content;
-  if (reportTab === 'evidence') content = (sourceReturn?.episodeId === selectedEpisodeId ? '<div class="source-return"><button type="button" data-return-source>Back to ' + safe(sourceReturn.tab === 'timeline' ? 'timeline' : 'assessment') + '</button></div>' : '') + investigationEvidence(ai || {}) + '<h3 class="capture-heading">Selected alert capture</h3>' + evidencePanel(report);
+  if (reportTab === 'evidence') content = (sourceReturn?.episodeId === selectedEpisodeId ? '<div class="source-return"><button type="button" data-return-source>Back to ' + safe(sourceReturn.tab === 'timeline' ? 'timeline' : 'assessment') + '</button></div>' : '') + investigationEvidence(ai || {}, payload.media_evidence || []) + '<h3 class="capture-heading">Selected alert capture</h3>' + evidencePanel(report);
   else if (reportTab === 'timeline') content = timelinePanel(report) + investigationTimeline(ai || {});
   else content = '<div class="overview-layout"><div>' + briefingPanel(payload) + fallback + (ai?.assessment ? overviewMetrics(report) : '') + mediaEvidencePanel(payload) + sourceReviewPanel(payload) + '</div>' + investigationProgress(ai || {}) + '</div>';
   return '<section id="incident-report"><div class="report-navigation"><div role="tablist" aria-label="Investigation views">' +
