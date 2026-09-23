@@ -809,16 +809,21 @@ class InvestigationToolTests(unittest.TestCase):
             "dropped": [{"state": "dropped", "pod": "worker-2", "service": "worker"}],
         }
         self.kube.monitoring_resources.return_value = [
-            {"kind": "ServiceMonitor", "name": "worker", "match_labels": {"metrics": "enabled"}},
-            {"kind": "PodMonitor", "name": "worker-pods", "match_labels": {"metrics": "pod-enabled"}},
+            {"kind": "ServiceMonitor", "name": "worker", "namespace": "monitoring",
+             "target_namespaces": ["ns"], "effective_namespaces": ["ns"],
+             "namespace_selector": {"status": "resolved"}, "match_labels": {"metrics": "enabled"},
+             "match_expressions": [{"key": "tier", "operator": "In", "values": ["backend"]}]},
+            {"kind": "PodMonitor", "name": "worker-pods", "namespace": "monitoring",
+             "target_namespaces": ["ns"], "effective_namespaces": ["ns"],
+             "namespace_selector": {"status": "resolved"}, "match_labels": {"metrics": "pod-enabled"}},
         ]
         self.kube.list_services.return_value = [
-            {"name": "worker", "labels": {"metrics": "enabled"}, "selector": {"app": "worker"}},
-            {"name": "other", "labels": {"metrics": "disabled"}, "selector": {}},
+            {"namespace": "ns", "name": "worker", "labels": {"metrics": "enabled", "tier": "backend"}, "selector": {"app": "worker"}},
+            {"namespace": "ns", "name": "other", "labels": {"metrics": "disabled", "tier": "backend"}, "selector": {}},
         ]
         self.kube.list_pods.return_value = [
-            {"name": "worker-1", "workload": "worker", "labels": {"metrics": "pod-enabled"}},
-            {"name": "worker-2", "workload": "worker", "labels": {"metrics": "misspelled"}},
+            {"name": "worker-1", "namespace": "ns", "workload": "worker", "labels": {"metrics": "pod-enabled"}},
+            {"name": "worker-2", "namespace": "ns", "workload": "worker", "labels": {"metrics": "misspelled"}},
         ]
 
         result = self.kit.execute("scrape_discovery", {})
@@ -827,7 +832,32 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertEqual(result["dropped_targets"][0]["state"], "dropped")
         self.assertEqual(result["monitor_selection"][0]["matched_services"], ["worker"])
         self.assertEqual(result["monitor_selection"][1]["matched_pods"], ["worker-1"])
+        service_evidence = result["monitor_selection"][0]["evaluated_services"]
+        self.assertEqual(service_evidence[0]["selector_evaluation"]["status"], "matched")
+        self.assertEqual(service_evidence[1]["selector_evaluation"]["status"], "not_matched")
+        self.assertEqual(service_evidence[1]["selector_evaluation"]["requirements"][0]["observed"], "disabled")
+        self.assertEqual(result["monitor_selection"][0]["target_kind"], "Service labels")
+        self.assertEqual(result["monitor_selection"][0]["namespace_scope"]["effective_namespaces"], ["ns"])
+        self.assertTrue(result["observed_at"].endswith("Z"))
         self.assertIn("ServiceMonitor selectors apply to Service labels", result["limitation"])
+
+    def test_scrape_discovery_keeps_unknown_namespace_or_selector_rules_unknown(self):
+        self.prom.scrape_targets.return_value = {"active": [], "dropped": []}
+        self.kube.monitoring_resources.return_value = [{
+            "kind": "ServiceMonitor", "name": "uncertain", "namespace": "monitoring",
+            "effective_namespaces": ["ns"], "namespace_selector": {"status": "unknown"},
+            "match_labels": {"metrics": "enabled"}, "match_expressions": [], "selector_complete": False,
+        }]
+        self.kube.list_services.return_value = [{"name": "worker", "namespace": "ns",
+            "labels": {"metrics": "misspelled"}}]
+        self.kube.list_pods.return_value = []
+
+        result = self.kit.execute("scrape_discovery", {})
+
+        selection = result["monitor_selection"][0]
+        self.assertEqual(selection["matched_services"], [])
+        self.assertEqual(selection["evaluated_services"][0]["selector_evaluation"]["status"], "unknown")
+        self.assertEqual(selection["namespace_scope"]["status"], "unknown")
 
     def test_alert_rule_logic_keeps_detection_separate_from_root_cause(self):
         self.entries[0]["report"]["fault_alerts"] = [{
@@ -846,18 +876,29 @@ class InvestigationToolTests(unittest.TestCase):
         self.kube.declared_services.return_value = [{"service": "inventory", "namespace": "ns"}]
         with self.assertRaisesRegex(ValueError, "not declared"):
             self.kit.execute("dependency_evidence", {"service": "unrelated"})
-        self.kube.service_pods.assert_not_called()
+        self.kube.resolve_service.assert_not_called()
         self.logs.collect_logs.assert_not_called()
 
     def test_dependency_query_is_bounded_and_keeps_partial_evidence(self):
         self.kube.list_pods.return_value = [{"name": "worker-1", "workload": "worker"}]
-        self.kube.declared_services.return_value = [{"service": "inventory", "namespace": "ns"}]
-        self.kube.service_pods.return_value = [{"name": "inventory-1"}, {"name": "inventory-2"}]
+        self.kube.declared_services.return_value = [{"service": "inventory", "namespace": "ns",
+            "configured_via": "ConfigMap/runtime:INVENTORY_URL", "configured_endpoint": {
+                "host": "inventory", "scheme": "http", "port": 8080, "port_source": "explicit"},
+            "observed_at": "2026-09-20T12:00:00Z"}]
+        self.kube.resolve_service.return_value = {"service": {"name": "inventory", "namespace": "ns", "type": "ClusterIP",
+            "selector": {"app": "inventory"}, "ports": [{"name": "http", "port": 8081, "target_port": 8081, "protocol": "TCP"}],
+            "observed_at": "2026-09-20T12:01:00Z", "source": "Kubernetes API Service"},
+            "pods": [{"name": "inventory-1", "namespace": "ns"}, {"name": "inventory-2", "namespace": "ns"}]}
         self.logs.collect_logs.return_value = [{"message": '{"mysql_error_code":1054}', "@timestamp": "now"}]
         self.prom.collect_pod_metrics.side_effect = RuntimeError("password=private")
         self.kube.configuration_snapshot.return_value = [{"kind": "PodSpec", "name": "inventory-1"}]
         result = self.kit.execute("dependency_evidence", {"service": "inventory", "terms": ["1054"]})
         self.assertEqual(result["matching_pods"], 2)
+        self.assertEqual(result["port_comparisons"][0]["status"], "does_not_match_service_port")
+        self.assertEqual(result["port_comparisons"][0]["configured_port"], 8080)
+        self.assertEqual(result["port_comparisons"][0]["service_ports"][0]["port"], 8081)
+        self.assertEqual(result["declared_endpoints"][0]["configured_via"], "ConfigMap/runtime:INVENTORY_URL")
+        self.assertTrue(result["observed_at"].endswith("Z"))
         self.assertEqual(result["unavailable_sources"], ["Prometheus"])
         self.assertEqual(result["patterns"][0]["fields"]["mysql_error_code"], "1054")
         self.assertEqual(self.logs.collect_logs.call_args.args[:2], ("ns", "inventory-1"))
@@ -865,6 +906,41 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertIn("not historical", result["limitation"])
         self.assertNotIn("private", json.dumps(result))
         self.assertEqual(self.kit.pods, ["worker-1"])
+
+    def test_dependency_without_current_pods_returns_service_facts_without_extra_queries(self):
+        self.kube.list_pods.return_value = [{"name": "worker-1", "workload": "worker"}]
+        self.kube.declared_services.return_value = [{"service": "inventory", "namespace": "ns",
+            "configured_endpoint": {"host": "inventory", "scheme": None, "port": None, "port_source": "not_declared"}}]
+        self.kube.resolve_service.return_value = {"service": {"name": "inventory", "namespace": "ns", "type": "ClusterIP",
+            "selector": {"app": "inventory"}, "ports": [{"name": "http", "port": 8080, "target_port": 8081}],
+            "observed_at": "2026-09-20T12:01:00Z", "source": "Kubernetes API Service"}, "pods": []}
+
+        result = self.kit.execute("dependency_evidence", {"service": "inventory"})
+
+        self.assertEqual(result["matching_pods"], 0)
+        self.assertEqual(result["port_comparisons"][0]["status"], "unknown")
+        self.assertEqual(result["not_collected_sources"], ["OpenSearch", "Prometheus", "Pod configuration"])
+        self.assertEqual(result["observations"], [])
+        self.logs.collect_logs.assert_not_called()
+        self.prom.collect_pod_metrics.assert_not_called()
+
+    def test_dependency_keeps_route_facts_when_all_pod_sources_are_unavailable(self):
+        self.kube.list_pods.return_value = [{"name": "worker-1", "workload": "worker"}]
+        self.kube.declared_services.return_value = [{"service": "inventory", "namespace": "ns",
+            "configured_endpoint": {"host": "inventory", "scheme": "http", "port": 8080, "port_source": "explicit"}}]
+        self.kube.resolve_service.return_value = {"service": {"name": "inventory", "namespace": "ns", "type": "ClusterIP",
+            "selector": {"app": "inventory"}, "ports": [{"name": "http", "port": 8081, "target_port": 8081}],
+            "observed_at": "2026-09-20T12:01:00Z", "source": "Kubernetes API Service"},
+            "pods": [{"name": "inventory-1", "namespace": "ns"}]}
+        self.logs.collect_logs.side_effect = RuntimeError("OpenSearch unavailable")
+        self.prom.collect_pod_metrics.side_effect = RuntimeError("Prometheus unavailable")
+        self.kube.configuration_snapshot.side_effect = RuntimeError("Kubernetes unavailable")
+
+        result = self.kit.execute("dependency_evidence", {"service": "inventory"})
+
+        self.assertEqual(result["port_comparisons"][0]["status"], "does_not_match_service_port")
+        self.assertEqual(result["unavailable_sources"], ["OpenSearch", "Prometheus", "Kubernetes"])
+        self.assertEqual(result["service_observation"]["ports"][0]["port"], 8081)
 
     def test_sql_error_codes_do_not_collapse_into_one_pattern(self):
         groups = log_patterns([{"message": '{"mysql_error_code":1054}'}, {"message": '{"mysql_error_code":1205}'}])

@@ -339,8 +339,10 @@ class LiveSourceTests(unittest.TestCase):
                     "items": [{
                         "metadata": {"name": "api", "namespace": "monitoring", "resourceVersion": "12"},
                         "spec": {
-                            "namespaceSelector": {"matchNames": ["shop"]},
-                            "selector": {"matchLabels": {"metrics": "enabled"}},
+                        "namespaceSelector": {"matchNames": ["shop"]},
+                            "selector": {"matchLabels": {"metrics": "enabled"}, "matchExpressions": [
+                                {"key": "tier", "operator": "In", "values": ["api", "worker"]},
+                            ]},
                             "endpoints": [{"port": "metrics", "path": "/metrics", "interval": "30s"}],
                         },
                     }]
@@ -350,7 +352,9 @@ class LiveSourceTests(unittest.TestCase):
                         "metadata": {"name": "worker", "namespace": "monitoring"},
                         "spec": {
                             "namespaceSelector": {"matchNames": ["shop"]},
-                            "selector": {"matchLabels": {"metrics": "pod-enabled"}},
+                            "selector": {"matchLabels": {"metrics": "pod-enabled"}, "matchExpressions": [
+                                {"key": "deprecated", "operator": "DoesNotExist", "values": []},
+                            ]},
                             "podMetricsEndpoints": [{"port": "metrics"}],
                         },
                     }]
@@ -363,6 +367,42 @@ class LiveSourceTests(unittest.TestCase):
         self.assertEqual([item["kind"] for item in monitors], ["ServiceMonitor", "PodMonitor"])
         self.assertEqual(monitors[0]["match_labels"], {"metrics": "enabled"})
         self.assertEqual(monitors[1]["match_labels"], {"metrics": "pod-enabled"})
+        self.assertEqual(monitors[0]["match_expressions"], [
+            {"key": "tier", "operator": "In", "values": ["api", "worker"]},
+        ])
+        self.assertEqual(monitors[1]["match_expressions"], [
+            {"key": "deprecated", "operator": "DoesNotExist", "values": []},
+        ])
+        self.assertEqual(monitors[0]["effective_namespaces"], ["shop"])
+        self.assertEqual(monitors[0]["namespace_selector"]["status"], "resolved")
+        self.assertTrue(monitors[0]["observed_at"].endswith("Z"))
+
+    def test_monitor_namespace_any_is_scoped_to_requested_namespaces(self):
+        adapter = KubernetesAdapter("http://kubernetes")
+        adapter.transport = FakeTransport({
+            "/apis/monitoring.coreos.com/v1/servicemonitors": {"items": [
+                {"metadata": {"name": "global", "namespace": "monitoring"},
+                 "spec": {"namespaceSelector": {"any": True}, "selector": {}}},
+                {"metadata": {"name": "local-default", "namespace": "shop"},
+                 "spec": {"selector": {"matchLabels": {"app": "api"}}}},
+                {"metadata": {"name": "other-only", "namespace": "monitoring"},
+                 "spec": {"namespaceSelector": {"matchNames": ["other"]}, "selector": {}}},
+                {"metadata": {"name": "malformed-cross-ns", "namespace": "monitoring"},
+                 "spec": {"namespaceSelector": {"any": "true"}}},
+            ]},
+            "/apis/monitoring.coreos.com/v1/podmonitors": {"items": []},
+        })
+
+        monitors = adapter.monitoring_resources({"shop"})
+
+        self.assertEqual([item["name"] for item in monitors], ["global", "local-default", "malformed-cross-ns"])
+        self.assertEqual(monitors[0]["effective_namespaces"], ["shop"])
+        self.assertTrue(monitors[0]["namespace_selector"]["any"])
+        self.assertEqual(monitors[1]["effective_namespaces"], ["shop"])
+        self.assertTrue(monitors[1]["namespace_selector"]["defaults_to_monitor_namespace"])
+        self.assertEqual(monitors[2]["effective_namespaces"], ["shop"])
+        self.assertEqual(monitors[2]["namespace_selector"]["status"], "unknown")
+        self.assertFalse(monitors[2]["selector_complete"])
 
     def test_source_configuration_is_validated_and_persisted(self):
         with tempfile.TemporaryDirectory() as directory:
