@@ -136,7 +136,7 @@ def validate_assessment(
         # it overturn a grounded assessment of current evidence. Nothing about
         # the omitted field is retained or presented as historical fact.
         pass
-    return scrub(result)
+    return scrub(result, reference_ids=evidence_ids | incident_ids | (historical_episode_ids or set()))
 
 
 def assessment_payload(decision: dict[str, Any], call: dict[str, Any]) -> Any:
@@ -243,7 +243,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
     if max_prompt_tokens < 1200 or max_prompt_tokens > 12000:
         raise ValueError("max_prompt_tokens must be between 1200 and 12000")
     state = {"version": "1", "episode_id": context["episode_id"], "status": "running", "started_at": now(),
-              "policy_version": "episode-investigation-1.15", "max_completion_tokens_per_call": max_tokens,
+              "policy_version": "episode-investigation-1.16", "max_completion_tokens_per_call": max_tokens,
              "model": model, "context": context, "checks": [], "calls": [], "assessment": None,
              "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
              "token_budget": {"maximum_total_tokens": max_total_tokens, "maximum_prompt_tokens": max_prompt_tokens,
@@ -457,7 +457,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             candidate = None
             try:
                 decision = parse_object(str(response.get("content", "")))
-                call["decision"] = scrub(decision)
+                call["decision"] = scrub(decision, reference_ids=set(visible_evidence_ids))
                 if decision.get("action") == "finish":
                     candidate = assessment_payload(decision, call)
                     state["assessment"] = validate_assessment(candidate, set(visible_evidence_ids),
@@ -518,7 +518,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             payload, visible_evidence_ids = compact_payload(review_base)
             response, call = request_model(payload, "none", "evidence_review", 1200)
             decision = parse_object(str(response.get("content", "")))
-            call["decision"] = scrub(decision)
+            call["decision"] = scrub(decision, reference_ids=set(visible_evidence_ids))
             repaired_review = False
             try:
                 reviewed = validate_assessment(
@@ -543,7 +543,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 payload, visible_evidence_ids = compact_payload(repair_base)
                 response, repair_call = request_model(payload, "none", "evidence_review_repair", 700)
                 repair_decision = parse_object(str(response.get("content", "")))
-                repair_call["decision"] = scrub(repair_decision)
+                repair_call["decision"] = scrub(repair_decision, reference_ids=set(visible_evidence_ids))
                 reviewed = validate_assessment(
                     review_assessment_payload(repair_decision, repair_call), set(visible_evidence_ids),
                     {item["incident_id"] for item in context["alerts"]},

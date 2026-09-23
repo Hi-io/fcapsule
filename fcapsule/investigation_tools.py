@@ -12,14 +12,18 @@ from typing import Any
 from fcapsule.processing.anonymizer import anonymize_text, diagnostic_fields, template_for_message
 
 
-def scrub(value: Any) -> Any:
+def scrub(value: Any, *, reference_ids: set[str] | frozenset[str] = frozenset()) -> Any:
     if isinstance(value, str):
+        # Only exact, caller-validated references bypass masking. Never exempt a
+        # UUID/hex-shaped string merely because it looks like an internal ID.
+        if value in reference_ids:
+            return value
         return anonymize_text(value)[:2000]
     if isinstance(value, dict):
-        return {str(key): scrub(item) for key, item in value.items()
+        return {str(key): scrub(item, reference_ids=reference_ids) for key, item in value.items()
                 if not any(term in str(key).lower() for term in ("password", "secret", "token", "credential"))}
     if isinstance(value, list):
-        return [scrub(item) for item in value[:80]]
+        return [scrub(item, reference_ids=reference_ids) for item in value[:80]]
     return value
 
 

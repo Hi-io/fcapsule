@@ -76,6 +76,25 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(state["assessment"]["provenance"], "deterministic_abstention")
         self.assertEqual(state["usage"]["total_tokens"], 130)
 
+    def test_attachment_references_survive_scrubbing_in_review_and_final_assessment(self):
+        ref = "A-attachment-0123456789abcdef0123456789abcdef"
+        self.context["evidence"] = [{"id": ref, "summary": "Target is down"}]
+        candidate = assessment(ref)
+        candidate["summary"] = "Target is down password=never-retain-this"
+        state, client = self.run_case([{"action": "finish", "assessment": candidate}], max_checks=0)
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["assessment"]["evidence_ids"], [ref])
+        self.assertEqual(state["assessment"]["hypotheses"][0]["evidence_ids"], [ref])
+        review = json.loads(client.requests[-1].messages[1]["content"])
+        self.assertEqual(review["assessment_to_review"]["evidence_ids"], [ref])
+        for call in state["calls"]:
+            self.assertEqual(call["decision"]["assessment"]["evidence_ids"], [ref])
+        self.assertNotIn("never-retain-this", json.dumps(state))
+        self.assertNotEqual(scrub(ref), ref)
+        self.assertNotEqual(scrub("ffffffffffffffff", reference_ids={ref}), "ffffffffffffffff")
+        with self.assertRaisesRegex(ValueError, "unavailable evidence"):
+            validate_assessment(candidate, {"E1"}, {"one"})
+
     def test_revision_evidence_survives_full_request_budget_including_review(self):
         self.context["evidence"] = [
             {"id": f"E-{index}", "domain": "log_template", "revision_priority": True,

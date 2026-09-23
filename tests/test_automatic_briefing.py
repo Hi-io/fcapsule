@@ -84,6 +84,31 @@ class AutomaticInvestigationTests(unittest.TestCase):
             self.control.investigator.resume()
             self.assertEqual(generate.call_count, 1)
 
+    def test_restart_does_not_replace_a_completed_manual_evidence_revision(self):
+        self.control._build_capsule(self.id)
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}), patch(
+            "fcapsule.investigation_service.run_investigation",
+            side_effect=lambda *args: args[4]({"status": "ready", "checks": [], "assessment": {}}),
+        ) as generate:
+            self.control.investigator.start(self.episode_id, retry=True, reason="evidence_added")
+            self.control.briefing_executor.shutdown(wait=True)
+            prior = self.control.investigator.read(self.episode_id)
+            self.control.investigator.resume()
+            current = self.control.investigator.read(self.episode_id)
+            legacy = dict(prior)
+            legacy.pop("primary_incident_id", None)
+            episode = self.control.store.get_episode(self.episode_id)
+            legacy["input_fingerprint"] = self.control.investigator.fingerprint(
+                self.control.investigator.entries(episode), self.control.evidence.manifest(self.episode_id), None
+            )
+            self.control._write_briefing_state(self.control.investigator.path(self.episode_id), legacy)
+            self.control.investigator.resume()
+            self.assertEqual(self.control.investigator.read(self.episode_id)["revision_id"], prior["revision_id"])
+        generate.assert_called_once()
+        self.assertEqual(current["revision_id"], prior["revision_id"])
+        self.assertEqual(current["revision_reason"], "evidence_added")
+        self.assertEqual(current["primary_incident_id"], self.id)
+
     def test_deleted_incident_is_not_recreated_by_late_provider_response(self):
         entered, release = threading.Event(), threading.Event()
 

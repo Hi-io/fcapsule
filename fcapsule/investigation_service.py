@@ -300,6 +300,12 @@ class InvestigationService:
             entries = self.entries(episode)
             if not entries:
                 raise ValueError("Build at least one report before starting an investigation")
+            if primary_incident_id is None and episode.get("primary_incident_id") in {
+                item["incident"]["incident_id"] for item in entries
+            }:
+                # Manual media updates and startup discovery refer to the same
+                # primary report; do not bill a fresh run solely on restart.
+                primary_incident_id = episode["primary_incident_id"]
             if primary_incident_id and primary_incident_id not in {item["incident"]["incident_id"] for item in entries}:
                 raise ValueError("Primary incident is not a member of this episode")
             evidence_manifest = self.plane.evidence.manifest(episode_id)
@@ -341,6 +347,16 @@ class InvestigationService:
     def resume(self) -> None:
         for episode in self.plane.store.list_episodes(limit=10000):
             if any(signal.get("report_ready") for signal in episode["signals"]):
+                previous = self.read(episode["episode_id"])
+                if previous.get("status") in {"ready", "incomplete", "inconclusive"}:
+                    entries = self.entries(episode)
+                    manifest = self.plane.evidence.manifest(episode["episode_id"])
+                    # Older manual revisions fingerprinted an implicit primary as
+                    # None. Keep completed work when its inputs are unchanged.
+                    if previous.get("input_fingerprint") == self.fingerprint(
+                        entries, manifest, previous.get("primary_incident_id")
+                    ):
+                        continue
                 self.start(episode["episode_id"], primary_incident_id=episode.get("primary_incident_id"))
 
     def invalidate(self, episode_id: str) -> None:
@@ -405,6 +421,7 @@ class InvestigationService:
                     state.update(input_fingerprint=input_fingerprint, attempt=queued["attempt"],
                                  lifetime_usage=queued.get("lifetime_usage", {}), previous_runs=queued.get("previous_runs", []),
                                  revision_id=queued.get("revision_id"), parent_revision_id=queued.get("parent_revision_id"),
+                                 primary_incident_id=primary_incident_id,
                                  revision_reason=queued.get("revision_reason"), source_mode=queued.get("source_mode"),
                                  evidence_manifest=evidence_manifest)
                     if state.get("status") in {"ready", "incomplete", "inconclusive"}:

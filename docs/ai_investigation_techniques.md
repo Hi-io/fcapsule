@@ -271,6 +271,10 @@ label. Extracted limitations remain alongside the bounded observation. Priority 
 only name retained items, and the call audit records which IDs were actually shown;
 retained evidence on disk is not proof that a model received it. Very tight caps may
 still omit lower-ranked attachments. The same ranking applies to the final review.
+Validated citation IDs bypass text masking by exact known-reference membership only;
+arbitrary identifiers, model prose and source payloads remain masked. Manual revisions
+and startup share a primary-report identity, so a restart alone does not replace a
+completed review or trigger another paid call when its inputs are unchanged.
 Compaction also retains the compact termination, limit and declared-dependency facts from required
 observations before lower-priority retained summaries. A forced final assessment omits
 the unused tool catalogue. Assessment and review calls reserve up to 1,200 completion
