@@ -149,9 +149,12 @@ class InvestigationService:
 
         current_id = primary_incident_id or episode.get("primary_incident_id")
         current = next((item for item in episode.get("signals", []) if item["incident_id"] == current_id), {})
-        identity = current.get("recurrence_key") or (episode.get("recurrence_key") if not primary_incident_id else None)
+        if not current:
+            return []
+        identity = current.get("recurrence_key")
+        summaries = self.plane.store.recurrence_candidates_for_incident(episode["episode_id"], current_id)
         candidates = []
-        for summary in (episode.get("recurrence") or {}).get("candidates", [])[:3]:
+        for summary in summaries[:3]:
             prior = self.plane.store.get_episode(str(summary["episode_id"]))
             if not prior or prior.get("app_id") != episode.get("app_id"):
                 continue

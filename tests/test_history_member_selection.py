@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 from fcapsule.investigation_service import InvestigationService
 from fcapsule.investigation_tools import historical_episode_result
-from fcapsule.store import _recurrence_key
+from fcapsule.store import FCAPSuleStore, _recurrence_key
 
 
 class HistoricalMemberSelectionTests(unittest.TestCase):
@@ -25,11 +25,12 @@ class HistoricalMemberSelectionTests(unittest.TestCase):
                         "recurrence": {"candidates": [{"episode_id": "prior"}]}}
         store = Mock()
         store.get_episode.return_value = self.prior
+        store.recurrence_candidates_for_incident.return_value = [{"episode_id": "prior"}]
         store.get_capsule_for_incident.side_effect = self.records.get
         store.get_incident.side_effect = self.incidents.get
         self.service = InvestigationService(SimpleNamespace(store=store, state_dir=self.root))
 
-    def member(self, name, minute, key=None):
+    def member(self, name, minute, key=None, alert=None):
         signal = {"incident_id": name, "started_at": f"2026-09-20T00:{minute:02d}:00Z",
                   "status": "resolved", "recurrence_key": key or self.key}
         self.prior["signals"].append(signal)
@@ -38,7 +39,7 @@ class HistoricalMemberSelectionTests(unittest.TestCase):
         folder.mkdir()
         self.records[name] = {"output_dir": str(folder)}
         (folder / "capsule.json").write_text(json.dumps({"case": {}}), encoding="utf-8")
-        report = {"incident": {}, "fault_alerts": [{"name": "QueueHigh" if signal["recurrence_key"] == self.key else "OtherAlert"}],
+        report = {"incident": {}, "fault_alerts": [{"name": alert or ("QueueHigh" if signal["recurrence_key"] == self.key else "OtherAlert")}],
                   "supporting_evidence": [{"evidence_id": name + "-evidence", "type": "log", "title": name,
                                            "summary": "Retained observation " + name}]}
         (folder / "incident_report.json").write_text(json.dumps(report), encoding="utf-8")
@@ -107,7 +108,9 @@ class HistoricalMemberSelectionTests(unittest.TestCase):
         self.mixed_members()
         other_key = _recurrence_key("app", "pod", "processor", "OtherAlert")
         self.current["signals"].append({"incident_id": "revision-member", "recurrence_key": other_key})
+        self.service.plane.store.recurrence_candidates_for_incident.return_value = [{"episode_id": "prior"}]
         result = self.service.historical_candidates(self.current, "revision-member")[0]
+        self.service.plane.store.recurrence_candidates_for_incident.assert_called_once_with("current", "revision-member")
         self.assertEqual(result["member_selection"]["current_incident_id"], "revision-member")
         self.assertEqual(result["captured_evidence"][0]["incident_id"], "other-14")
         self.assertEqual(self.current["primary_incident_id"], "current-member")
@@ -135,6 +138,49 @@ class HistoricalMemberSelectionTests(unittest.TestCase):
         first = checks[0]["result"]["observations"][0]
         self.assertEqual(first["source"]["provenance"][0]["incident_id"], "matching-old")
         self.assertTrue(first["source"]["matches_current_alert_identity"])
+
+    def test_real_store_revision_identity_selects_candidates_not_display_primary(self):
+        store = FCAPSuleStore(self.root / "real-state.db")
+        store.upsert_application("app", "Processor", "tasks", "test")
+        store.upsert_application("outside", "Other", "tasks", "test")
+
+        def capture(name, day, alert="QueueHigh", minute=0, severity="warning", app="app", resource="processor"):
+            store.record_incident({"incident_id": name, "app_id": app, "case_dir": str(self.root / name),
+                "started_at": f"2026-09-{day:02d}T00:{minute:02d}:00Z", "status": "resolved", "severity": severity,
+                "resource_kind": "pod", "resource_name": resource, "alert_identity": alert})
+            self.member(name, minute, _recurrence_key(app, "pod", resource, alert), alert)
+            store.record_capsule({"capsule_id": "capsule-" + name, "incident_id": name, "app_id": app,
+                                  "output_dir": self.records[name]["output_dir"]})
+
+        for day in (18, 19, 20, 21):
+            capture(f"prior-a-{day}", day)
+            capture(f"prior-a-repeat-{day}", day, minute=1)
+            capture(f"prior-b-{day}", day, "OtherAlert", minute=2, severity="critical")
+        capture("other-resource", 22, resource="different")
+        capture("current-a", 23)
+        capture("future-a", 24)
+        service = InvestigationService(SimpleNamespace(store=store, state_dir=self.root))
+        episode = store.episode_for_incident("current-a")
+        expected = [store.episode_for_incident(f"prior-a-{day}")["episode_id"] for day in (21, 20, 19)]
+        self.assertEqual(episode["recurrence"]["candidates"], [])
+        self.assertEqual([item["episode_id"] for item in service.historical_candidates(episode)], expected)
+        service.plane.evidence = SimpleNamespace(model_evidence=Mock(return_value=[]))
+        _, checks = service._retained_review_context(episode["episode_id"])
+        self.assertEqual([item["result"]["episode"]["episode_id"] for item in checks], expected)
+        self.assertEqual(checks[0]["result"]["observations"][0]["source"]["provenance"][0]["incident_id"], "prior-a-repeat-21")
+        capture("current-b", 23, "OtherAlert", minute=1, severity="critical")
+        capture("outside-incident", 22, app="outside")
+        episode = store.episode_for_incident("current-a")
+        self.assertEqual(episode["primary_incident_id"], "current-b")
+        self.assertEqual(service.historical_candidates(episode)[0]["observations"][0]["provenance"][0]["incident_id"], "prior-b-21")
+        candidates = service.historical_candidates(episode, "current-a")
+        self.assertEqual([item["episode_id"] for item in candidates], expected)
+        self.assertEqual(candidates[0]["observations"][0]["provenance"][0]["incident_id"], "prior-a-repeat-21")
+        self.assertEqual(service.historical_candidates(episode, "outside-incident"), [])
+        self.assertEqual(service.historical_candidates(episode, "prior-a-21"), [])
+        self.assertEqual(store.recurrence_candidates_for_incident(episode["episode_id"], "outside-incident"), [])
+        self.assertEqual(store.recurrence_candidates_for_incident(episode["episode_id"], "prior-a-21"), [])
+        self.assertEqual(store.get_episode(episode["episode_id"])["primary_incident_id"], "current-b")
 
 
 if __name__ == "__main__":
