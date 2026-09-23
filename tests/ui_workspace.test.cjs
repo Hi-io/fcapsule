@@ -32,6 +32,36 @@ test('retained prose-only references have an evidence destination even without f
   assert.match(helpers.investigationEvidence(run), /id="disclosure-agent-E-only-prose"/);
 });
 
+test('assessment basis uses neutral wording only for inconclusive assessments', () => {
+  for (const [status, label] of [['ready','Why this fits'],['inconclusive','Assessment basis']]) {
+    const html = helpers.briefingPanel({investigation:{status,
+      context:{evidence:[{id:'E123',domain:'metric_anomaly',title:'Latency'}]},
+      assessment:{basis:'E123 records the observation.',evidence_ids:['E123']}}});
+    assert.match(html, new RegExp('<summary id="disclosure-assessment-basis">' + label));
+    assert.match(html, /data-disclosure="assessment-basis"/);
+    assert.match(html, /data-investigation-ref="E123"/);
+    if (status === 'inconclusive') {
+      assert.doesNotMatch(html, /Why this fits/);
+      assert.match(html, /Why no cause is asserted/);
+    }
+  }
+});
+
+test('assessment source counts use singular, plural and no badge for zero sources', () => {
+  for (const status of ['ready','inconclusive']) {
+    for (const count of [0,1,2]) {
+      const ids = Array.from({length:count},(_,index)=>'E' + index);
+      const html = helpers.briefingPanel({investigation:{status,
+        context:{evidence:ids.map(id=>({id,domain:'metric_anomaly',title:id}))},
+        assessment:{basis:'Retained observations.',evidence_ids:ids}}});
+      const summary = html.match(/<summary id="disclosure-assessment-basis">(.*?)<\/summary>/)[1];
+      if (count) assert.match(summary,new RegExp('<span class="inline-count">' + count + (count === 1 ? ' source' : ' sources') + '</span>'));
+      else assert.doesNotMatch(summary,/inline-count/);
+      assert.doesNotMatch(summary,/1 sources/);
+    }
+  }
+});
+
 test('compact activity uses individually expandable checks, real statuses and a token footer', () => {
   const html = helpers.investigationProgress({status:'ready',episode_id:'episode-one',usage:{total_tokens:6205,complete:true},checks:[
     {id:'Q001',tool:'workload_state',question:'Is the workload running?',status:'completed',result:{summary:'Pod running'}},
