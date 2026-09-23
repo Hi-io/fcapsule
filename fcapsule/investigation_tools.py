@@ -9,6 +9,7 @@ import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from fcapsule.adapters.kubernetes_adapter import evaluate_label_selector
 from fcapsule.processing.anonymizer import anonymize_text, diagnostic_fields, template_for_message
 
 
@@ -29,6 +30,10 @@ def scrub(value: Any, *, reference_ids: set[str] | frozenset[str] = frozenset())
 
 def stamp(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _observed_at() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def metric_summary(series: list[dict[str, Any]], focus: datetime | None = None) -> list[dict[str, Any]]:
@@ -76,6 +81,39 @@ def log_patterns(logs: list[dict[str, Any]], terms: list[str] | None = None) -> 
     ranked = sorted(groups.values(), key=lambda item: (-bool(item["fields"]), -item["count"]))
     return {"scanned_lines": len(logs), "matching_patterns": len(groups), "patterns": ranked[:12],
             "limitation": "Bounded sample; no matches does not prove the event did not occur."}
+
+
+def _selector_observation(labels: dict[str, Any], monitor: dict[str, Any], namespace_status: str) -> dict[str, Any]:
+    evaluated = evaluate_label_selector(
+        labels,
+        monitor.get("match_labels", {}),
+        monitor.get("match_expressions", []),
+        complete=monitor.get("selector_complete") is not False,
+    )
+    if namespace_status != "resolved":
+        evaluated = {**evaluated, "status": "unknown", "reason": "namespace_selector_unknown"}
+    return evaluated
+
+
+def _port_comparison(declaration: dict[str, Any], service_ports: list[dict[str, Any]]) -> dict[str, Any]:
+    endpoint = declaration.get("configured_endpoint") if isinstance(declaration.get("configured_endpoint"), dict) else {}
+    configured_port = endpoint.get("port")
+    valid_ports = [item for item in service_ports if isinstance(item, dict) and type(item.get("port")) is int]
+    if type(configured_port) is not int or not valid_ports:
+        status = "unknown"
+    elif any(configured_port == item["port"] for item in valid_ports):
+        status = "matches_service_port"
+    else:
+        status = "does_not_match_service_port"
+    return {
+        "configured_host": endpoint.get("host"),
+        "configured_port": configured_port,
+        "configured_port_source": endpoint.get("port_source", "not_declared"),
+        "port_configured_via": declaration.get("port_configured_via"),
+        "service_ports": valid_ports[:12],
+        "status": status,
+        "comparison_basis": "Configured endpoint port compared with Kubernetes Service port; targetPort is the backend port and is not used as the client-facing Service port.",
+    }
 
 
 def episode_context(
@@ -281,11 +319,11 @@ class InvestigationTools:
         "search_logs": "Search incident-window logs for up to 3 literal terms, preserving diagnostic variants. Pod must be in allowed_pods, not a pod discovered through a dependency. For dependency log follow-up use dependency_evidence with service and terms. args: {pod?: allowed_pods entry, terms: [text]}",
         "compare_baseline": "Compare a ready peer with the same workload, or the preceding equal time window. args: {}",
         "database_pressure": "Query namespace-scoped MySQL connection/limit series and exporter database reachability, with latest-alert phase summaries. Not automatically attributed to this workload. args: {}",
-        "dependency_evidence": "Follow one declared same-namespace Service from workload_state.declared_dependencies; inspect one selected pod's incident logs, metrics and current config. Corroborate the dependency with application evidence. args: {service: declared name, terms?: up to 3 literal log terms}",
+        "dependency_evidence": "Inspect one declared same-namespace Service's port mapping and at most one selected pod's bounded evidence. No pod means no pod queries; a declaration does not prove traffic. args: {service: declared name, terms?: up to 3 literal log terms}",
         "review_omitted": "Inspect candidate evidence excluded from the initial selection, including possible counterevidence. args: {terms?: [text]}",
         "historical_episode": "Read one retained, deterministic recurrence candidate. Earlier assessments are hypotheses; compare their captured evidence with this episode. args: {episode_id: supplied candidate}",
         "alert_rule_logic": "Read the retained/live definitions for the episode's named alert rules. Explains detection logic, not root cause. args: {}",
-        "scrape_discovery": "Compare Prometheus active/dropped target discovery with read-only ServiceMonitor/PodMonitor selectors and current Kubernetes labels. args: {}",
+        "scrape_discovery": "Compare active/dropped targets with bounded ServiceMonitor/PodMonitor label and namespace selectors and current matching Service/Pod labels. Unsupported selection stays unknown. args: {}",
     }
 
     def __init__(
@@ -380,21 +418,63 @@ class InvestigationTools:
             current_pods = [item for item in kubernetes.list_pods({self.namespace}) if item.get("workload") == self.workload or item["name"] in self.pods]
             selections = []
             for monitor in monitors:
-                labels = monitor.get("match_labels", {})
+                monitor_namespace = str(monitor.get("namespace") or "default")
+                namespace_selector = monitor.get("namespace_selector") if isinstance(monitor.get("namespace_selector"), dict) else {}
+                namespace_status = namespace_selector.get("status", "resolved")
+                effective_namespaces = monitor.get("effective_namespaces", monitor.get("target_namespaces", []))
+                if not isinstance(effective_namespaces, list):
+                    effective_namespaces = []
                 if monitor["kind"] == "ServiceMonitor":
-                    matched = [service["name"] for service in services if all(service.get("labels", {}).get(key) == value for key, value in labels.items())]
-                    selections.append({"monitor": monitor, "matched_services": matched, "matched_pods": []})
+                    candidates = []
+                    for service in services:
+                        service_namespace = str(service.get("namespace") or self.namespace)
+                        if service_namespace not in effective_namespaces:
+                            continue
+                        labels = service.get("labels", {}) if isinstance(service.get("labels"), dict) else {}
+                        evaluation = _selector_observation(labels, monitor, namespace_status)
+                        candidates.append({"name": service.get("name"), "namespace": service_namespace,
+                                           "labels": labels, "selector_evaluation": evaluation})
+                    candidates.sort(key=lambda item: (0 if item["selector_evaluation"]["status"] == "matched" else 1,
+                                                        sum(1 for row in item["selector_evaluation"].get("requirements", []) if row.get("matches") is False),
+                                                        str(item.get("name") or "")))
+                    matched = [item["name"] for item in candidates if item["selector_evaluation"]["status"] == "matched"]
+                    selections.append({"monitor": monitor, "target_kind": "Service labels",
+                                       "namespace_scope": {"status": namespace_status, "effective_namespaces": effective_namespaces[:12]},
+                                       "matched_services": matched[:12], "matched_pods": [],
+                                       "evaluated_services": candidates[:12], "omitted_service_candidates": max(0, len(candidates) - 12)})
                 else:
-                    matched = [pod["name"] for pod in current_pods if all(pod.get("labels", {}).get(key) == value for key, value in labels.items())]
-                    selections.append({"monitor": monitor, "matched_services": [], "matched_pods": matched})
+                    candidates = []
+                    for pod in current_pods:
+                        pod_namespace = str(pod.get("namespace") or self.namespace)
+                        if pod_namespace not in effective_namespaces:
+                            continue
+                        labels = pod.get("labels", {}) if isinstance(pod.get("labels"), dict) else {}
+                        evaluation = _selector_observation(labels, monitor, namespace_status)
+                        candidates.append({"name": pod.get("name"), "namespace": pod_namespace,
+                                           "labels": labels, "selector_evaluation": evaluation})
+                    candidates.sort(key=lambda item: (0 if item["selector_evaluation"]["status"] == "matched" else 1,
+                                                        sum(1 for row in item["selector_evaluation"].get("requirements", []) if row.get("matches") is False),
+                                                        str(item.get("name") or "")))
+                    matched = [item["name"] for item in candidates if item["selector_evaluation"]["status"] == "matched"]
+                    selections.append({"monitor": monitor, "target_kind": "Pod labels",
+                                       "namespace_scope": {"status": namespace_status, "effective_namespaces": effective_namespaces[:12]},
+                                       "matched_services": [], "matched_pods": matched[:12],
+                                       "evaluated_pods": candidates[:12], "omitted_pod_candidates": max(0, len(candidates) - 12)})
+            observed_at = _observed_at()
             return scrub({
                 "source": "Prometheus target discovery + Kubernetes monitoring resources",
                 "scope": {"namespace": self.namespace, "pods": self.pods, "workload": self.workload},
+                "observed_at": observed_at,
+                "provenance": [
+                    {"source": "Prometheus target API", "observed_at": observed_at},
+                    {"source": "Kubernetes monitoring and Service/Pod APIs", "observed_at": observed_at},
+                ],
                 "active_targets": targets["active"],
                 "dropped_targets": targets["dropped"],
                 "monitor_selection": selections,
-                "current_pod_labels": [{"pod": item["name"], "labels": item.get("labels", {})} for item in current_pods[:12]],
-                "limitation": "ServiceMonitor selectors apply to Service labels, while PodMonitor selectors apply to Pod labels. Absence from this bounded view may reflect a different namespace, relabeling, RBAC or target filtering; it is not proof of a typo.",
+                "current_pod_labels": [{"pod": item["name"], "namespace": item.get("namespace", self.namespace), "labels": item.get("labels", {})} for item in current_pods[:12]],
+                "current_service_labels": [{"service": item.get("name"), "namespace": item.get("namespace", self.namespace), "labels": item.get("labels", {})} for item in services[:12]],
+                "limitation": "ServiceMonitor selectors apply to Service labels; PodMonitor selectors apply to Pod labels. Supported label expressions are evaluated only for current, bounded candidates in the captured namespace. An unknown selector, Prometheus resource selector, relabeling rule, scrape configuration, or RBAC restriction can prevent a conclusion. A matched selector does not prove the target was retained or scraped.",
             })
         if name == "workload_state":
             pods = [item for item in kubernetes.list_pods({self.namespace})
@@ -416,31 +496,42 @@ class InvestigationTools:
             matching = [item for item in declarations if item["service"] == arguments.get("service")]
             if not matching:
                 raise ValueError("Service is not declared by this workload")
-            targets = kubernetes.service_pods(self.namespace, arguments["service"], available)
-            if not targets:
-                raise ValueError("No current pod matches the declared Service selector")
-            target = targets[0]
-            result = {"source": "Declared dependency: Kubernetes + OpenSearch + Prometheus", "pod": target["name"],
-                      "service": arguments["service"], "configured_via": matching, "matching_pods": len(targets),
+            resolution = kubernetes.resolve_service(self.namespace, arguments["service"], available)
+            service_info = resolution["service"]
+            targets = resolution["pods"]
+            target = targets[0] if targets else None
+            port_comparisons = [_port_comparison(item, service_info.get("ports", [])) for item in matching[:4]]
+            result = {"source": "Declared dependency: Kubernetes + OpenSearch + Prometheus", "pod": target["name"] if target else None,
+                      "service": arguments["service"], "declared_endpoints": matching[:4], "service_observation": service_info,
+                      "port_comparisons": port_comparisons, "matching_pods": len(targets),
                       "latest_alert_at": self.focus_time.isoformat(),
                       "window": [self.window_start.isoformat(), self.window_end.isoformat()], "observations": [],
-                      "unavailable_sources": [], "observed_at": datetime.now(timezone.utc).isoformat(),
-                      "limitation": "One pod sampled. Declaration is not proof of traffic or causation. Service membership and config are current, not historical. Missing samples do not prove health."}
-            for source, collect in (
-                ("OpenSearch", lambda: log_patterns(opensearch.collect_logs(self.namespace, target["name"], self.window_start, self.window_end, limit=200, terms=terms, focus=self.focus_time))),
-                ("Prometheus", lambda: {"observations": metric_summary(prometheus.collect_pod_metrics(self.namespace, target["name"], self.window_start, self.window_end), self.focus_time)}),
-                ("Kubernetes", lambda: {"observations": kubernetes.configuration_snapshot(target)[:8]}),
-            ):
-                try:
-                    observation = collect()
-                    result["observations"].extend(observation.pop("observations", []))
-                    if observation.get("limitation"):
-                        result["limitation"] += " " + observation.pop("limitation")
-                    result.update(observation)
-                except (RuntimeError, OSError, ValueError):
-                    result["unavailable_sources"].append(source)
-            if len(result["unavailable_sources"]) == 3:
-                raise ValueError("Dependency sources unavailable")
+                      "unavailable_sources": [], "not_collected_sources": [], "observed_at": _observed_at(),
+                      "provenance": [{"source": service_info.get("source", "Kubernetes API Service"),
+                                      "resource": f"Service/{self.namespace}/{arguments['service']}",
+                                      "observed_at": service_info.get("observed_at")}],
+                      "limitation": "Current Service and configuration facts are not historical. Endpoint port is compared with the client-facing Service port, not its backend targetPort. A declared endpoint does not prove traffic or causation."}
+            if target:
+                result["provenance"].append({"source": "Kubernetes API Pod", "resource": f"Pod/{self.namespace}/{target['name']}",
+                                             "observed_at": _observed_at()})
+                for source, collect in (
+                    ("OpenSearch", lambda: log_patterns(opensearch.collect_logs(self.namespace, target["name"], self.window_start, self.window_end, limit=200, terms=terms, focus=self.focus_time))),
+                    ("Prometheus", lambda: {"observations": metric_summary(prometheus.collect_pod_metrics(self.namespace, target["name"], self.window_start, self.window_end), self.focus_time)}),
+                    ("Kubernetes", lambda: {"observations": kubernetes.configuration_snapshot(target)[:8]}),
+                ):
+                    try:
+                        observation = collect()
+                        result["observations"].extend(observation.pop("observations", []))
+                        if observation.get("limitation"):
+                            result["limitation"] += " " + observation.pop("limitation")
+                        result.update(observation)
+                        result["provenance"].append({"source": source, "resource": f"Pod/{self.namespace}/{target['name']}",
+                                                     "observed_at": _observed_at()})
+                    except (RuntimeError, OSError, ValueError):
+                        result["unavailable_sources"].append(source)
+            else:
+                result["not_collected_sources"] = ["OpenSearch", "Prometheus", "Pod configuration"]
+                result["limitation"] += " No current pod matched the Service selector, so pod-scoped logs, metrics and configuration were not queried."
             return scrub(result)
         if not pod and name != "database_pressure":
             raise ValueError("No captured pod identity is available")

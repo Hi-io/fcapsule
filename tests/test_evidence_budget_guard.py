@@ -37,6 +37,109 @@ def current_assessment(reference="Q002"):
 
 
 class EvidenceBudgetGuardTests(unittest.TestCase):
+    def test_compaction_retains_service_label_expression_and_namespace_evidence(self):
+        raw = {
+            "source": "Prometheus target discovery + Kubernetes APIs",
+            "scope": {"namespace": "production", "pods": ["api-1"]},
+            "observed_at": "2026-09-24T02:00:00Z",
+            "provenance": [{"source": "Kubernetes monitoring and Service APIs", "observed_at": "2026-09-24T02:00:00Z"}],
+            "active_targets": [], "dropped_targets": [],
+            "current_service_labels": [{"service": "api-metrics", "namespace": "production",
+                                         "labels": {"monitoring": "enabeld", "private-token": "never-leak"}}],
+            "monitor_selection": [{
+                "monitor": {"kind": "ServiceMonitor", "namespace": "monitoring", "name": "api",
+                    "match_labels": {"monitoring": "enabled"}, "match_expressions": [
+                        {"key": "tier", "operator": "In", "values": ["backend", "worker"]},
+                        {"key": "private-token", "operator": "Exists", "values": []},
+                    ], "selector_complete": True},
+                "target_kind": "Service labels", "namespace_scope": {
+                    "status": "resolved", "effective_namespaces": ["production"]},
+                "matched_services": [], "matched_pods": [],
+                "evaluated_services": [{"name": "api-metrics", "namespace": "production",
+                    "labels": {"monitoring": "enabeld", "tier": "backend", "private-token": "never-leak"},
+                    "selector_evaluation": {"status": "not_matched", "requirements": [
+                        {"key": "monitoring", "operator": "Equals", "expected": "enabled",
+                         "observed": "enabeld", "matches": False},
+                        {"key": "tier", "operator": "In", "expected": ["backend", "worker"],
+                         "observed": "backend", "matches": True},
+                        {"key": "private-token", "operator": "Exists", "redacted": True},
+                    ]}},
+            ]}],
+        }
+
+        compact = _check_item({"id": "Q2", "tool": "scrape_discovery", "status": "completed", "result": raw}, False)
+        observation = _minimal_check_observation(compact)
+        selection = observation["monitor_selection"][0]
+        self.assertEqual(selection["match_expressions"][0]["operator"], "In")
+        self.assertEqual(selection["namespace_scope"]["effective_namespaces"], ["production"])
+        self.assertEqual(selection["evaluated_resources"][0]["selector_status"], "not_matched")
+        self.assertEqual(selection["evaluated_resources"][0]["requirements"][0]["observed"], "enabeld")
+        self.assertEqual(selection["evaluated_resources"][0]["requirements"][1]["matches"], True)
+        self.assertNotIn("never-leak", json.dumps(observation))
+        self.assertEqual(observation["observed_at"], raw["observed_at"])
+        self.assertTrue(observation["compacted_discovery"])
+
+    def test_dependency_compaction_keeps_declared_port_comparison_and_provenance(self):
+        raw = {
+            "service": "inventory", "pod": "inventory-1", "matching_pods": 1,
+            "observed_at": "2026-09-24T02:00:00Z", "latest_alert_at": "2026-09-24T01:59:00Z",
+            "window": ["2026-09-24T01:50:00Z", "2026-09-24T02:00:00Z"],
+            "declared_endpoints": [{"service": "inventory", "configured_via": "ConfigMap/runtime:INVENTORY_URL",
+                "configured_endpoint": {"host": "inventory", "scheme": "http", "port": 8080, "port_source": "explicit"},
+                "observed_at": "2026-09-24T02:00:00Z"}],
+            "service_observation": {"name": "inventory", "namespace": "production", "type": "ClusterIP",
+                "selector": {"app": "inventory"}, "ports": [{"name": "http", "port": 8081,
+                    "target_port": 8081, "protocol": "TCP"}], "source": "Kubernetes API Service",
+                "observed_at": "2026-09-24T02:00:00Z"},
+            "port_comparisons": [{"configured_host": "inventory", "configured_port": 8080,
+                "configured_port_source": "explicit", "status": "does_not_match_service_port",
+                "service_ports": [{"name": "http", "port": 8081, "target_port": 8081, "protocol": "TCP"}],
+                "comparison_basis": "Configured endpoint port compared with Kubernetes Service port."}],
+            "provenance": [{"source": "Kubernetes API Service", "resource": "Service/production/inventory",
+                            "observed_at": "2026-09-24T02:00:00Z"}],
+            "observations": [], "unavailable_sources": [], "not_collected_sources": [],
+            "limitation": "Current Service state only.",
+        }
+
+        compact = _check_item({"id": "Q3", "tool": "dependency_evidence", "status": "completed", "result": raw}, False)
+        observation = _minimal_check_observation(compact)
+
+        self.assertEqual(observation["declared_endpoints"][0]["configured_endpoint"]["port"], 8080)
+        self.assertEqual(observation["service_observation"]["ports"][0]["port"], 8081)
+        self.assertEqual(observation["port_comparisons"][0]["status"], "does_not_match_service_port")
+        self.assertEqual(observation["provenance"][0]["resource"], "Service/production/inventory")
+        self.assertEqual(observation["observed_at"], raw["observed_at"])
+
+    def test_compaction_keeps_paired_port_provenance(self):
+        raw = {"declared_endpoints": [{
+            "service": "inventory", "configured_via": "ConfigMap/runtime:INVENTORY_HOST",
+            "configured_endpoint": {"host": "inventory", "port": 8081, "port_source": "paired_environment"},
+            "port_configured_via": "ConfigMap/runtime:INVENTORY_PORT",
+            "observed_at": "2026-09-24T02:00:00Z",
+        }], "service_observation": {"ports": []}, "port_comparisons": [], "observations": []}
+
+        compact = _check_item({"id": "Q3", "tool": "dependency_evidence", "status": "completed", "result": raw}, False)
+        observation = _minimal_check_observation(compact)
+
+        self.assertEqual(observation["declared_endpoints"][0]["port_configured_via"],
+                         "ConfigMap/runtime:INVENTORY_PORT")
+        workload = _check_item({"id": "Q1", "tool": "workload_state", "result": {
+            "declared_dependencies": raw["declared_endpoints"], "observations": []}}, False)
+        self.assertEqual(workload["observation"]["declared_dependencies"][0]["port_configured_via"],
+                         "ConfigMap/runtime:INVENTORY_PORT")
+
+    def test_workload_state_summary_retains_endpoint_identity_without_url_path(self):
+        raw = {"declared_dependencies": [{"service": "inventory", "configured_via": "ConfigMap/runtime:INVENTORY_URL",
+                "configured_endpoint": {"host": "inventory", "scheme": "http", "port": 8080,
+                                         "port_source": "explicit", "path": "/private"},
+                "observed_at": "2026-09-24T02:00:00Z"}],
+            "observations": [{"kind": "PodSpec", "name": "orders-1", "resources": [], "container_states": []}]}
+        compact = _check_item({"id": "Q1", "tool": "workload_state", "result": raw}, False)
+        endpoint = compact["observation"]["declared_dependencies"][0]["configured_endpoint"]
+        self.assertEqual(endpoint["host"], "inventory")
+        self.assertEqual(endpoint["port"], 8080)
+        self.assertNotIn("path", endpoint)
+
     def test_selector_and_actual_labels_stay_paired_without_forcing_mismatch(self):
         for kind in ("ServiceMonitor", "PodMonitor"):
             for actual in ("enabled", "disabled"):
