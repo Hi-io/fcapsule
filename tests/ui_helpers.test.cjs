@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const { test } = require('node:test');
 
 const source = fs.readFileSync(path.join(__dirname, '../fcapsule/ui/assets/app.js'), 'utf8');
+const uiStates = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/ui_states.json'), 'utf8'));
 function helper(name, next, context = {}) {
   const code = source.slice(source.indexOf(`function ${name}(`), source.indexOf(`function ${next}(`));
   return vm.runInNewContext(code + '\n' + name, context);
@@ -115,6 +116,52 @@ test('episode lifecycle does not label an incomplete investigation as saved', ()
     investigation:{status:'incomplete',finished_at:'attempt-time'}, signals:[{incident_id:'one',reference:'INC-ONE'}]});
   assert.match(html, /Investigation needs attention attempt-time/);
   assert.doesNotMatch(html, /Assessment saved/);
+});
+
+test('representative investigation states have distinct operator guidance', () => {
+  const render = helper('briefingPanel', 'investigationRefs', {
+    safe:value=>String(value ?? ''), formatDate:value=>value, selectedEpisodeId:'episode-example',
+    investigationRefs:()=>'', disclosure:(id,title,body)=>'<details><summary>'+title+'</summary>'+body+'</details>',
+  });
+  const ready = render({investigation:uiStates.ready});
+  const inconclusive = render({investigation:uiStates.inconclusive});
+  const running = render({investigation:uiStates.running});
+  const missing = render({investigation:uiStates.missing_provider});
+  const missingSource = render({investigation:uiStates.missing_source});
+  const interrupted = render({investigation:uiStates.interrupted});
+  assert.match(ready,/The inventory dependency timed out/);
+  assert.match(inconclusive,/No supported cause yet/);
+  assert.match(inconclusive,/no retained metrics/);
+  assert.match(running,/Investigating/);
+  assert.doesNotMatch(running,/Reassess episode/);
+  assert.match(missing,/Provider key required/);
+  assert.match(missing,/Open Settings/);
+  assert.match(missingSource,/No OpenSearch log records were available/);
+  assert.match(interrupted,/Investigation needs attention/);
+  assert.match(interrupted,/Provider unavailable/);
+  assert.match(render({investigation:{status:'not_started',episode_id:'episode-example'}}),/Start investigation/);
+});
+
+test('multi-alert and archived fixtures retain scope and lifecycle controls', () => {
+  const context = helper('episodeContext', 'formatDate', {
+    reportId:()=> 'incident-one', reportTab:'overview', safe:value=>String(value ?? ''),
+    relativeTime:value=>value, icon:()=>'',
+  });
+  const html = context(uiStates.multi_alert);
+  assert.match(html,/Episode EP-EXAMPLE/);
+  assert.match(html,/2 captured alerts/);
+  assert.doesNotMatch(html,/INC-ONE/);
+  const table = helper('episodeTable', 'episodeContext', {
+    lastState:{overview:{applications:[],related_groups:[]}}, selectedEpisodeId:'episode-archived', selectedReport:{},
+    reportLoading:false, reportError:'', episodeContext:()=>'', reportPanel:()=> '',
+    queueFilters:{}, safe:value=>String(value ?? ''), status:value=>value, formatDate:value=>value,
+    formatExactDate:value=>value, relativeTime:value=>value,
+    resourceLabel:item=>item.app_id, recurrenceLabel:()=> '',
+  });
+  const archived = table([uiStates.archived], [], true);
+  assert.match(archived,/data-restore="episode-archived"/);
+  assert.match(archived,/data-delete="episode-archived"/);
+  assert.doesNotMatch(archived,/data-archive="episode-archived"/);
 });
 
 test('queue filters can find a stable incident reference without hiding unrelated history', () => {

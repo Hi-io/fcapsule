@@ -1,0 +1,76 @@
+{
+  "ready": {
+    "status": "ready",
+    "episode_id": "episode-example",
+    "finished_at": "2026-09-23T09:00:00Z",
+    "assessment": {
+      "summary": "Checkout errors increased during the alert window.",
+      "likely_mechanism": "The inventory dependency timed out.",
+      "next_action": "Check inventory request latency.",
+      "expected_finding": "Dependency latency increased before checkout failures.",
+      "uncertainty": "The dependency's own telemetry is unavailable.",
+      "evidence_ids": [],
+      "hypotheses": [],
+      "connections": []
+    },
+    "findings": []
+  },
+  "inconclusive": {
+    "status": "inconclusive",
+    "episode_id": "episode-example",
+    "message": "Log errors are present, but the affected dependency has no retained metrics."
+  },
+  "running": {
+    "status": "running",
+    "episode_id": "episode-example",
+    "message": "Checking bounded resource history."
+  },
+  "missing_provider": {
+    "status": "not_configured",
+    "episode_id": "episode-example"
+  },
+  "missing_source": {
+    "status": "ready",
+    "episode_id": "episode-example",
+    "assessment": {
+      "summary": "Only the alert and runtime snapshot were retained.",
+      "likely_mechanism": "The affected pod stopped accepting work.",
+      "next_action": "Inspect the pod events and source access.",
+      "expected_finding": "Events identify a reason or the source remains unavailable.",
+      "uncertainty": "No OpenSearch log records were available for this capture.",
+      "evidence_ids": [],
+      "hypotheses": [],
+      "connections": []
+    },
+    "findings": []
+  },
+  "interrupted": {
+    "status": "incomplete",
+    "episode_id": "episode-example",
+    "validation_error": "Provider unavailable before the final assessment."
+  },
+  "multi_alert": {
+    "episode_id": "episode-example",
+    "reference": "EP-EXAMPLE",
+    "signal_count": 2,
+    "status": "active",
+    "signals": [
+      {"incident_id": "incident-one", "reference": "INC-ONE", "started_at": "2026-09-23T08:55:00Z"},
+      {"incident_id": "incident-two", "reference": "INC-TWO", "started_at": "2026-09-23T08:59:00Z"}
+    ]
+  },
+  "archived": {
+    "episode_id": "episode-archived",
+    "reference": "EP-ARCHIVED",
+    "title": "Historic checkout failure",
+    "app_id": "checkout",
+    "signal_count": 1,
+    "report_count": 1,
+    "status": "resolved",
+    "severity": "warning",
+    "started_at": "2026-09-22T08:00:00Z",
+    "last_activity_at": "2026-09-22T08:15:00Z",
+    "archived_at": "2026-09-23T00:00:00Z",
+    "signals": [{"incident_id": "incident-archived", "reference": "INC-ARCHIVED"}]
+  }
+}

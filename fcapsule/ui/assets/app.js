@@ -814,9 +814,18 @@ function briefingPanel(payload) {
     ? '<details class="assessment-note"><summary>Why this needs attention</summary><p>The last attempt stopped before a conclusion met the evidence contract. Retained observations below are still available.</p>' + (run.validation_error ? '<small>' + safe(run.validation_error) + '</small>' : '') + '</details>' : '';
   const inconclusiveNote = run.status === 'inconclusive'
     ? '<details class="assessment-note" open><summary>Why no cause is asserted</summary><p>This is an evidence-preserving abstention, not a diagnosis. The retained observations remain available for review and reassessment.</p></details>' : '';
+  const pendingTitle = loading ? 'Investigating' : {
+    not_configured:'Provider key required', incomplete:'Investigation needs attention',
+    inconclusive:'No supported cause yet',
+  }[run.status] || 'No validated conclusion yet';
+  const pendingCopy = loading ? run.message || 'Checking retained evidence and bounded source observations.'
+    : run.status === 'incomplete' ? 'The attempt stopped before validation. Review retained observations, then reassess when the missing discriminator is available.'
+      : run.status === 'inconclusive' ? run.message || 'The retained observations cannot distinguish the likely mechanisms. Check the missing evidence in Evidence before reassessing.'
+        : run.status === 'not_configured' ? 'Configure the investigation provider in Settings; retained evidence remains available.'
+          : run.message || 'Retained evidence is available below.';
   if (!assessment) return '<section class="briefing">' + header + '<div class="analysis-state" role="status" aria-live="polite">' +
-    (loading ? '<span class="spinner"></span>' : '') + '<div><strong>' + (loading ? 'Investigating' : run.status === 'not_configured' ? 'Provider key required' : run.status === 'incomplete' ? 'Investigation needs attention' : 'No validated conclusion yet') + '</strong><p>' + safe(loading ? (run.message || 'Checking retained evidence and bounded source observations.') : run.status === 'incomplete' ? 'Review the retained observations, then reassess when the missing discriminator is available.' : run.message || 'Retained evidence is available below.') + '</p>' + incompleteNote +
-    (!loading ? run.status === 'not_configured' ? '<a href="/settings">Open Settings</a>' : '<button class="secondary" data-investigate="' + safe(run.episode_id) + '">Reassess episode</button>' : '') + '</div></div></section>';
+    (loading ? '<span class="spinner"></span>' : '') + '<div><strong>' + safe(pendingTitle) + '</strong><p>' + safe(pendingCopy) + '</p>' + incompleteNote + (run.status === 'inconclusive' ? inconclusiveNote : '') +
+    (!loading ? run.status === 'not_configured' ? '<a href="/settings">Open Settings</a>' : '<button class="secondary" data-investigate="' + safe(run.episode_id) + '">' + (run.status === 'not_started' ? 'Start investigation' : 'Reassess episode') + '</button>' : '') + '</div></div></section>';
   const hypotheses = (assessment.hypotheses || []).map(item => '<article class="hypothesis-row"><div class="section-heading"><h4>' + safe(item.explanation) + '</h4><span class="hypothesis-state ' + safe(item.status) + '">' + safe(item.status) + '</span></div><p>' + safe(item.reason) + '</p><div class="citations">' + investigationRefs(run, item.evidence_ids) + '</div></article>').join('');
   const name = id => run.context?.alerts?.find(item=>item.incident_id === id)?.title || id;
   const connections = (assessment.connections || []).map(item=>'<article class="hypothesis-row"><h4>' + safe(name(item.from)) + ' / ' + safe(name(item.to)) + '</h4><small>' + safe(item.relationship.replaceAll('_',' ')) + '</small><p>' + safe(item.reason) + '</p><div class="citations">' + investigationRefs(run,item.evidence_ids) + '</div></article>').join('');
@@ -845,7 +854,7 @@ function briefingPanel(payload) {
   const atCapture = assessment.summary && !same(assessment.summary, mechanism)
     ? '<p class="assessment-context"><span class="text-label">At capture</span>' + safe(assessment.summary) + '</p>' : '';
   return '<section class="briefing">' + header + inconclusiveNote +
-    '<div class="assessment-main"><span class="text-label">Likely explanation · ' + safe(run.status === 'inconclusive' ? 'inconclusive' : 'model assessment') + '</span><p class="brief-lead">' + safe(mechanism || 'No supported cause yet.') + '</p><div class="citations">' + investigationRefs(run, mainIds) + '</div></div>' +
+    '<div class="assessment-main"><span class="text-label">' + (run.status === 'inconclusive' ? 'Evidence assessment · inconclusive' : 'Likely explanation · model assessment') + '</span><p class="brief-lead">' + safe(mechanism || 'No supported cause yet.') + '</p><div class="citations">' + investigationRefs(run, mainIds) + '</div></div>' +
     discrepancy + atCapture + (briefObservations ? '<div class="key-observations"><h4>Key observations</h4><ul>' + briefObservations + '</ul></div>' : '') +
     '<div class="next-check"><h4>Next check</h4><p><strong>' + safe(assessment.next_action) + '</strong></p><p><span class="text-label">What would confirm it</span>' + safe(assessment.expected_finding) + '</p></div>' +
     '<p class="uncertainty"><strong>Still unconfirmed:</strong> ' + safe(assessment.uncertainty) + '</p>' +
