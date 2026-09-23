@@ -80,6 +80,12 @@ _CORRELATION_FIELDS = {
     "trace_id", "request_id", "correlation_id", "transaction_id", "span_id",
     "order_id", "event_id", "message_id", "job_id", "session_id",
 }
+_GROUPING_DIAGNOSTIC_FIELDS = {
+    "exit_code", "errno", "status", "status_code", "sqlstate", "mysql_error_code",
+    "error_code", "error_type", "reason", "disposition", "payload_encoding",
+    "delivery", "kdf", "rounds", "mode", "expected_schema", "response_schema",
+    "schema_version", "query_revision", "endpoint", "host", "port",
+}
 _SENSITIVE_FIELD_PARTS = (
     "password", "secret", "token", "credential", "private", "certificate",
     "authorization", "cookie", "api_key", "apikey",
@@ -108,7 +114,7 @@ def template_for_message(value: str | dict[str, object], structured_fields: dict
     template = " ".join(anonymize_text(message, mask_numbers=True, preserve_relations=False).split())
     diagnostic = {
         key: item for key, item in diagnostic_fields(message, structured_fields).items()
-        if key not in _CORRELATION_FIELDS
+        if key in _GROUPING_DIAGNOSTIC_FIELDS and key not in _CORRELATION_FIELDS
     }
     return template + (" | diagnostic=" + json.dumps(diagnostic, sort_keys=True) if diagnostic else "")
 

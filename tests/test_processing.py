@@ -68,6 +68,23 @@ class ProcessingTests(unittest.TestCase):
             template_for_message("request failed", second_fields),
         )
 
+    def test_dynamic_measurements_do_not_fragment_templates_but_error_codes_do(self):
+        first = template_for_message("request failed duration_ms=35.12", {
+            "status_code": 503, "duration_ms": 35.12, "error": {"code": 1205},
+            "request_id": "request-1001",
+        })
+        second = template_for_message("request failed duration_ms=35.13", {
+            "status_code": 503, "duration_ms": 35.13, "error": {"code": 1205},
+            "request_id": "request-1002",
+        })
+        other_failure = template_for_message("request failed duration_ms=35.14", {
+            "status_code": 503, "duration_ms": 35.14, "error": {"code": 1213},
+            "request_id": "request-1003",
+        })
+
+        self.assertEqual(first, second)
+        self.assertNotEqual(first, other_failure)
+
     def test_reduced_linked_entities_use_same_opaque_identifier(self):
         identifier = "a9c74440-635f-4ca3-99a1-c989391fb843"
         events = [
