@@ -45,21 +45,36 @@ The view shows:
 - FM sequence, PM changes, representative evidence, topology, and trace-source retention context;
 
 Overview presents the retained resource and namespace, one primary episode assessment,
-next action and uncertainty. **Why this fits**, **What would confirm it** and **Key
-observations** expand on demand. Exact retained evidence IDs in the explanation become
+next action and uncertainty. **Why this fits**, **Expected finding** and **Key
+observations** use compact native disclosures beside the relevant text. Exact retained evidence IDs in the explanation become
 named source buttons (Metric, Logs, Config, Image or a source check); unknown references
 are not guessed. **Investigation activity** sits in a right-hand column on wide screens,
 with individually expandable checks and token usage underneath. On smaller screens it
 stacks below the reading column. **Investigation** contains full check observations,
 findings, alternatives, alert relationships, retained history and capsule questions.
-Related history is not proof of the same cause. Evidence includes source observations
-and the selected alert capture's telemetry. Timeline separates historical alerts from
-later agent activity. Source navigation preserves the expanded rationale and provides
-a return control to the originating tab.
+Related history is not proof of the same cause. The four report tabs remain Overview,
+Investigation, Evidence and Timeline. Evidence defaults to **Captured telemetry** for
+the selected alert's alerts, logs, performance, configuration and coverage. Its
+**Investigation sources** view contains additional operator evidence and retained
+agent observations. Source links open the appropriate view and restore the originating
+tab, evidence view, focus and expanded rationale on return. Timeline separates historical
+alerts from investigation activity, including evidence uploads at their upload time
+and reassessment requests from retained revision records. Observation times remain
+separate; uploading does not itself imply a reassessment ran.
 
 One relevant performance series is previewed in Overview, prioritizing captured alert-condition signals. Its source and the total number of retained series are identified; **All performance evidence** opens the full charts, including other replicas. This is a preview, not a merged or deduplicated metric. For supported rules, new captures preserve the metric before its scalar threshold comparison: the amber line is the threshold, the red line is alert start. Generic pod charts retain their explicitly labelled selected-deviation marker, which is not alert time. Sample times determine horizontal positions and missing samples remain gaps. Query, labels and provenance are inspectable in Evidence. Unsupported rules show unavailable coverage; old captures are never backfilled. Charts describe a captured interval, not current workload health.
 
-**Your context**, immediately after the assessment, contains the **Add context** action and any existing attachments. Other report tabs retain a toolbar shortcut. It accepts a note, text/log excerpt, pasted/attached image, or short audio. Save first, then explicitly Review new context to create a new assessment revision. Upload time is automatic and is not substituted for an unknown observation time. Queue ages are relative with exact timestamps on hover. Export names the selected capture and episode-wide investigation scope. Compression, preservation, grounding and runtime remain in collapsed engineering diagnostics.
+**Add evidence** sits directly below the next check, with an **Additional evidence**
+link when uploads exist. Other report tabs retain a toolbar shortcut. The compact
+composer grows with its text and accepts a note, pasted/attached image, text/log excerpt,
+or short audio. Optional source details include file import, observation time and the
+redaction declaration. Image thumbnails open an accessible dialog in the same page;
+Close or Escape restores focus and the original remains downloadable. Save first,
+then explicitly **Review new evidence** to create a new assessment revision. Upload
+time is automatic and is not substituted for an unknown observation time. Queue ages
+are relative with exact timestamps on hover. Export names the selected capture and
+episode-wide investigation scope. Compression, preservation, grounding and runtime
+remain in collapsed engineering diagnostics.
 
 Reports use a centered workspace: the likely explanation and next check share the
 main reading column, with investigation activity alongside it. **Capture

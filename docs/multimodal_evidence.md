@@ -31,22 +31,36 @@ assessment is retained so a reviewer can see what changed.
 
 1. FCAPSule captures the incident from Prometheus, OpenSearch, and Kubernetes.
 2. The normal evidence-seeking assessment starts independently of any media.
-3. In the selected episode, **Add context** offers one text area with image and audio
-   tools. Paste an image, import a `.txt`/`.log` excerpt, attach audio, or enter a note.
+3. In the selected episode, **Add evidence** offers a single-row, auto-growing text
+   area with an image attachment control on the left and microphone on the right.
+   Paste an image or enter a note; Source details also allows a `.txt`/`.log` import
+   or audio-file attachment.
    Text context requires only a validated core model and is ready without a specialist
    call. Images/audio still require their matching validated specialist. Recording
-   requires browser microphone support on HTTPS or localhost; audio-file upload also
+   requires browser microphone support on trusted HTTPS or localhost; audio-file upload also
    works from the LAN HTTP interface. Recording stops after 60 seconds.
    Upload time is automatic. An actual observation time and redaction declaration
    remain optional under Source details; unknown event times stay unknown.
 4. The matching specialist processes only that attachment. The original file, derived
    extraction, provider/model identity, usage record, operator note and correction
    history are kept with the episode.
-5. The operator chooses **Review new context** only after ready context exists.
+5. **Evidence > Investigation sources > Additional evidence** retains the uploads.
+   Small image thumbnails open a labelled in-page dialog, not a new browser tab.
+   Close and Escape return focus to the thumbnail; the original is downloadable.
+   **Captured telemetry** remains the default Evidence view for alerts, logs,
+   performance, configuration and coverage. Citation navigation selects the relevant
+   evidence view and provides a return control.
+6. The operator chooses **Review new evidence** only after ready evidence exists.
    FCAPSule writes a new assessment revision rather than overwriting the original.
+   Timeline shows upload events using upload time, with observation time separately
+   labelled, and reassessment requests only when a retained revision exists.
 
 No microphone is opened until the operator presses the recording control. No screenshot,
 audio, image, or browser content is collected automatically.
+The focusable microphone control explains missing validation, an untrusted connection,
+unsupported recording APIs, or denied permission. Certificate errors must be resolved
+with a trusted certificate; insecure-origin flags and certificate bypasses are not a
+recording solution.
 
 Text and accompanying notes are limited to 16,000 characters and redacted before
 storage. Text is an unverified operator claim, not authenticated source telemetry.

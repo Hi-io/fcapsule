@@ -19,6 +19,7 @@ let selectedReport = null;
 let selectedEpisodeId = null;
 let showArchived;
 let reportTab = 'overview';
+let evidenceView = 'captured';
 let reportLoading = false;
 let reportError = '';
 let requestSequence = 0;
@@ -61,6 +62,9 @@ function renderPreservingFocus(render) {
 function disclosure(id, title, content, count = '', statusLabel = '') {
   const domainIcon = {'domain-alerts':'bell-ring','domain-logs':'logs','domain-metrics':'chart-no-axes-combined','domain-config':'file-code-2','domain-coverage':'layers','diagnostics':'settings-2'}[id];
   return `<details class="evidence-disclosure" data-disclosure="${safe(id)}" ${openDisclosures.has(id) ? 'open' : ''}><summary id="disclosure-${safe(id)}"><span class="disclosure-title">${domainIcon ? icon(domainIcon) : ''}<span>${safe(title)}</span></span>${statusLabel ? `<span class="sr-only">: ${safe(statusLabel)}</span>` : ''}${count !== '' ? `<span class="detail-count">${safe(count)}</span>` : ''}</summary><div class="disclosure-body">${content}</div></details>`;
+}
+function inlineDisclosure(id, title, content, count = '') {
+  return `<details class="inline-disclosure" data-disclosure="${safe(id)}" ${openDisclosures.has(id) ? 'open' : ''}><summary id="disclosure-${safe(id)}">${safe(title)}${count !== '' ? `<span class="inline-count">${safe(count)}</span>` : ''}</summary><div class="inline-disclosure-body">${content}</div></details>`;
 }
 function icon(name) { return `<span class="ui-icon" data-icon="${safe(name)}" aria-hidden="true"></span>`; }
 function quantity(count, noun) { return `${count} ${noun}${count === 1 ? '' : 's'}`; }
@@ -106,7 +110,7 @@ function sources(config) {
 }
 
 function consoleSignature(state) {
-  return JSON.stringify([state.overview.episodes, state.overview.archived_episodes, state.overview.related_groups, selectedReport, selectedEpisodeId, showArchived, queueFilters, reportTab, reportLoading, reportError, state.running]);
+  return JSON.stringify([state.overview.episodes, state.overview.archived_episodes, state.overview.related_groups, selectedReport, selectedEpisodeId, showArchived, queueFilters, reportTab, evidenceView, reportLoading, reportError, state.running]);
 }
 function resourceLabel(item, application) {
   const resource = item.resource || {};
@@ -224,6 +228,7 @@ function renderConsole(state) {
   document.querySelectorAll('[data-signal-select]').forEach(select => select.addEventListener('change', () => openEpisodeReport(selectedEpisodeId, select.value, true)));
   document.querySelectorAll('[data-report-tab]').forEach(button => button.addEventListener('click', () => {
     reportTab = button.dataset.reportTab;
+    if (reportTab === 'evidence') evidenceView = 'captured';
     sourceReturn = null;
     renderPreservingFocus(() => renderConsole(lastState));
     document.getElementById('tab-' + reportTab)?.focus({preventScroll:true});
@@ -233,13 +238,21 @@ function renderConsole(state) {
     event.preventDefault();
     const names = ['overview','investigation','evidence','timeline'];
     reportTab = event.key === 'Home' ? names[0] : event.key === 'End' ? names.at(-1) : names[(names.indexOf(reportTab) + (event.key === 'ArrowRight' ? 1 : names.length - 1)) % names.length];
+    if (reportTab === 'evidence') evidenceView = 'captured';
+    sourceReturn = null;
     renderPreservingFocus(() => renderConsole(lastState));
     document.getElementById('tab-' + reportTab)?.focus({preventScroll:true});
   });
+  document.querySelectorAll('[data-evidence-view]').forEach(button => button.addEventListener('click', () => {
+    evidenceView = button.dataset.evidenceView;
+    renderPreservingFocus(() => renderConsole(lastState));
+    document.getElementById('evidence-view-' + evidenceView)?.focus({preventScroll:true});
+  }));
   document.querySelectorAll('[data-evidence-link]').forEach(button => button.addEventListener('click', () => {
     rememberDisclosures();
-    sourceReturn = {episodeId:selectedEpisodeId, tab:reportTab, scrollY:window.scrollY, index:[...document.querySelectorAll('[data-evidence-link]')].indexOf(button), kind:'evidence'};
+    sourceReturn = {episodeId:selectedEpisodeId, tab:reportTab, evidenceView, scrollY:window.scrollY, index:[...document.querySelectorAll('[data-evidence-link]')].indexOf(button), kind:'evidence'};
     reportTab = 'evidence';
+    evidenceView = 'captured';
     const id = button.dataset.evidenceLink;
     openDisclosures.add('evidence-' + id);
     openDisclosures.add('domain-' + button.dataset.domain);
@@ -252,16 +265,27 @@ function renderConsole(state) {
   document.querySelectorAll('[data-ai-briefing]').forEach(button => button.addEventListener('click', () => generateAiBriefing(button.dataset.aiBriefing)));
   document.querySelectorAll('[data-investigate]').forEach(button => button.addEventListener('click', () => startInvestigation(button.dataset.investigate)));
   document.querySelectorAll('[data-add-evidence]').forEach(button => button.addEventListener('click', () => showEvidenceDialog(button.dataset.addEvidence)));
+  bindEvidenceImages(app);
+  document.querySelectorAll('[data-media-ref]').forEach(button => button.addEventListener('click', () => {
+    rememberDisclosures();
+    sourceReturn = {episodeId:selectedEpisodeId, tab:reportTab, evidenceView, scrollY:window.scrollY, index:[...document.querySelectorAll('[data-media-ref]')].indexOf(button), kind:'media'};
+    reportTab = 'evidence'; evidenceView = 'sources';
+    openDisclosures.add('operator-evidence');
+    renderConsole(lastState);
+    const target = document.getElementById('attachment-' + button.dataset.mediaRef) || document.getElementById('disclosure-operator-evidence');
+    target?.scrollIntoView({block:'center'}); target?.focus({preventScroll:true});
+  }));
   document.querySelectorAll('[data-update-evidence-investigation]').forEach(button => button.addEventListener('click', () => updateWithEvidence(button.dataset.updateEvidenceInvestigation)));
   document.querySelectorAll('[data-correct-evidence]').forEach(button => button.addEventListener('click', () => correctEvidence(button.dataset.correctEvidence)));
   document.querySelectorAll('[data-source-review]').forEach(button => button.addEventListener('click', () => askSourceReview(button.dataset.sourceReview)));
   document.querySelectorAll('[data-copy-incident-link]').forEach(button => button.addEventListener('click', () => copyIncidentLink(button)));
   document.querySelectorAll('[data-investigation-ref]').forEach(button => button.addEventListener('click', () => {
     rememberDisclosures();
-    sourceReturn = {episodeId:selectedEpisodeId, tab:reportTab, scrollY:window.scrollY, index:[...document.querySelectorAll('[data-investigation-ref]')].indexOf(button), kind:'investigation'};
+    sourceReturn = {episodeId:selectedEpisodeId, tab:reportTab, evidenceView, scrollY:window.scrollY, index:[...document.querySelectorAll('[data-investigation-ref]')].indexOf(button), kind:'investigation'};
     reportTab = 'evidence';
+    evidenceView = 'sources';
     const id = button.dataset.investigationRef;
-    openDisclosures.add('agent-evidence'); openDisclosures.add('agent-' + id);
+    openDisclosures.add('agent-' + id);
     renderConsole(lastState);
     const target = document.getElementById('disclosure-agent-' + id);
     target?.scrollIntoView({block:'center', behavior:matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'});
@@ -272,9 +296,10 @@ function renderConsole(state) {
     if (!previous || previous.episodeId !== selectedEpisodeId) return;
     sourceReturn = null;
     reportTab = previous.tab;
+    evidenceView = previous.evidenceView || 'captured';
     renderConsole(lastState);
     window.scrollTo({top:previous.scrollY, behavior:'instant'});
-    const selector = previous.kind === 'evidence' ? '[data-evidence-link]' : '[data-investigation-ref]';
+    const selector = previous.kind === 'evidence' ? '[data-evidence-link]' : previous.kind === 'media' ? '[data-media-ref]' : '[data-investigation-ref]';
     document.querySelectorAll(selector)[previous.index]?.focus({preventScroll:true});
   });
   document.querySelectorAll('[data-archive]').forEach(button => button.addEventListener('click', () => changeEpisodeState(button.dataset.archive, 'archive')));
@@ -452,7 +477,7 @@ function episodeContext(episode) {
       : investigation.status === 'running' || investigation.status === 'queued' ? 'Investigation in progress' : '';
   const lifecycle = assessmentState || (episode.status === 'active' ? 'Currently active' : 'Currently resolved');
   const episodeLine = `<div class="episode-context-line">${identity}<button class="icon-button" data-copy-incident-link title="Copy direct episode link" aria-label="Copy direct episode link">${icon('copy')}</button><span class="queue-note">${episode.signal_count} captured alert${episode.signal_count === 1 ? '' : 's'} · ${lifecycle}</span></div>`;
-  if (['overview','investigation'].includes(reportTab)) return episodeLine;
+  if (['overview','investigation'].includes(reportTab) || reportTab === 'evidence' && evidenceView === 'sources') return episodeLine;
   const capture = episode.signals.length === 1
     ? `<span class="queue-note">Selected alert capture · ${safe(signal.reference || id)} · ${safe(formatDate(signal.started_at))}</span>`
     : `<div class="signal-selector"><label for="signal-report">Alert capture</label><select id="signal-report" data-signal-select>${episode.signals.map((item, index) => `<option value="${safe(item.incident_id)}" ${id === item.incident_id ? 'selected' : ''}>${index + 1}. ${safe(item.summary || item.scenario)} · ${shortTime(item.started_at)}</option>`).join('')}</select></div>`;
@@ -496,7 +521,7 @@ async function openEpisodeReport(episodeId, incidentId, keepOpen = false) {
     return;
   }
   selectedEpisodeId = episodeId; selectedReport = null; reportLoading = true; reportError = '';
-  if (!keepOpen) { reportTab = 'overview'; sourceReturn = null; openDisclosures.clear(); animateEpisodeId = episodeId; }
+  if (!keepOpen) { reportTab = 'overview'; evidenceView = 'captured'; sourceReturn = null; openDisclosures.clear(); animateEpisodeId = episodeId; }
   renderConsole(lastState);
   try {
     const response = await fetch('/api/incidents/' + encodeURIComponent(incidentId) + '/report');
@@ -535,7 +560,7 @@ async function buildCapsule(id) {
 
 function attachmentSummary(item) {
   const extraction = item.extraction || {};
-  if (item.kind === 'text') return extraction.content_text || item.context_note || 'Operator context';
+  if (item.kind === 'text') return extraction.content_text || item.context_note || 'Operator-provided evidence';
   if (item.kind === 'audio') return extraction.transcript || extraction.limitation || 'Transcription pending.';
   const first = extraction.observations?.[0]?.fact || extraction.visible_text?.[0];
   return first || extraction.limitation || 'Visual extraction pending.';
@@ -559,12 +584,48 @@ function mediaEvidencePanel(payload, includeHistory = true) {
   const ready = items.some(item => item.status === 'ready' && changed(item));
   const rows = items.map(item => {
     const useState = item.status === 'ready' ? (changed(item) ? 'ready for a new assessment' : 'provided to latest investigation') : '';
-    return `<article class="media-evidence-row"><div><strong>${safe(item.filename)}</strong><small>${safe(item.kind)} · ${safe(item.status)}${useState ? ' · ' + safe(useState) : ''}${item.uploaded_at ? ' · uploaded ' + safe(formatDate(item.uploaded_at)) : ''}${item.observed_at ? ' · observed ' + safe(formatDate(item.observed_at)) : ''}</small><p>${safe(attachmentSummary(item))}</p></div><div class="media-evidence-actions"><a class="secondary button-link" href="${safe(item.artifact_url)}" target="_blank" rel="noopener">View</a>${item.status === 'ready' ? `<button class="secondary" data-correct-evidence="${safe(item.attachment_id)}">Correct</button>` : ''}</div></article>`;
+    return `<article class="media-evidence-row" id="attachment-${safe(item.attachment_id)}" tabindex="-1"><div><strong>${safe(item.filename)}</strong><small>Operator-provided · ${safe(item.kind)} · ${safe(item.status)}${useState ? ' · ' + safe(useState) : ''}${item.uploaded_at ? ' · uploaded ' + safe(formatDate(item.uploaded_at)) : ''}${item.observed_at ? ' · observed ' + safe(formatDate(item.observed_at)) : ' · observation time unknown'}</small>${evidenceArtifact(item)}<p>${safe(attachmentSummary(item))}</p></div><div class="media-evidence-actions">${item.status === 'ready' ? `<button class="secondary" data-correct-evidence="${safe(item.attachment_id)}">Correct</button>` : ''}</div></article>`;
   }).join('');
   const revision = includeHistory ? payload.investigation_revisions || [] : [];
   const history = revision.length > 1 ? disclosure('assessment-history', 'Assessment history', revision.map(item=>`<div class="revision-row"><span>${safe(item.reason.replaceAll('_',' '))}</span><strong>${safe(item.summary?.summary || item.status.replaceAll('_',' '))}</strong><small>${safe(formatDate(item.completed_at || item.created_at))}</small></div>`).join(''), revision.length) : '';
   if (!items.length) return history;
-  return disclosure('operator-evidence', 'Added context', `<section class="media-evidence">${ready ? `<div class="row-actions"><button data-update-evidence-investigation="${safe(episodeId || '')}">Review new context</button></div>` : ''}${rows}${history}</section>`, items.length);
+  return disclosure('operator-evidence', 'Additional evidence', `<section class="media-evidence">${ready ? `<div class="row-actions"><button data-update-evidence-investigation="${safe(episodeId || '')}">Review new evidence</button></div>` : ''}${rows}${history}</section>`, items.length);
+}
+
+function evidenceArtifact(item) {
+  if (!item.artifact_url) return '<span class="queue-note">Original file unavailable</span>';
+  const name = item.filename || 'Evidence image';
+  const preview = item.kind === 'image' ? `<button type="button" class="evidence-thumbnail" id="preview-${safe(item.preview_id || item.attachment_id || 'composer')}" data-preview-image="${safe(item.artifact_url)}" data-image-name="${safe(name)}" aria-label="View image: ${safe(name)}" title="View image"><img src="${safe(item.artifact_url)}" alt="${safe(name)}" loading="lazy"></button>` : '';
+  return `<div class="evidence-artifact">${preview}<a class="evidence-download" href="${safe(item.artifact_url)}" download="${safe(name)}">${icon('download')}Download original</a></div>`;
+}
+
+function bindEvidenceImages(root) {
+  root.querySelectorAll('[data-preview-image]').forEach(button => button.addEventListener('click', () => showEvidenceImage(button.dataset.previewImage, button.dataset.imageName, button)));
+}
+
+function showEvidenceImage(url, name, trigger) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'evidence-dialog image-dialog';
+  dialog.setAttribute('aria-labelledby', 'image-dialog-title');
+  dialog.innerHTML = `<header><h2 id="image-dialog-title">${safe(name || 'Evidence image')}</h2><button type="button" class="icon-button" aria-label="Close image" title="Close image" autofocus>${icon('x')}</button></header><div class="image-dialog-body"><p class="queue-note" role="status">Loading image...</p><img alt="${safe(name || 'Evidence image')}" hidden></div><footer><a class="evidence-download" href="${safe(url)}" download="${safe(name || 'evidence-image')}">${icon('download')}Download original</a></footer>`;
+  const img = dialog.querySelector('img');
+  const message = dialog.querySelector('[role="status"]');
+  img.addEventListener('load', () => { img.hidden = false; message.hidden = true; });
+  img.addEventListener('error', () => { img.hidden = true; message.textContent = 'Image unavailable. The retained file may no longer be accessible.'; });
+  dialog.querySelector('button').addEventListener('click', () => dialog.close());
+  dialog.addEventListener('close', () => {
+    dialog.remove();
+    const replacement = trigger?.id ? document.getElementById(trigger.id) : null;
+    (trigger?.isConnected ? trigger : replacement)?.focus({preventScroll:true});
+  });
+  document.body.append(dialog); dialog.showModal(); img.src = url;
+}
+
+function microphoneAvailability(available, secure, mediaDevices, recorder) {
+  if (!available.audio) return {ready:false, hint:'Microphone unavailable: validate the audio model in Settings.'};
+  if (!secure) return {ready:false, hint:'Microphone requires trusted HTTPS or localhost. You can still attach an audio file.'};
+  if (!mediaDevices?.getUserMedia || !recorder) return {ready:false, hint:'Microphone recording is not supported by this browser. You can still attach an audio file.'};
+  return {ready:true, hint:'Record audio, up to 60 seconds. Microphone permission will be requested.'};
 }
 
 function sourceReviewPanel(payload) {
@@ -600,15 +661,27 @@ function showEvidenceDialog(episodeId) {
   }
   const imageTypes = ['image/png','image/jpeg','image/webp'];
   const audioTypes = ['audio/wav','audio/x-wav','audio/mpeg','audio/ogg','audio/webm','audio/mp4','audio/x-m4a'];
-  const canRecord = available.audio && !!navigator.mediaDevices?.getUserMedia && !!window.MediaRecorder;
-  const state = {file:null, stream:null, recorder:null, objectUrl:null, timer:null, busy:false, closed:false};
+  const microphone = microphoneAvailability(available, window.isSecureContext, navigator.mediaDevices, window.MediaRecorder);
+  const canRecord = microphone.ready;
+  const trigger = document.activeElement;
+  const state = {file:null, stream:null, recorder:null, objectUrl:null, timer:null, busy:false, requesting:false, closed:false};
   const dialog = document.createElement('dialog');
   dialog.className = 'evidence-dialog';
-  dialog.innerHTML = `<form method="dialog"><header><div><h2>Add context</h2><p>An observation, a log excerpt, or evidence from another tool.</p></div><button class="icon-button" value="cancel" aria-label="Close">${icon('x')}</button></header><div class="dialog-body"><div class="context-composer"><label class="text-label" for="evidence-note">What did you observe?</label><textarea id="evidence-note" maxlength="16000" rows="6" placeholder="Add context or paste an image..."></textarea><div id="evidence-preview" class="evidence-preview" hidden></div><div class="composer-tools"><div><button type="button" class="icon-button" id="attach-image" aria-label="Attach image" title="${available.image ? 'Attach image (up to 6 MiB)' : 'Validate the image model in Settings'}" ${available.image ? '' : 'disabled'}>${icon('scan-line')}</button><button type="button" class="icon-button" id="record-evidence" aria-label="Record audio" title="${canRecord ? 'Record audio (up to 60 seconds)' : 'Recording requires HTTPS or localhost and a validated audio model'}" ${canRecord ? '' : 'disabled'}>${icon('mic')}</button><button type="button" class="icon-button" id="attach-file" aria-label="Attach audio or import text" title="Attach audio or import a text/log file">${icon('paperclip')}</button></div><span id="record-status" class="queue-note" role="status">Uploaded time is saved automatically</span></div></div><input id="evidence-file" type="file" hidden><details class="context-metadata"><summary>Source details (optional)</summary><div class="field"><label for="evidence-observed-at">Time of observation</label><input id="evidence-observed-at" type="datetime-local"><small>Unknown when blank; separate from upload time.</small></div><label class="toggle"><input id="evidence-redacted" type="checkbox">I have redacted this copy where needed</label></details><p class="queue-note">Saved as operator-provided evidence. Review sensitive content before uploading.</p><p id="evidence-error" class="notice" role="alert" hidden></p></div><footer><button class="secondary" value="cancel">Cancel</button><button type="button" id="submit-evidence" disabled>Add context</button></footer></form>`;
+  dialog.setAttribute('aria-labelledby','evidence-dialog-title');
+  dialog.innerHTML = `<form method="dialog"><header><h2 id="evidence-dialog-title">Add evidence</h2><button class="icon-button" value="cancel" aria-label="Close" title="Close">${icon('x')}</button></header><div class="dialog-body"><div class="context-composer"><div id="evidence-preview" class="evidence-preview" hidden></div><div class="composer-row"><button type="button" class="icon-button" id="attach-image" aria-label="Attach image" title="${available.image ? 'Attach image (up to 6 MiB)' : 'Validate the image model in Settings'}" ${available.image ? '' : 'disabled'}>${icon('image')}</button><label class="sr-only" for="evidence-note">Additional evidence</label><textarea id="evidence-note" maxlength="16000" rows="1" placeholder="Add evidence..."></textarea><button type="button" class="icon-button" id="record-evidence" aria-label="Record audio" aria-describedby="record-status" aria-disabled="${!canRecord}" title="${safe(microphone.hint)}">${icon('mic')}</button></div></div><p id="record-status" class="queue-note microphone-hint" role="status">${safe(microphone.hint)}</p><input id="evidence-file" type="file" hidden><details class="context-metadata"><summary>Source details (optional)</summary><button type="button" class="secondary" id="attach-file">${icon('paperclip')}Attach audio or import text</button><div class="field"><label for="evidence-observed-at">Time of observation</label><input id="evidence-observed-at" type="datetime-local"><small>Unknown when blank; upload time is saved separately.</small></div><label class="toggle"><input id="evidence-redacted" type="checkbox">I have redacted this copy where needed</label></details><p class="queue-note">Operator-provided evidence. Review sensitive content before uploading.</p><p id="evidence-error" class="notice" role="alert" hidden></p></div><footer><button type="button" id="submit-evidence" disabled>Add evidence</button></footer></form>`;
   document.body.append(dialog);
   const fileInput = dialog.querySelector('#evidence-file'); const preview = dialog.querySelector('#evidence-preview');
   const note = dialog.querySelector('#evidence-note'); const error = dialog.querySelector('#evidence-error'); const submit = dialog.querySelector('#submit-evidence'); const record = dialog.querySelector('#record-evidence'); const recordStatus = dialog.querySelector('#record-status');
-  const sync = () => { submit.disabled = state.busy || state.recorder?.state === 'recording' || (!state.file && !note.value.trim()); };
+  const sync = () => {
+    const recording = state.recorder?.state === 'recording';
+    submit.disabled = state.busy || state.requesting || recording || (!state.file && !note.value.trim());
+    submit.textContent = state.busy ? 'Adding...' : 'Add evidence';
+    record.disabled = state.busy || state.requesting;
+    dialog.querySelector('#attach-image').disabled = !available.image || state.busy || state.requesting || recording;
+    dialog.querySelector('#attach-file').disabled = state.busy || state.requesting || recording;
+    note.readOnly = state.busy;
+    note.style.height = 'auto'; note.style.height = Math.min(180, note.scrollHeight) + 'px';
+  };
   const fail = message => { error.textContent = message; error.hidden = false; };
   const stopTracks = () => { clearTimeout(state.timer); state.stream?.getTracks().forEach(track => track.stop()); state.stream = null; state.recorder = null; };
   const setFile = async file => {
@@ -619,26 +692,28 @@ function showEvidenceDialog(episodeId) {
       const text = await file.text();
       if (state.closed) return;
       const combined = [note.value.trim(),text].filter(Boolean).join('\n\n');
-      if (combined.length > 16000) return fail('Context is limited to 16,000 characters. Choose a focused excerpt.');
+      if (combined.length > 16000) return fail('Text evidence is limited to 16,000 characters. Choose a focused excerpt.');
       note.value = combined; sync(); return;
     }
     if (file) {
       const type = file.type.split(';')[0];
       const isImage = imageTypes.includes(type); const isAudio = audioTypes.includes(type);
-      if ((!isImage && !isAudio) || (isImage && !available.image) || (isAudio && !available.audio)) return fail('This file type is unavailable. Validate its model in Settings, or add text context.');
+      if ((!isImage && !isAudio) || (isImage && !available.image) || (isAudio && !available.audio)) return fail('This file type is unavailable. Validate its model in Settings, or add text evidence.');
       if (file.size > (isImage ? 6 : 8) * 1024 * 1024) return fail(isImage ? 'Images are limited to 6 MiB.' : 'Audio is limited to 8 MiB.');
     }
     if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
     state.file = file || null; preview.hidden = !file; preview.innerHTML = '';
     if (file) {
       state.objectUrl = URL.createObjectURL(file);
-      preview.innerHTML = (file.type.startsWith('image/') ? `<img src="${safe(state.objectUrl)}" alt="Selected evidence preview">` : `<audio controls src="${safe(state.objectUrl)}"></audio>`) + `<div class="attachment-caption"><span>${safe(file.name)} · ${bytes(file.size)}</span><button type="button" class="icon-button" aria-label="Remove attachment">${icon('x')}</button></div>`;
-      preview.querySelector('button').addEventListener('click', () => setFile(null));
+      preview.innerHTML = (file.type.startsWith('image/') ? evidenceArtifact({kind:'image', artifact_url:state.objectUrl, filename:file.name}) : `<audio controls src="${safe(state.objectUrl)}"></audio>`) + `<div class="attachment-caption"><span>${safe(file.name)} · ${bytes(file.size)}</span><button type="button" class="icon-button" data-remove-attachment aria-label="Remove attachment" title="Remove attachment">${icon('x')}</button></div>`;
+      bindEvidenceImages(preview);
+      preview.querySelector('[data-remove-attachment]').addEventListener('click', () => { setFile(null); note.focus(); });
     }
     sync();
   };
   note.addEventListener('input', sync);
   note.addEventListener('paste', event => {
+    if (state.busy || state.requesting || state.recorder?.state === 'recording') return;
     const image = [...(event.clipboardData?.items || [])].find(item => item.kind === 'file' && item.type.startsWith('image/'));
     if (image) { event.preventDefault(); setFile(image.getAsFile()); }
   });
@@ -646,12 +721,14 @@ function showEvidenceDialog(episodeId) {
   dialog.querySelector('#attach-image').addEventListener('click', () => { fileInput.accept = imageTypes.join(','); fileInput.value = ''; fileInput.click(); });
   dialog.querySelector('#attach-file').addEventListener('click', () => { fileInput.accept = ['.txt','.log',...(available.audio ? audioTypes : [])].join(','); fileInput.value = ''; fileInput.click(); });
   record.addEventListener('click', async () => {
+    if (!canRecord || state.busy || state.requesting) return;
     if (state.recorder?.state === 'recording') { state.recorder.stop(); return; }
     try {
-      record.disabled = true;
+      state.requesting = true; recordStatus.textContent = 'Waiting for microphone permission...'; sync();
       const stream = await navigator.mediaDevices.getUserMedia({audio:true});
       if (state.closed) { stream.getTracks().forEach(track => track.stop()); return; }
       state.stream = stream;
+      state.requesting = false;
       const mime = ['audio/webm','audio/ogg','audio/mp4'].find(value => MediaRecorder.isTypeSupported(value)) || '';
       const chunks = []; let size = 0;
       const recorder = new MediaRecorder(stream, mime ? {mimeType:mime} : undefined); state.recorder = recorder;
@@ -664,7 +741,11 @@ function showEvidenceDialog(episodeId) {
       });
       recorder.start(1000); state.timer = setTimeout(() => { if (recorder.state === 'recording') recorder.stop(); },60000);
       record.innerHTML = icon('square'); record.setAttribute('aria-label','Stop recording'); record.title = 'Stop recording'; recordStatus.textContent = 'Recording · 60-second limit'; record.disabled = false; sync();
-    } catch (exception) { fail(exception.message || 'Unable to start recording.'); stopTracks(); record.disabled = !canRecord; sync(); }
+    } catch (exception) {
+      state.requesting = false; stopTracks();
+      const message = exception.name === 'NotAllowedError' ? 'Microphone permission denied. Allow access in your browser or attach an audio file.' : exception.name === 'NotFoundError' ? 'No microphone found. Attach an audio file instead.' : 'Unable to start recording. Check your microphone or attach an audio file.';
+      recordStatus.textContent = message; fail(message); sync();
+    }
   });
   submit.addEventListener('click', async () => {
     if (submit.disabled) return; state.busy = true; sync(); error.hidden = true;
@@ -680,8 +761,12 @@ function showEvidenceDialog(episodeId) {
       if (!state.closed) dialog.close(); renderPreservingFocus(() => renderConsole(lastState)); await refresh();
     } catch (exception) { fail(exception.message || 'Unable to submit evidence.'); state.busy = false; sync(); }
   });
-  dialog.addEventListener('close', () => { state.closed = true; if (state.recorder?.state === 'recording') state.recorder.stop(); stopTracks(); if (state.objectUrl) URL.revokeObjectURL(state.objectUrl); dialog.remove(); });
-  dialog.showModal(); note.focus();
+  dialog.addEventListener('close', () => {
+    state.closed = true; if (state.recorder?.state === 'recording') state.recorder.stop(); stopTracks();
+    if (state.objectUrl) URL.revokeObjectURL(state.objectUrl); dialog.remove();
+    (trigger?.isConnected ? trigger : document.querySelector('[data-add-evidence]'))?.focus({preventScroll:true});
+  });
+  dialog.showModal(); sync(); note.focus();
 }
 
 async function updateWithEvidence(episodeId) {
@@ -866,7 +951,7 @@ function logLabel(pattern) {
     return pattern.length > 140 ? pattern.slice(0, 137) + '...' : pattern;
   }
 }
-function briefingPanel(payload, detailed = false) {
+function briefingPanel(payload, detailed = false, evidencePrompt = '') {
   const run = payload.investigation || {status:'not_started', episode_id:selectedEpisodeId};
   const assessment = run.assessment;
   if (detailed && !assessment) return '';
@@ -925,9 +1010,9 @@ function briefingPanel(payload, detailed = false) {
     (connections ? disclosure('alert-connections','How the alerts relate',connections,assessment.connections.length) : '') + '</section>';
   return '<section class="briefing">' + header + inconclusiveNote +
     '<div class="assessment-decision"><div class="assessment-main"><span class="text-label">' + (run.status === 'inconclusive' ? 'Evidence assessment · inconclusive' : 'Likely explanation · model assessment') + '</span><p class="brief-lead">' + investigationText(run, mechanism || 'No supported cause yet.') + '</p>' +
-    disclosure('assessment-basis', 'Why this fits', (assessment.basis ? '<p class="assessment-basis">' + investigationText(run, assessment.basis) + '</p>' : '') + (extraIds.length ? '<div class="citations">' + investigationRefs(run, extraIds) + '</div>' : ''), mainIds.length ? mainIds.length + ' sources' : '') + '</div>' +
-    '<div class="next-check"><h4>Next check</h4><p><strong>' + investigationText(run, assessment.next_action) + '</strong></p>' + (assessment.expected_finding ? disclosure('expected-finding', 'What would confirm it', '<p>' + investigationText(run, assessment.expected_finding) + '</p>') : '') + '</div>' +
-    '</div>' + discrepancy + (briefObservations ? '<div class="key-observations">' + disclosure('key-observations', 'Key observations', '<ul>' + briefObservations + '</ul>', observations.length) + '</div>' : '') +
+    inlineDisclosure('assessment-basis', 'Why this fits', (assessment.basis ? '<p class="assessment-basis">' + investigationText(run, assessment.basis) + '</p>' : '') + (extraIds.length ? '<div class="citations">' + investigationRefs(run, extraIds) + '</div>' : ''), mainIds.length ? mainIds.length + ' sources' : '') + '</div>' +
+    '<div class="next-check"><h4>Next check</h4><p><strong>' + investigationText(run, assessment.next_action) + '</strong></p>' + (assessment.expected_finding ? inlineDisclosure('expected-finding', 'Expected finding', '<p>' + investigationText(run, assessment.expected_finding) + '</p>') : '') + evidencePrompt + '</div>' +
+    '</div>' + discrepancy + (briefObservations ? '<div class="key-observations">' + inlineDisclosure('key-observations', 'Key observations', '<ul>' + briefObservations + '</ul>', observations.length) + '</div>' : '') +
     '<p class="uncertainty"><strong>Still unconfirmed:</strong> ' + investigationText(run, assessment.uncertainty) + '</p></section>';
 }
 
@@ -1116,9 +1201,9 @@ function investigationEvidence(run = {}, attachments = []) {
       const facts = (extraction?.content_text ? [extraction.content_text] : extraction?.observations || item.examples || []).map(entry=>typeof entry === 'string' ? entry : entry.fact).filter(Boolean);
       const observed = item.time_range?.observed_at;
       const limitation = extraction?.limitation || item.limitation;
-      const content = '<div class="media-observation-meta"><span class="queue-note">' + (item.domain === 'operator_context' ? 'Operator-provided context, not verified telemetry' : item.domain === 'image_evidence' ? 'Image observation' : 'Audio observation') +
+      const content = '<div class="media-observation-meta"><span class="queue-note">' + (item.domain === 'operator_context' ? 'Operator-provided evidence, not verified telemetry' : item.domain === 'image_evidence' ? 'Image observation' : 'Audio observation') +
         (observed ? ' · observed ' + safe(formatDate(observed)) : ' · observation time unknown') + '</span>' +
-        (attachment?.artifact_url ? '<a class="evidence-link" href="' + safe(attachment.artifact_url) + '" target="_blank" rel="noopener">' + icon('scan-line') + 'View original</a>' : '') + '</div>' +
+        '</div>' + (attachment ? evidenceArtifact({...attachment, preview_id:'agent-' + item.id, kind:attachment.kind || (item.domain === 'image_evidence' ? 'image' : 'audio')}) : '') +
         (facts.length ? '<ul class="media-observation-facts">' + facts.map(fact=>'<li>' + safe(fact) + '</li>').join('') + '</ul>' : '<p>' + safe(item.summary) + '</p>') +
         (limitation ? '<p class="queue-note">' + safe(limitation) + '</p>' : '') +
         (item.operator_context?.correction ? '<p><strong>Operator correction:</strong> ' + safe(item.operator_context.correction) + '</p>' : '') +
@@ -1132,15 +1217,19 @@ function investigationEvidence(run = {}, attachments = []) {
     (item.configuration || item.alert ? '<pre class="log-lines">' + safe(JSON.stringify(item.configuration || item.alert,null,2)) + '</pre>' : '') +
     (provenance.length ? '<small>Captured in ' + provenance.join(', ') + '</small>' : ''));
   }).join('');
-  return disclosure('agent-evidence','Investigation evidence',checks + evidence || '<p>No investigation evidence yet.</p>', (run.checks?.length || 0) + (run.context?.evidence?.length || 0));
+  return '<section class="investigation-sources"><h3>Agent observations <span class="detail-count">' + ((run.checks?.length || 0) + (run.context?.evidence?.length || 0)) + '</span></h3>' + (checks + evidence || '<p class="queue-note">No investigation sources retained yet.</p>') + '</section>';
 }
 
-function investigationTimeline(run = {}) {
-  const rows = (run.checks || []).map(item=>'<li><time>' + formatDate(item.started_at) + '</time><div><strong>' + safe(item.question) + '</strong><small>' + safe(item.status) + ' · ' + safe(item.tool) + '</small><button class="evidence-link" data-investigation-ref="' + safe(item.id) + '">View observation</button></div></li>').join('');
+function investigationTimeline(run = {}, attachments = [], revisions = []) {
+  const events = (run.checks || []).map(item=>({time:item.started_at, title:item.question, detail:item.status + ' · ' + item.tool, link:'<button class="evidence-link" data-investigation-ref="' + safe(item.id) + '">View observation</button>'}));
+  attachments.forEach(item => events.push({time:item.uploaded_at || item.created_at, title:'Evidence uploaded: ' + item.filename, detail:'Operator-provided · ' + item.kind + ' · ' + item.status + (item.observed_at ? ' · observed ' + formatDate(item.observed_at) : ' · observation time unknown'), link:'<button class="evidence-link" data-media-ref="' + safe(item.attachment_id) + '">View evidence</button>'}));
+  revisions.filter(item => item.reason && item.reason !== 'initial_capture').forEach(item => events.push({time:item.created_at, title:item.reason === 'evidence_added' ? 'Reassessment requested with additional evidence' : 'Reassessment requested', detail:String(item.reason).replaceAll('_',' ') + ' · ' + item.status}));
   const review = (run.calls || []).find(item=>item.phase === 'evidence_review');
-  return '<section class="timeline-view"><h3>Agent activity</h3><ol class="event-timeline">' + rows +
-    (review ? '<li><time>' + formatDate(review.started_at) + '</time><div><strong>Conclusion checked against evidence</strong><small>' + safe(run.review?.status || review.status) + '</small></div></li>' : '') +
-    (run.finished_at ? '<li><time>' + formatDate(run.finished_at) + '</time><div><strong>' + (run.status === 'ready' ? 'Assessment saved' : 'Stopped without a validated conclusion') + '</strong></div></li>' : '') + '</ol></section>';
+  if (review) events.push({time:review.started_at, title:'Conclusion checked against evidence', detail:run.review?.status || review.status});
+  if (run.finished_at) events.push({time:run.finished_at, title:run.status === 'ready' ? 'Assessment saved' : 'Stopped without a validated conclusion'});
+  events.sort((left, right) => (Date.parse(left.time) || Infinity) - (Date.parse(right.time) || Infinity));
+  const rows = events.map(item => '<li><time' + (item.time ? ' datetime="' + safe(item.time) + '"' : '') + '>' + safe(item.time ? formatDate(item.time) : 'Time unknown') + '</time><div><strong>' + safe(item.title) + '</strong>' + (item.detail ? '<small>' + safe(item.detail) + '</small>' : '') + (item.link || '') + '</div></li>').join('');
+  return '<section class="timeline-view"><h3>Investigation activity</h3>' + (rows ? '<ol class="event-timeline">' + rows + '</ol>' : '<p class="queue-note">No investigation activity recorded yet.</p>') + '</section>';
 }
 function metricMatters(item) {
   if (item.label === 'Pod readiness') return item.value !== 'Ready';
@@ -1257,19 +1346,21 @@ function reportPanel(payload) {
   const exports = capsuleExport(payload);
   const specialists = mediaEvidenceAvailability();
   const evidenceAction = specialists.text
-    ? '<button class="context-action" data-add-evidence="' + safe(selectedEpisodeId || '') + '">' + icon('paperclip') + ' Add context</button>'
+    ? '<button id="add-evidence-action" class="context-action" data-add-evidence="' + safe(selectedEpisodeId || '') + '">' + icon('paperclip') + ' Add evidence</button>'
     : '<a class="button-link" href="/settings#evidence-models" title="Validate the core and specialist models in Settings to attach image or audio evidence">Evidence setup</a>';
-  const contextWorkspace = '<section class="context-workspace" aria-label="Investigation context"><div class="context-workspace-heading"><div><h3>Your context</h3><span class="queue-note">' + ((payload.media_evidence || []).length ? quantity(payload.media_evidence.length, 'attachment') : 'No context added') + '</span></div>' + evidenceAction + '</div>' + mediaEvidencePanel(payload, false) + '</section>';
+  const contextWorkspace = '<div class="evidence-prompt" aria-label="Additional evidence">' + evidenceAction + ((payload.media_evidence || []).length ? '<button class="evidence-link" data-media-ref="">Additional evidence (' + payload.media_evidence.length + ')</button>' : '') + '</div>';
   const ai = payload.investigation;
   const fallback = ai?.status !== 'ready' ? '<section class="observed-summary"><h3>Alert context</h3><p>' + safe(report.fault_alerts?.[0]?.description || incident.summary) + '</p></section>' : '';
   const d = report.engineering_diagnostics;
   const diagnostics = disclosure('diagnostics', 'Engineering diagnostics', '<dl class="coverage-details"><div><dt>Selected evidence</dt><dd>' + d.selected_evidence + '</dd></div><div><dt>Log reduction</dt><dd>' + pct(d.log_compression_ratio) + '</dd></div><div><dt>Signal preservation</dt><dd>' + pct(d.important_signal_preservation) + '</dd></div><div><dt>Grounding</dt><dd>' + pct(d.hypothesis_grounding_score) + '</dd></div><div><dt>Runtime</dt><dd>' + Number(d.runtime_seconds || 0).toFixed(2) + 's</dd></div></dl><p class="queue-note">Rule-based hypothesis: ' + safe(report.primary_hypothesis.statement) + '</p>');
   const tabs = ['overview','investigation','evidence','timeline'];
   let content;
-  if (reportTab === 'evidence') content = (sourceReturn?.episodeId === selectedEpisodeId ? '<div class="source-return"><button type="button" data-return-source>Back to ' + safe(sourceReturn.tab) + '</button></div>' : '') + investigationEvidence(ai || {}, payload.media_evidence || []) + '<h3 class="capture-heading">Selected alert capture</h3>' + evidencePanel(report);
-  else if (reportTab === 'timeline') content = timelinePanel(report) + investigationTimeline(ai || {});
-  else if (reportTab === 'investigation') content = '<div class="overview-layout investigation-layout">' + investigationProgress(ai || {}) + briefingPanel(payload, true) + mediaEvidencePanel(payload) + sourceReviewPanel(payload) + '</div>';
-  else content = '<div class="overview-layout report-workspace">' + investigationScope(payload) + '<div class="report-main">' + briefingPanel(payload) + fallback + contextWorkspace + (ai?.assessment ? overviewMetrics(report) : '') + '</div><div class="report-rail">' + investigationProgress(ai || {}, true) + '</div></div>';
+  if (reportTab === 'evidence') content = (sourceReturn?.episodeId === selectedEpisodeId ? '<div class="source-return"><button type="button" data-return-source>Back to ' + safe(sourceReturn.tab) + '</button></div>' : '') +
+    '<div class="evidence-workspace"><div class="evidence-views" role="group" aria-label="Evidence views">' + [['captured','Captured telemetry'],['sources','Investigation sources']].map(([key,label]) => '<button type="button" id="evidence-view-' + key + '" data-evidence-view="' + key + '" aria-pressed="' + (evidenceView === key) + '" aria-controls="evidence-view-panel">' + label + '</button>').join('') + '</div><div id="evidence-view-panel" aria-labelledby="evidence-view-' + evidenceView + '">' +
+    (evidenceView === 'sources' ? mediaEvidencePanel(payload) + investigationEvidence(ai || {}, payload.media_evidence || []) : evidencePanel(report)) + '</div></div>';
+  else if (reportTab === 'timeline') content = timelinePanel(report) + investigationTimeline(ai || {}, payload.media_evidence || [], payload.investigation_revisions || []);
+  else if (reportTab === 'investigation') content = '<div class="overview-layout investigation-layout">' + investigationProgress(ai || {}) + briefingPanel(payload, true) + sourceReviewPanel(payload) + '</div>';
+  else content = '<div class="overview-layout report-workspace">' + investigationScope(payload) + '<div class="report-main">' + briefingPanel(payload, false, contextWorkspace) + fallback + (ai?.assessment ? '' : contextWorkspace) + (ai?.assessment ? overviewMetrics(report) : '') + '</div><div class="report-rail">' + investigationProgress(ai || {}, true) + '</div></div>';
   return '<section id="incident-report"><div class="report-navigation"><div role="tablist" aria-label="Investigation views">' +
     tabs.map(name=>'<button id="tab-' + name + '" role="tab" data-report-tab="' + name + '" aria-selected="' + (name === reportTab) + '" aria-controls="investigation-panel" tabindex="' + (name === reportTab ? 0 : -1) + '">' + name[0].toUpperCase() + name.slice(1) + '</button>').join('') +
     '</div><div class="report-actions">' + (reportTab === 'overview' ? '' : evidenceAction) + exports + '</div></div><div id="investigation-panel" role="tabpanel" aria-labelledby="tab-' + reportTab + '" tabindex="0">' + content + '</div><div class="report-technical">' + diagnostics + '</div></section>';

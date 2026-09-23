@@ -8,13 +8,14 @@ const source = fs.readFileSync(path.join(__dirname, '../fcapsule/ui/assets/app.j
 const uiStates = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/ui_states.json'), 'utf8'));
 function helper(name, next, context = {}) {
   const code = source.slice(source.indexOf(`function ${name}(`), source.indexOf(`function ${next}(`));
-  return vm.runInNewContext(code + '\n' + name, {investigationReferenceMatches:()=>[], ...context});
+  return vm.runInNewContext(code + '\n' + name, {investigationReferenceMatches:()=>[], inlineDisclosure:context.disclosure, ...context});
 }
 
 test('image citations show readable observations and original evidence before raw extraction', () => {
   const render = helper('investigationEvidence', 'investigationTimeline', {
     safe:value=>String(value ?? '').replaceAll('<','&lt;'), formatDate:value=>value,
     icon:name=>`<i>${name}</i>`,
+    evidenceArtifact:helper('evidenceArtifact','bindEvidenceImages',{safe:value=>String(value ?? '').replaceAll('<','&lt;'),icon:()=>''}),
     disclosure:(id,title,body)=>`<details data-id="${id}"><summary>${title}</summary>${body}</details>`,
   });
   const run = {assessment:{evidence_ids:['A-image']},context:{evidence:[{
@@ -27,7 +28,9 @@ test('image citations show readable observations and original evidence before ra
   assert.match(html, /Endpoint &lt;metrics> returned 404/);
   assert.match(html, /observed 2026-09-23T02:16:00Z/);
   assert.match(html, /href="\/evidence\/image.png"/);
-  assert.match(html, /View original/);
+  assert.match(html, /data-preview-image="\/evidence\/image.png"/);
+  assert.match(html, /Download original/);
+  assert.doesNotMatch(html, /target="_blank"/);
   assert.match(html, /Full extraction/);
   assert.doesNotMatch(html, /Captured in|image_evidence/);
   assert.ok(html.indexOf('media-observation-facts') < html.indexOf('Full extraction'));
@@ -328,7 +331,7 @@ test('agent event times remain separate from the historical incident sequence', 
     safe:value=>String(value ?? ''), formatDate:value=>value, investigationRefs:()=>'',
   });
   const html = timeline({status:'ready',checks:[{id:'Q1',question:'Why restarted?',status:'completed',tool:'resource_history',started_at:'analysis-time'}],finished_at:'done-time'});
-  assert.match(html,/Agent activity/);
+  assert.match(html,/Investigation activity/);
   assert.match(html,/analysis-time/);
   assert.match(html,/Assessment saved/);
 });
@@ -417,10 +420,10 @@ test('a corrected attachment can be reviewed again without claiming it changed t
   });
   const payload={investigation:{started_at:'2026-09-23T01:00:00Z',calls:[{visible_evidence_ids:['A-note']}]},
     media_evidence:[{attachment_id:'note',kind:'text',filename:'note.txt',status:'ready',updated_at:'2026-09-23T01:02:00Z',uploaded_at:'2026-09-23T00:59:00Z'}]};
-  assert.match(render(payload),/Review new context/);
+  assert.match(render(payload),/Review new evidence/);
   assert.match(render(payload),/uploaded 2026-09-23T00:59:00Z/);
   payload.media_evidence[0].updated_at='2026-09-23T00:59:00Z';
-  assert.doesNotMatch(render(payload),/Review new context/);
+  assert.doesNotMatch(render(payload),/Review new evidence/);
   assert.match(render(payload),/provided to latest investigation/);
 });
 
