@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from datetime import datetime, timezone
@@ -9,6 +10,7 @@ from typing import Any
 from urllib.parse import quote
 
 from fcapsule.adapters.transport import JsonTransport
+from fcapsule.processing.anonymizer import diagnostic_fields
 
 
 class OpenSearchAdapter:
@@ -97,7 +99,8 @@ class OpenSearchAdapter:
             pod_data = kubernetes.get("pod", {}) if isinstance(kubernetes.get("pod"), dict) else {}
             container = kubernetes.get("container", {}) if isinstance(kubernetes.get("container"), dict) else {}
             labels = kubernetes.get("labels", {}) if isinstance(kubernetes.get("labels"), dict) else {}
-            message = str(source.get("message") or source.get("log") or "")
+            message = _message_text(source)
+            structured_diagnostics = diagnostic_fields(source)
             logs.append(
                 {
                     "@timestamp": source.get("@timestamp"),
@@ -108,6 +111,7 @@ class OpenSearchAdapter:
                     "namespace": kubernetes.get("namespace") or namespace,
                     "pod": pod_data.get("name") or pod,
                     "message": message,
+                    "diagnostic_fields": structured_diagnostics,
                 }
             )
         return sorted(
@@ -153,6 +157,37 @@ def _log_level(source: dict[str, Any], message: str) -> str:
         return str(direct).upper()
     match = re.search(r"\b(?:level[=: ]+)?(critical|fatal|error|warn(?:ing)?|info|debug)\b", message, re.I)
     return match.group(1).upper().replace("WARNING", "WARN") if match else "INFO"
+
+
+def _message_text(source: dict[str, Any]) -> str:
+    """Normalize common parsed and unparsed Filebeat message shapes."""
+
+    message = source.get("message")
+    if isinstance(message, str) and message.strip():
+        return message
+    if isinstance(message, dict):
+        for key in ("message", "log", "original", "content"):
+            nested = message.get(key)
+            if isinstance(nested, str) and nested.strip():
+                return nested
+        return json.dumps(message, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    if message is not None and not isinstance(message, (dict, list)):
+        return str(message)
+
+    log = source.get("log")
+    if isinstance(log, str) and log.strip():
+        return log
+    if isinstance(log, dict):
+        for key in ("message", "original", "content"):
+            nested = log.get(key)
+            if isinstance(nested, str) and nested.strip():
+                return nested
+    event = source.get("event")
+    if isinstance(event, dict):
+        original = event.get("original")
+        if isinstance(original, str) and original.strip():
+            return original
+    return ""
 
 
 def _iso(value: datetime) -> str:

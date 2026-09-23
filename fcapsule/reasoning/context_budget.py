@@ -13,7 +13,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from fcapsule.processing.anonymizer import anonymize_text
+from fcapsule.processing.anonymizer import anonymize_text, diagnostic_fields
 
 
 def estimate_tokens(value: Any) -> int:
@@ -112,6 +112,8 @@ def _evidence_item(item: dict[str, Any]) -> dict[str, Any]:
         "summary": _short(item.get("summary"), 360),
         "time_range": _bounded(item.get("time_range"), max_items=3),
         "diagnostic_example": _bounded(examples[:1], max_items=1) if examples else None,
+        "diagnostic_fields": diagnostic_fields(None, item.get("diagnostic_fields"))
+        if isinstance(item.get("diagnostic_fields"), dict) else None,
         "configuration": _bounded(item.get("configuration"), max_items=3) if item.get("configuration") else None,
         "operator_context": _bounded(item.get("operator_context"), max_items=3) if item.get("operator_context") else None,
         "limitation": _short(item.get("limitation"), 180),
@@ -271,11 +273,15 @@ def _log_example(item: dict[str, Any]) -> dict[str, Any] | str | None:
     example = examples[0] if examples else None
     if not isinstance(example, dict):
         return _short(example, 220) if example else None
-    message = str(example.get("message", ""))
+    raw_message = example.get("message", "")
+    message = json.dumps(raw_message, ensure_ascii=True, sort_keys=True, separators=(",", ":")) \
+        if isinstance(raw_message, dict) else str(raw_message)
     try:
         structured = json.loads(message)
     except (TypeError, ValueError):
         structured = None
+    fields = diagnostic_fields(message, example.get("diagnostic_fields")
+                               if isinstance(example.get("diagnostic_fields"), dict) else None)
     if isinstance(structured, dict):
         values = {key: structured.get(key) for key in (
             "level", "message", "error", "error_type", "reason", "exit_code", "errno",
@@ -283,12 +289,18 @@ def _log_example(item: dict[str, Any]) -> dict[str, Any] | str | None:
             "buffered_bytes", "page_bytes", "delivery", "rows", "kdf", "rounds", "mode",
             "timeout_seconds", "expected_schema", "response_schema", "query_revision", "endpoint",
         )}
-        return {"timestamp": example.get("timestamp"),
-                **{key: _short(value, 180) for key, value in values.items() if value not in (None, "")}}
+        result = {key: _short(anonymize_text(str(value)), 180) for key, value in values.items()
+                  if value not in (None, "")}
+    else:
+        result = {
+            "level": example.get("level"),
+            "message": _short(message, 220),
+        }
+    result.update({key: _short(value, 180) for key, value in fields.items()
+                   if key not in result and value not in (None, "")})
     return {
         "timestamp": example.get("timestamp"),
-        "level": example.get("level"),
-        "message": _short(message, 220),
+        **{key: value for key, value in result.items() if value not in (None, "")},
     }
 
 
@@ -301,6 +313,7 @@ def _log_observation(result: dict[str, Any]) -> dict[str, Any]:
     values = {
         "matching_patterns": result.get("matching_patterns"),
         "top_signal": _log_example(primary) if primary else None,
+        "fields": diagnostic_fields(None, primary.get("fields")) if primary.get("fields") else None,
         "first_seen": primary.get("first_seen"),
         "last_seen": primary.get("last_seen"),
         "occurrences": primary.get("count") if primary else None,
@@ -471,7 +484,7 @@ def _minimal_check_observation(check: dict[str, Any]) -> Any:
         return observation
     if check.get("tool") == "search_logs" and isinstance(observation, dict):
         return {key: observation[key] for key in
-                ("top_signal", "first_seen", "last_seen", "occurrences", "sampled") if key in observation}
+                ("top_signal", "fields", "first_seen", "last_seen", "occurrences", "sampled") if key in observation}
     if check.get("tool") == "scrape_discovery" and isinstance(observation, dict) and "monitor_selection" in observation:
         if observation.get("compacted_discovery"):
             return observation
@@ -681,10 +694,12 @@ def compact_for_model(
             visible_ids = refresh_visible_ids()
         elif payload["evidence"] and len(str(payload["evidence"][0].get("summary") or "")) > 60:
             payload["evidence"][0]["summary"] = _short(payload["evidence"][0].get("summary"), 60)
-        elif any(set(item) - {"id", "summary", "metric_observation", "visual_observation", "time_range", "limitation"}
+        elif any(set(item) - {"id", "summary", "metric_observation", "visual_observation", "diagnostic_fields",
+                              "time_range", "limitation"}
                  for item in payload["evidence"]):
             payload["evidence"] = [{key: item[key] for key in
-                                    ("id", "summary", "metric_observation", "visual_observation", "time_range", "limitation")
+                                    ("id", "summary", "metric_observation", "visual_observation", "diagnostic_fields",
+                                     "time_range", "limitation")
                                     if key in item} for item in payload["evidence"]]
             visible_ids = refresh_visible_ids()
         else:

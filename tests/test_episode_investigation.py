@@ -870,6 +870,26 @@ class InvestigationToolTests(unittest.TestCase):
         groups = log_patterns([{"message": '{"mysql_error_code":1054}'}, {"message": '{"mysql_error_code":1205}'}])
         self.assertEqual(groups["matching_patterns"], 2)
 
+    def test_structured_request_ids_remain_linkable_without_fragmenting_log_patterns(self):
+        rows = [
+            {"message": "reservation rejected", "diagnostic_fields": {
+                "error_code": "ER_DUP_ENTRY", "request_id": "request-1", "authorization": "secret-value"}},
+            {"message": "reservation rejected", "diagnostic_fields": {
+                "error_code": "ER_DUP_ENTRY", "request_id": "request-2"}},
+        ]
+
+        result = log_patterns(rows)
+
+        self.assertEqual(result["matching_patterns"], 1)
+        self.assertEqual(result["patterns"][0]["count"], 2)
+        first, second = [example["diagnostic_fields"]["request_id"]
+                         for example in result["patterns"][0]["examples"]]
+        self.assertTrue(first.startswith("<REF:"))
+        self.assertNotEqual(first, second)
+        self.assertNotIn("request-1", json.dumps(result))
+        self.assertNotIn("request-2", json.dumps(result))
+        self.assertNotIn("secret-value", json.dumps(result))
+
     def test_post_alert_metrics_do_not_mix_in_healthy_baseline(self):
         series = [{"metric": "connections", "values": [["2026-09-20T12:00:00Z", 1],
                   ["2026-09-20T12:05:00Z", 40], ["2026-09-20T12:06:00Z", 40]]}]
