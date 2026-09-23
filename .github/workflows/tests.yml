@@ -25,4 +25,4 @@ jobs:
       - name: Check frontend and helper regressions
         run: |
           node --check fcapsule/ui/assets/app.js
-          node --test tests/ui_helpers.test.cjs
+          node --test tests/ui_*.test.cjs

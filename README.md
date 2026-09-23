@@ -66,7 +66,7 @@ kubectl apply -f deploy/kubernetes/prometheus-rule.yaml
 kubectl apply -f deploy/kubernetes/fcapsule.yaml
 ```
 
-For development, apply `deploy/kubernetes/dev-overlay.yaml` to the Deployment after the base manifest. It installs the current `master` source into an `emptyDir`, so an iteration only requires a push and `kubectl rollout restart deployment/fcapsule -n fcapsule`.
+For development, apply `deploy/kubernetes/dev-overlay.yaml` to the Deployment after the base manifest. It installs the current `master` source into an `emptyDir`. Develop on a feature branch, validate it locally and in CI, then merge before restarting the shared deployment. See the [branch and deployment workflow](docs/kubernetes_deployment.md#development-overlay).
 
 The default NodePort is `http://<node-ip>:30765`. Edit the `fcapsule-runtime` ConfigMap or use **Targets** to change URLs, namespaces, polling, and incident-window settings. See `docs/kubernetes_deployment.md` for RBAC, secrets, storage, verification, and production notes.
 
@@ -162,7 +162,7 @@ fcapsule_<id>.zip     derived evidence, report and available investigation; no r
 
 ```bash
 python3 -m unittest discover -s tests -v
-node --test tests/ui_helpers.test.cjs
+node --test tests/ui_*.test.cjs
 ```
 
 Node is needed only for frontend tests, not to run FCAPSule. The suite covers validation, processing, domain-balanced selection, hypothesis references,

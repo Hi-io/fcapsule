@@ -42,21 +42,50 @@ const widths = [1920, 1366, 1024, 720, 390, 320];
             return Math.abs((outer.left+outer.right)/2 - (inner.left+inner.right)/2) < 2;
           });
           assert.ok(centered, 'Report reading area must be centered at ' + width);
+          const layout = await page.evaluate(()=>{
+            const main = document.querySelector('.report-main').getBoundingClientRect();
+            const rail = document.querySelector('.report-rail').getBoundingClientRect();
+            return {side:rail.left >= main.right, aligned:Math.abs(rail.top-main.top)<2, stacked:rail.top>=main.bottom};
+          });
+          assert.ok(width >= 1200 ? layout.side && layout.aligned : layout.stacked, 'Activity rail layout at ' + width);
+          if (width >= 1200) {
+            const aligned = await page.evaluate(()=>Math.abs(document.querySelector('.briefing h3').getBoundingClientRect().top - document.querySelector('.report-rail h3').getBoundingClientRect().top) < 3);
+            assert.ok(aligned, 'Assessment and Activity headings must align at ' + width);
+          }
+          assert.ok(await page.locator('.overview-metrics .metric-preview').count() <= 1);
           await capture('overview-' + width);
+          const basis = page.locator('#disclosure-assessment-basis');
+          if (await basis.count()) {
+            await basis.click();
+            await capture('assessment-sources-' + width);
+          }
+          const check = page.locator('.compact-checks summary').first();
+          if (await check.count()) {
+            await check.click();
+            await capture('activity-observation-' + width);
+          }
           for (const tab of ['Investigation','Evidence','Timeline']) {
             await page.getByRole('tab',{name:tab,exact:true}).click();
             await page.locator('#incident-report').scrollIntoViewIfNeeded();
             await capture(tab.toLowerCase() + '-' + width);
           }
           await page.getByRole('tab',{name:'Overview',exact:true}).click();
+          const basisDetails = page.locator('[data-disclosure="assessment-basis"]');
+          if (await basisDetails.count() && !await basisDetails.evaluate(el=>el.open)) await basisDetails.locator('summary').click();
           const citation = page.locator('.briefing [data-investigation-ref]').first();
           if (await citation.count()) {
+            const id = await citation.getAttribute('data-investigation-ref');
             await citation.click();
+            assert.ok(await page.locator('[id="disclosure-agent-' + id + '"]').isVisible(), 'Citation must open a retained source');
+            assert.equal(await page.evaluate(()=>document.activeElement.id),'disclosure-agent-' + id);
             await page.locator('[data-return-source]').click();
             assert.equal(await page.getByRole('tab',{name:'Overview',exact:true}).getAttribute('aria-selected'),'true');
+            assert.equal(await basisDetails.evaluate(el=>el.open),true, 'Source navigation must preserve rationale expansion');
+            assert.equal(await page.evaluate(()=>document.activeElement.dataset.investigationRef),id);
           }
           const evidenceButton = page.locator('[data-add-evidence]');
           if (await evidenceButton.count()) {
+            assert.equal(await evidenceButton.evaluate(el=>Boolean(el.closest('.context-workspace'))),true, 'Context belongs beside the assessment');
             await evidenceButton.click();
             await page.locator('dialog[open]').waitFor();
             assert.equal(await page.locator('#evidence-preview').isVisible(),false, 'No empty preview before a file is chosen');

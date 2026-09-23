@@ -63,15 +63,37 @@ kubectl patch deployment fcapsule \
 kubectl rollout status deployment/fcapsule -n fcapsule
 ```
 
-After a source change:
+Make source changes on a dedicated branch, not on `master`:
 
 ```bash
+git switch -c codex/your-change
+python3 -m pip install -e .
+python3 -m unittest discover -s tests -v
+node --check fcapsule/ui/assets/app.js
+node --test tests/ui_*.test.cjs
+git push -u origin codex/your-change
+```
+
+Review the diff and wait for the branch's GitHub Actions **Test** workflow to pass.
+UI changes also require a browser smoke test with retained records. The browser
+smoke script can load branch assets over read-only live data without deploying
+them to the shared instance; do not trigger provider calls or mutate incidents
+during a presentation-only check.
+
+After verification, merge the tested branch (through a reviewed pull request or a
+local merge), then deploy:
+
+```bash
+git switch master
+git merge --no-ff codex/your-change
 git push origin master
 kubectl rollout restart deployment/fcapsule -n fcapsule
 kubectl rollout status deployment/fcapsule -n fcapsule
 ```
 
 This profile is for iteration only. Build an immutable image pinned by digest for release deployments.
+These steps are a working convention, not server-enforced branch protection.
+Protected-branch rules and required checks can be configured separately in GitHub.
 
 ## Source Configuration
 

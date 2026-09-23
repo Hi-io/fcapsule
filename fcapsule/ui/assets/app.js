@@ -32,16 +32,20 @@ let pendingSharedAnchor = location.hash.startsWith('#shared-');
 const openDisclosures = new Set();
 const closedNamespaces = new Set();
 
+function rememberDisclosures() {
+  document.querySelectorAll('details[data-disclosure]').forEach(node => {
+    if (node.open) openDisclosures.add(node.dataset.disclosure);
+    else openDisclosures.delete(node.dataset.disclosure);
+  });
+}
+
 function renderPreservingFocus(render) {
   const focused = document.activeElement;
   const focusId = focused?.id;
   const selection = focused instanceof HTMLInputElement && focused.type === 'text' ? [focused.selectionStart, focused.selectionEnd] : null;
   const anchorId = selectedEpisodeId ? 'toggle-' + selectedEpisodeId : null;
   const anchorTop = anchorId ? document.getElementById(anchorId)?.getBoundingClientRect().top : null;
-  document.querySelectorAll('details[data-disclosure]').forEach(node => {
-    if (node.open) openDisclosures.add(node.dataset.disclosure);
-    else openDisclosures.delete(node.dataset.disclosure);
-  });
+  rememberDisclosures();
   render();
   document.querySelectorAll('details[data-disclosure]').forEach(node => { node.open = openDisclosures.has(node.dataset.disclosure); });
   if (anchorId && anchorTop != null) {
@@ -54,9 +58,9 @@ function renderPreservingFocus(render) {
     if (selection && replacement instanceof HTMLInputElement) replacement.setSelectionRange(...selection);
   }
 }
-function disclosure(id, title, content, count = '') {
+function disclosure(id, title, content, count = '', statusLabel = '') {
   const domainIcon = {'domain-alerts':'bell-ring','domain-logs':'logs','domain-metrics':'chart-no-axes-combined','domain-config':'file-code-2','domain-coverage':'layers','diagnostics':'settings-2'}[id];
-  return `<details class="evidence-disclosure" data-disclosure="${safe(id)}" ${openDisclosures.has(id) ? 'open' : ''}><summary id="disclosure-${safe(id)}"><span class="disclosure-title">${domainIcon ? icon(domainIcon) : ''}<span>${safe(title)}</span></span>${count !== '' ? `<span class="detail-count">${safe(count)}</span>` : ''}</summary><div class="disclosure-body">${content}</div></details>`;
+  return `<details class="evidence-disclosure" data-disclosure="${safe(id)}" ${openDisclosures.has(id) ? 'open' : ''}><summary id="disclosure-${safe(id)}"><span class="disclosure-title">${domainIcon ? icon(domainIcon) : ''}<span>${safe(title)}</span></span>${statusLabel ? `<span class="sr-only">: ${safe(statusLabel)}</span>` : ''}${count !== '' ? `<span class="detail-count">${safe(count)}</span>` : ''}</summary><div class="disclosure-body">${content}</div></details>`;
 }
 function icon(name) { return `<span class="ui-icon" data-icon="${safe(name)}" aria-hidden="true"></span>`; }
 function quantity(count, noun) { return `${count} ${noun}${count === 1 ? '' : 's'}`; }
@@ -233,6 +237,7 @@ function renderConsole(state) {
     document.getElementById('tab-' + reportTab)?.focus({preventScroll:true});
   });
   document.querySelectorAll('[data-evidence-link]').forEach(button => button.addEventListener('click', () => {
+    rememberDisclosures();
     sourceReturn = {episodeId:selectedEpisodeId, tab:reportTab, scrollY:window.scrollY, index:[...document.querySelectorAll('[data-evidence-link]')].indexOf(button), kind:'evidence'};
     reportTab = 'evidence';
     const id = button.dataset.evidenceLink;
@@ -252,6 +257,7 @@ function renderConsole(state) {
   document.querySelectorAll('[data-source-review]').forEach(button => button.addEventListener('click', () => askSourceReview(button.dataset.sourceReview)));
   document.querySelectorAll('[data-copy-incident-link]').forEach(button => button.addEventListener('click', () => copyIncidentLink(button)));
   document.querySelectorAll('[data-investigation-ref]').forEach(button => button.addEventListener('click', () => {
+    rememberDisclosures();
     sourceReturn = {episodeId:selectedEpisodeId, tab:reportTab, scrollY:window.scrollY, index:[...document.querySelectorAll('[data-investigation-ref]')].indexOf(button), kind:'investigation'};
     reportTab = 'evidence';
     const id = button.dataset.investigationRef;
@@ -788,10 +794,10 @@ async function copyIncidentLink(button) {
   }
 }
 
-function sparkline(signal) {
+function sparkline(signal, width = 380) {
   const values = signal.values || [];
   if (values.length < 2) return '';
-  const width = 380; const height = 110; const left = 42; const pad = 8;
+  const height = 110; const left = 42; const pad = 8;
   const finite = point => point.value != null && Number.isFinite(Number(point.value)) && Number.isFinite(Date.parse(point.timestamp));
   const valid = values.filter(finite);
   if (!valid.length) return '';
@@ -816,8 +822,8 @@ function sparkline(signal) {
   const threshold = isRule && signal.threshold != null ? `<line class="threshold" x1="${left}" y1="${y(signal.threshold)}" x2="${width}" y2="${y(signal.threshold)}"/>` : '';
   const tick = value => {
     const metric = String(signal.metric || '');
-    const divisor = metric.endsWith('_bytes') ? 1048576 : 1;
-    return Number(value / divisor).toLocaleString('en',{notation:'compact',maximumSignificantDigits:3}) + (divisor > 1 ? ' MiB' : '');
+    const divisor = metric.endsWith('_bytes') ? 1048576 : signal.unit === 'seconds' ? 0.001 : 1;
+    return Number(value / divisor).toLocaleString('en',{notation:'compact',maximumSignificantDigits:3}) + (divisor > 1 ? ' MiB' : divisor < 1 ? ' ms' : '');
   };
   return `<svg class="spark" viewBox="0 0 ${width} ${height}" role="img" aria-label="${safe(signal.label)} across the captured window. ${isRule ? 'Amber horizontal line: threshold. Red vertical line: alert start, when in range.' : 'Dashed vertical line: selected deviation, not alert time. Horizontal line: baseline median.'} Gaps represent missing samples."><text x="0" y="12" class="chart-tick">${tick(ceiling)}</text><text x="0" y="${height-pad}" class="chart-tick">${tick(floor)}</text><line class="axis" x1="${left}" y1="${height - pad}" x2="${width}" y2="${height - pad}"/>${baseline}${threshold}${markerLine}<path class="series" d="${path}"/>${valid.length === 1 ? `<circle class="single-sample" cx="${x(valid[0].timestamp)}" cy="${y(valid[0].value)}" r="3"/>` : ''}</svg>`;
 }
@@ -883,19 +889,21 @@ function briefingPanel(payload, detailed = false) {
   if (!assessment) return '<section class="briefing">' + header + '<div class="analysis-state" role="status" aria-live="polite">' +
     (loading ? '<span class="spinner"></span>' : '') + '<div><strong>' + safe(pendingTitle) + '</strong><p>' + safe(pendingCopy) + '</p>' + incompleteNote + (run.status === 'inconclusive' ? inconclusiveNote : '') +
     (!loading ? run.status === 'not_configured' ? '<a href="/settings">Open Settings</a>' : '<button class="secondary" data-investigate="' + safe(run.episode_id) + '">' + (run.status === 'not_started' ? 'Start investigation' : 'Reassess episode') + '</button>' : '') + '</div></div></section>';
-  const hypotheses = (assessment.hypotheses || []).map(item => '<article class="hypothesis-row"><div class="section-heading"><h4>' + safe(item.explanation) + '</h4><span class="hypothesis-state ' + safe(item.status) + '">' + safe(item.status) + '</span></div><p>' + safe(item.reason) + '</p><div class="citations">' + investigationRefs(run, item.evidence_ids) + '</div></article>').join('');
+  const hypotheses = (assessment.hypotheses || []).map(item => '<article class="hypothesis-row"><div class="section-heading"><h4>' + safe(item.explanation) + '</h4><span class="hypothesis-state ' + safe(item.status) + '">' + safe(item.status) + '</span></div><p>' + investigationText(run, item.reason) + '</p><div class="citations">' + investigationRefs(run, item.evidence_ids) + '</div></article>').join('');
   const name = id => run.context?.alerts?.find(item=>item.incident_id === id)?.title || id;
-  const connections = (assessment.connections || []).map(item=>'<article class="hypothesis-row"><h4>' + safe(name(item.from)) + ' / ' + safe(name(item.to)) + '</h4><small>' + safe(item.relationship.replaceAll('_',' ')) + '</small><p>' + safe(item.reason) + '</p><div class="citations">' + investigationRefs(run,item.evidence_ids) + '</div></article>').join('');
+  const connections = (assessment.connections || []).map(item=>'<article class="hypothesis-row"><h4>' + safe(name(item.from)) + ' / ' + safe(name(item.to)) + '</h4><small>' + safe(item.relationship.replaceAll('_',' ')) + '</small><p>' + investigationText(run, item.reason) + '</p><div class="citations">' + investigationRefs(run,item.evidence_ids) + '</div></article>').join('');
   const history = assessment.historical_comparison;
   const historyCandidate = run.context?.historical_candidates?.find(item => item.episode_id === history?.episode_id);
-  const historyHtml = history ? '<section class="history-comparison"><div><span class="text-label">Related history</span><h4>' + safe(history.status.replaceAll('_',' ')) + '</h4><p>' + safe(history.summary) + '</p></div><div><span class="incident-reference">' + safe(historyCandidate?.reference || history.episode_id) + '</span><div class="citations">' + investigationRefs(run, history.evidence_ids) + '</div></div></section>' : '';
+  const historyHtml = history ? '<section class="history-comparison"><div><span class="text-label">Related history</span><h4>' + safe(history.status.replaceAll('_',' ')) + '</h4><p>' + investigationText(run, history.summary) + '</p></div><div><span class="incident-reference">' + safe(historyCandidate?.reference || history.episode_id) + '</span><div class="citations">' + investigationRefs(run, history.evidence_ids) + '</div></div></section>' : '';
   const same = (left, right) => String(left || '').trim().replace(/[.\s]+$/,'').toLowerCase() === String(right || '').trim().replace(/[.\s]+$/,'').toLowerCase();
   const assessorFinding = (run.findings || []).find(item => item.category === 'investigator_assessment');
   const primary = assessorFinding || run.findings?.[0];
   const mechanism = assessment.likely_mechanism || primary?.summary || '';
   const mainIds = [...new Set([...(assessment.evidence_ids || []), ...(primary && same(primary.summary, mechanism) ? primary.evidence_ids || [] : [])])];
+  const inlineIds = new Set(investigationReferenceMatches(run, assessment.basis).filter(item=>!item.reference.unresolved).map(item=>item.id));
+  const extraIds = mainIds.filter(id=>!inlineIds.has(id));
   const discrepancy = assessorFinding && mechanism && !same(assessorFinding.summary, mechanism)
-    ? '<section class="assessment-discrepancy" role="note"><strong>Assessment discrepancy</strong><p>The retained initial finding differs from the latest mechanism. Verify both before acting.</p><dl><div><dt>Latest mechanism</dt><dd>' + safe(mechanism) + '</dd></div><div><dt>Initial finding</dt><dd>' + safe(assessorFinding.summary) + '</dd></div></dl><div class="citations">' + investigationRefs(run, assessorFinding.evidence_ids) + '</div></section>' : '';
+    ? '<section class="assessment-discrepancy" role="note"><strong>Assessment discrepancy</strong><p>The retained initial finding differs from the latest mechanism. Verify both before acting.</p><dl><div><dt>Latest mechanism</dt><dd>' + investigationText(run, mechanism) + '</dd></div><div><dt>Initial finding</dt><dd>' + investigationText(run, assessorFinding.summary) + '</dd></div></dl><div class="citations">' + investigationRefs(run, assessorFinding.evidence_ids) + '</div></section>' : '';
   const seenObservations = new Set();
   const observations = (run.findings || []).filter(item => {
     if (item === assessorFinding && discrepancy) return false;
@@ -904,44 +912,106 @@ function briefingPanel(payload, detailed = false) {
     seenObservations.add(key);
     return true;
   });
-  const briefObservations = observations.slice(0, 3).map(item => '<li><strong>' + safe(item.title) + '</strong><p>' + safe(item.summary) + '</p><div class="citations">' + investigationRefs(run, item.evidence_ids) + '</div></li>').join('');
-  const findingDetails = (run.findings || []).map(item => '<article class="finding"><h4>' + safe(item.title) + '</h4><p>' + safe(item.summary) + '</p><div class="citations">' + investigationRefs(run, item.evidence_ids) + '</div>' +
-    (item.next_check && !same(item.next_check, assessment.next_action) ? '<p><strong>Additional check:</strong> ' + safe(item.next_check) + '</p>' : '') +
+  const briefObservations = observations.map(item => '<li><strong>' + safe(item.title) + '</strong><p>' + investigationText(run, item.summary) + '</p><div class="citations">' + investigationRefs(run, item.evidence_ids) + '</div></li>').join('');
+  const findingDetails = (run.findings || []).map(item => '<article class="finding"><h4>' + safe(item.title) + '</h4><p>' + investigationText(run, item.summary) + '</p><div class="citations">' + investigationRefs(run, item.evidence_ids) + '</div>' +
+    (item.next_check && !same(item.next_check, assessment.next_action) ? '<p><strong>Additional check:</strong> ' + investigationText(run, item.next_check) + '</p>' : '') +
     (item.observations?.length ? disclosure('finding-' + safe(item.id), 'Observed details', item.observations.map(observation => '<pre class="compact-data">' + safe(JSON.stringify(observation, null, 2)) + '</pre>').join(''), item.observations.length) : '') + '</article>').join('');
   const atCapture = assessment.summary && !same(assessment.summary, mechanism)
-    ? disclosure('assessment-context', 'Capture context', '<p class="assessment-context">' + safe(assessment.summary) + '</p>') : '';
+    ? disclosure('assessment-context', 'Capture context', '<p class="assessment-context">' + investigationText(run, assessment.summary) + '</p>') : '';
   if (detailed) return '<section class="investigation-details"><h3>Assessment details</h3>' + atCapture +
     (historyHtml ? disclosure('related-history', 'Related history', historyHtml) : '') +
     (findingDetails ? disclosure('all-findings', 'Retained findings', '<div class="findings">' + findingDetails + '</div>', run.findings.length) : '') +
     (hypotheses ? disclosure('competing-explanations','Explanations considered',hypotheses,assessment.hypotheses.length) : '') +
     (connections ? disclosure('alert-connections','How the alerts relate',connections,assessment.connections.length) : '') + '</section>';
   return '<section class="briefing">' + header + inconclusiveNote +
-    '<div class="assessment-decision"><div class="assessment-main"><span class="text-label">' + (run.status === 'inconclusive' ? 'Evidence assessment · inconclusive' : 'Likely explanation · model assessment') + '</span><p class="brief-lead">' + safe(mechanism || 'No supported cause yet.') + '</p>' + (assessment.basis ? '<p class="assessment-basis"><strong>Why this fits</strong> ' + safe(assessment.basis) + '</p>' : '') + '<div class="citations">' + investigationRefs(run, mainIds) + '</div></div>' +
-    '<div class="next-check"><h4>Next check</h4><p><strong>' + safe(assessment.next_action) + '</strong></p><p><span class="text-label">What would confirm it</span>' + safe(assessment.expected_finding) + '</p></div>' +
-    '</div>' + discrepancy + (briefObservations ? '<div class="key-observations"><h4>Key observations</h4><ul>' + briefObservations + '</ul></div>' : '') +
-    '<p class="uncertainty"><strong>Still unconfirmed:</strong> ' + safe(assessment.uncertainty) + '</p></section>';
+    '<div class="assessment-decision"><div class="assessment-main"><span class="text-label">' + (run.status === 'inconclusive' ? 'Evidence assessment · inconclusive' : 'Likely explanation · model assessment') + '</span><p class="brief-lead">' + investigationText(run, mechanism || 'No supported cause yet.') + '</p>' +
+    disclosure('assessment-basis', 'Why this fits', (assessment.basis ? '<p class="assessment-basis">' + investigationText(run, assessment.basis) + '</p>' : '') + (extraIds.length ? '<div class="citations">' + investigationRefs(run, extraIds) + '</div>' : ''), mainIds.length ? mainIds.length + ' sources' : '') + '</div>' +
+    '<div class="next-check"><h4>Next check</h4><p><strong>' + investigationText(run, assessment.next_action) + '</strong></p>' + (assessment.expected_finding ? disclosure('expected-finding', 'What would confirm it', '<p>' + investigationText(run, assessment.expected_finding) + '</p>') : '') + '</div>' +
+    '</div>' + discrepancy + (briefObservations ? '<div class="key-observations">' + disclosure('key-observations', 'Key observations', '<ul>' + briefObservations + '</ul>', observations.length) + '</div>' : '') +
+    '<p class="uncertainty"><strong>Still unconfirmed:</strong> ' + investigationText(run, assessment.uncertainty) + '</p></section>';
 }
 
 function investigationRefs(run, ids = []) {
   const labels = new Map();
-  const checks = {workload_state:'Runtime snapshot',resource_history:'Resource history',search_logs:'Source logs',compare_baseline:'Baseline comparison',database_pressure:'Database metrics',dependency_evidence:'Dependency evidence',review_omitted:'Omitted log patterns',historical_episode:'Prior episode',alert_rule_logic:'Alert logic',scrape_discovery:'Target discovery'};
+  const references = investigationReferenceDescriptors(run);
   return ids.map(id => {
-    const item = [...(run.checks || []), ...(run.context?.evidence || [])].find(item=>item.id === id);
-    if (!item) return '<span class="source-unavailable">Reference ' + safe(id) + ' unavailable in this capture</span>';
-    const log = item?.domain === 'log_template';
-    const prior = item?.tool === 'historical_episode' ? item.result?.episode?.reference : '';
-    const logTitle = log ? logLabel(item.title).replace(/^(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL):\s*/i,'') : '';
-    const label = prior ? 'Prior episode ' + prior : checks[item?.tool] || (log ? 'Logs: ' + (logTitle.length > 72 ? logTitle.slice(0, 69).trimEnd() + '…' : logTitle) : item?.title) || item?.question || id;
-    const occurrence = (labels.get(label) || 0) + 1; labels.set(label,occurrence);
-    const kind = log || ['search_logs','review_omitted'].includes(item.tool) ? 'logs'
-      : item.domain === 'configuration' || item.tool === 'workload_state' ? 'configuration'
-        : item.domain === 'metric_anomaly' || ['resource_history','compare_baseline','database_pressure'].includes(item.tool) ? 'performance'
-          : item.domain === 'image_evidence' ? 'image' : item.domain === 'audio_evidence' ? 'audio'
-          : item.tool === 'historical_episode' ? 'history' : 'observation';
-    const iconName = {logs:'logs',configuration:'file-code-2',performance:'chart-no-axes-combined',image:'scan-line',audio:'activity',history:'layers',observation:'bell-ring'}[kind];
-    const disambiguator = occurrence > 1 ? ' · ' + (item.time_range?.start ? shortTime(item.time_range.start) : String(occurrence)) : '';
-    return '<button class="evidence-link" data-investigation-ref="' + safe(id) + '" title="Open retained ' + kind + ' evidence">' + icon(iconName) + '<span>' + safe(label + disambiguator) + '</span></button>';
+    const reference = references.get(id);
+    if (!reference) return '<span class="source-unavailable">Reference ' + safe(id) + ' unavailable in this capture</span>';
+    const occurrence = (labels.get(reference.label) || 0) + 1; labels.set(reference.label,occurrence);
+    const disambiguator = occurrence > 1 ? ' · ' + (reference.start ? shortTime(reference.start) : String(occurrence)) : '';
+    return investigationReferenceButton(reference, false, disambiguator);
   }).join('');
+}
+
+function investigationText(run, text) {
+  const prose = String(text ?? '');
+  const parts = [];
+  let offset = 0;
+  for (const match of investigationReferenceMatches(run, prose)) {
+    parts.push(safe(prose.slice(offset,match.index)), investigationReferenceButton(match.reference, true));
+    offset = match.index + match.id.length;
+  }
+  parts.push(safe(prose.slice(offset)));
+  return parts.join('');
+}
+
+function investigationReferenceMatches(run, text) {
+  const prose = String(text ?? '');
+  const references = investigationReferenceDescriptors(run);
+  if (!prose || !references.size) return [];
+  const ids = [...references.keys()].sort((a,b)=>b.length - a.length).map(id=>id.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
+  // Match retained IDs once in raw prose, never in escaped text or generated markup.
+  const matches = new RegExp('(?<![\\p{L}\\p{N}\\p{M}_-])(?:' + ids.join('|') + ')(?![\\p{L}\\p{N}\\p{M}_-])','gu');
+  return [...prose.matchAll(matches)].map(match=>({id:match[0], index:match.index, reference:references.get(match[0])}));
+}
+
+function investigationReferenceDescriptors(run) {
+  const references = new Map();
+  const checks = run?.checks || [];
+  for (const item of [...checks, ...(run?.context?.evidence || [])]) {
+    const id = item?.id;
+    if (typeof id !== 'string' || !id.trim()) continue;
+    if (references.has(id)) {
+      references.set(id, {id, unresolved:'Ambiguous'});
+    } else if (/<(?:ID|UUID|SECRET|EMAIL|IP|NUM|REDACTED)>|\[REDACTED\]/i.test(id)) {
+      references.set(id, {id, unresolved:'Redacted'});
+    } else {
+      references.set(id, investigationReferenceDescriptor(item, checks.includes(item)));
+    }
+  }
+  return references;
+}
+
+function investigationReferenceDescriptor(item, isCheck) {
+  const checks = {workload_state:'Runtime snapshot',resource_history:'Resource history',search_logs:'Source logs',compare_baseline:'Baseline comparison',database_pressure:'Database metrics',dependency_evidence:'Dependency evidence',review_omitted:'Omitted log patterns',historical_episode:'Prior episode',alert_rule_logic:'Alert logic',scrape_discovery:'Target discovery'};
+  const domains = {
+    log_template:['Logs','logs','logs'], configuration:['Config','configuration','file-code-2'],
+    metric_anomaly:['Metric','performance','chart-no-axes-combined'], alert:['Alert','alert','bell-ring'],
+    image_evidence:['Image','image','scan-line'], audio_evidence:['Audio','audio','activity'],
+    audio_transcript:['Audio transcript','audio transcript','mic'],
+    operator_context:['Operator context (unverified)','operator context (unverified)','file-code-2'],
+  };
+  const checkDomain = ['search_logs','review_omitted'].includes(item.tool) ? 'log_template'
+    : item.tool === 'workload_state' ? 'configuration'
+      : ['resource_history','compare_baseline','database_pressure'].includes(item.tool) ? 'metric_anomaly' : '';
+  const domain = Object.hasOwn(domains,item.domain) ? domains[item.domain] : domains[checkDomain];
+  const [prefix,kind,iconName] = item.tool === 'historical_episode' ? ['Prior episode','history','layers']
+    : domain || (isCheck ? ['Check','check','layers'] : ['Observation','observation','bell-ring']);
+  let title = String(item.title || item.question || '').trim();
+  if (title === item.id) title = '';
+  if (item.domain === 'log_template') title = logLabel(title).replace(/^(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL):\s*/i,'');
+  if (['image_evidence','audio_evidence','audio_transcript','operator_context'].includes(item.domain)) title = title.replace(/^(?:Image|Audio|Text) evidence:\s*/i,'');
+  const prior = item.tool === 'historical_episode' ? item.result?.episode?.reference : '';
+  const fullLabel = prior ? 'Prior episode ' + prior : Object.hasOwn(checks,item.tool) ? checks[item.tool] : prefix + (title ? ': ' + title : '');
+  const label = fullLabel.length > 80 ? fullLabel.slice(0,77).trimEnd() + '...' : fullLabel;
+  return {id:item.id, domain:item.domain || (isCheck ? 'check' : 'observation'), kind, iconName, label, fullLabel, start:item.time_range?.start};
+}
+
+function investigationReferenceButton(reference, inline = false, suffix = '') {
+  if (reference.unresolved) return '<span class="source-unavailable" title="' + safe(reference.unresolved + ' reference: ' + reference.id) + '">' + safe(reference.unresolved) + ' source (unresolved)</span>';
+  const action = 'Open retained ' + reference.kind + ' evidence';
+  const description = action + ': ' + reference.fullLabel + suffix;
+  return '<button type="button" class="evidence-link' + (inline ? ' evidence-link-inline' : '') + '" data-investigation-ref="' + safe(reference.id) + '" data-investigation-domain="' + safe(reference.domain) + '" title="' + safe(inline ? description : action) + '" aria-label="' + safe(description) + '">' + icon(reference.iconName) + '<span>' + safe(reference.label + suffix) + '</span></button>';
 }
 
 function investigationScope(payload) {
@@ -983,14 +1053,23 @@ function investigationProgress(run = {}, compact = false) {
   const usage = run.usage;
   const budget = run.token_budget || {};
   const tokenText = usage ? (usage.complete ? '' : 'At least ') + Number(usage.total_tokens || 0).toLocaleString('en') + (run.status === 'running' ? ' reported tokens' : ' tokens') : 'Usage pending';
-  const rows = checks.map(item => '<li class="agent-step ' + safe(item.status) + '"><span class="step-marker" aria-hidden="true">' + (item.status === 'running' ? '<span class="spinner"></span>' : icon(item.status === 'completed' ? 'check' : 'bell-ring')) + '</span><div><strong>' + safe(item.question) + '</strong><p class="check-answer">' + safe(checkObservation(item)) + '</p><button class="evidence-link" data-investigation-ref="' + safe(item.id) + '">' + icon('chevron-right') + ' Open observation</button><small>' + safe(item.status) + (item.finished_at ? ' · ' + formatDate(item.finished_at) : '') + '</small></div></li>').join('');
+  const checkNames = {workload_state:'Workload state', resource_history:'Resource history', search_logs:'Source logs', compare_baseline:'Baseline comparison', database_pressure:'Database metrics', dependency_evidence:'Dependencies', review_omitted:'Omitted logs', historical_episode:'Prior episode', alert_rule_logic:'Alert condition', scrape_discovery:'Target discovery'};
+  const rows = checks.map(item => {
+    const hasError = item.status !== 'completed' || Boolean(item.result?.error || item.error);
+    const state = item.status === 'completed' && hasError ? 'unavailable' : item.status;
+    const marker = '<span class="step-marker" aria-hidden="true">' + (item.status === 'running' ? '<span class="spinner"></span>' : icon(hasError ? 'bell-ring' : 'check')) + '</span>';
+    const answer = '<p class="check-answer">' + safe(checkObservation(item)) + '</p><button class="evidence-link" data-investigation-ref="' + safe(item.id) + '">' + icon('chevron-right') + ' Open observation</button><small>' + safe(state) + (item.finished_at ? ' · ' + formatDate(item.finished_at) : '') + '</small>';
+    if (compact) return '<li class="agent-step ' + safe(state) + '">' + marker + disclosure('activity-' + item.id, checkNames[item.tool] || item.question || 'Source check', '<strong>' + safe(item.question) + '</strong>' + answer, hasError && state !== 'running' ? state : '', !hasError || state === 'running' ? state : '') + '</li>';
+    return '<li class="agent-step ' + safe(state) + '">' + marker + '<div><strong>' + safe(item.question) + '</strong>' + answer + '</div></li>';
+  }).join('');
   const details = '<dl class="coverage-details"><div><dt>Input tokens</dt><dd>' + Number(usage?.prompt_tokens || 0).toLocaleString('en') + '</dd></div><div><dt>Output tokens</dt><dd>' + Number(usage?.completion_tokens || 0).toLocaleString('en') + '</dd></div><div><dt>Safety reserve</dt><dd>' + Number(budget.accounted_total_tokens || 0).toLocaleString('en') + (budget.maximum_total_tokens ? ' / ' + Number(budget.maximum_total_tokens).toLocaleString('en') : '') + '</dd></div><div><dt>Budget remaining</dt><dd>' + Number(budget.remaining_tokens || 0).toLocaleString('en') + '</dd></div><div><dt>Model calls</dt><dd>' + (run.calls?.length || 0) + '</dd></div><div><dt>Earlier attempts</dt><dd>' + Number(run.lifetime_usage?.total_tokens || 0).toLocaleString('en') + ' tokens</dd></div></dl><p class="queue-note">' + (usage?.complete ? 'Provider-reported usage is shown alongside a pre-call safety reserve.' : 'Provider usage is incomplete; the safety reserve prevents unbounded follow-up calls.') + '</p>';
   const current = checks.find(item => item.status === 'running');
   const running = ['queued','running','waiting'].includes(run.status);
   const activity = running ? (current?.question || 'Checking retained evidence') : run.status === 'ready' ? 'Investigation complete' : run.status === 'inconclusive' ? 'No supported cause yet' : 'Investigation needs attention';
   return '<aside class="agent-progress"><div class="activity-heading"><div><h3>Investigation activity</h3><strong>' + safe(activity) + '</strong><small>' + checks.length + ' check' + (checks.length === 1 ? '' : 's') + (run.finished_at ? ' · ' + formatDate(run.finished_at) : '') + '</small></div>' +
-    '<div class="activity-actions"><div class="usage-note">' + disclosure('token-usage',tokenText,details) + '</div>' + (['ready','incomplete','inconclusive'].includes(run.status) ? '<button class="icon-button" data-investigate="' + safe(run.episode_id) + '" title="Reassess episode" aria-label="Reassess episode">' + icon('refresh-cw') + '</button>' : '') + '</div></div>' +
-    (compact ? disclosure('activity-checks', 'Review checks', rows ? '<ol class="agent-steps">' + rows + '</ol>' : '<p class="queue-note">No checks recorded yet.</p>', checks.length) : '<ol class="agent-steps">' + rows + '</ol>') +
+    (['ready','incomplete','inconclusive'].includes(run.status) ? '<button class="icon-button" data-investigate="' + safe(run.episode_id) + '" title="Reassess episode" aria-label="Reassess episode">' + icon('refresh-cw') + '</button>' : '') + '</div>' +
+    (rows ? '<ol class="agent-steps' + (compact ? ' compact-checks' : '') + '">' + rows + '</ol>' : '<p class="queue-note">No checks recorded yet.</p>') +
+    '<div class="activity-footer"><div class="usage-note">' + disclosure('token-usage',tokenText,details) + '</div></div>' +
     (run.lifetime_usage?.complete === false ? '<p class="queue-note">Earlier-attempt usage is a lower bound; an interrupted request has no final count.</p>' : '') + '</aside>';
 }
 
@@ -1028,10 +1107,9 @@ function investigationResult(result = {}, checkId = '') {
 }
 
 function investigationEvidence(run = {}, attachments = []) {
-  const cited = new Set([...(run.assessment?.evidence_ids || []), ...(run.assessment?.hypotheses || []).flatMap(item=>item.evidence_ids), ...(run.assessment?.connections || []).flatMap(item=>item.evidence_ids), ...(run.assessment?.historical_comparison?.evidence_ids || [])]);
   const checks = (run.checks || []).map(item=>disclosure('agent-' + item.id,item.question,'<p>' + safe(item.distinguishes) + '</p><p class="queue-note">' + formatDate(item.started_at) + ' · ' + safe(item.status) + '</p>' + investigationResult(item.result,item.id),item.id)).join('');
   const exampleText = examples => examples.map(item => typeof item === 'string' ? item : JSON.stringify(item)).join('\n');
-  const evidence = (run.context?.evidence || []).filter(item=>cited.has(item.id)).map(item=> {
+  const evidence = (run.context?.evidence || []).map(item=> {
     if (['image_evidence','audio_evidence','audio_transcript','operator_context'].includes(item.domain)) {
       const attachment = attachments.find(entry=>entry.attachment_id === item.attachment_id);
       const extraction = attachment?.extraction;
@@ -1054,7 +1132,7 @@ function investigationEvidence(run = {}, attachments = []) {
     (item.configuration || item.alert ? '<pre class="log-lines">' + safe(JSON.stringify(item.configuration || item.alert,null,2)) + '</pre>' : '') +
     (provenance.length ? '<small>Captured in ' + provenance.join(', ') + '</small>' : ''));
   }).join('');
-  return disclosure('agent-evidence','Investigation evidence',checks + evidence || '<p>No investigation evidence yet.</p>', (run.checks?.length || 0) + (run.context?.evidence || []).filter(item=>cited.has(item.id)).length);
+  return disclosure('agent-evidence','Investigation evidence',checks + evidence || '<p>No investigation evidence yet.</p>', (run.checks?.length || 0) + (run.context?.evidence?.length || 0));
 }
 
 function investigationTimeline(run = {}) {
@@ -1103,8 +1181,29 @@ function metricsPanel(report) {
 }
 function overviewMetrics(report) {
   const supported = new Set((report.primary_hypothesis?.supporting_evidence || []).map(item => item.evidence_id));
-  const chosen = (report.pm_signals || []).filter(item => (item.signal_origin === 'alert_rule' || supported.has(item.evidence_id) && item.component) && (item.values || []).length >= 2).sort((a,b)=>Number(b.signal_origin === 'alert_rule') - Number(a.signal_origin === 'alert_rule')).slice(0, 2);
-  return chosen.length ? '<section class="overview-metrics"><h3>Relevant performance</h3><div class="metrics-grid">' + chosen.map(item => metricChart(item, true)).join('') + '</div></section>' : '';
+  const signals = report.pm_signals || [];
+  const chosen = signals.filter(item => (item.signal_origin === 'alert_rule' || supported.has(item.evidence_id) && item.component) && (item.values || []).filter(point => point.value != null && Number.isFinite(Number(point.value))).length >= 2).sort((a,b)=>Number(b.signal_origin === 'alert_rule') - Number(a.signal_origin === 'alert_rule'))[0];
+  if (!chosen) return '';
+  const rule = chosen.signal_origin === 'alert_rule';
+  const points = chosen.values;
+  const start = points[0].timestamp; const end = points.at(-1).timestamp;
+  const minutes = Math.round((Date.parse(end) - Date.parse(start)) / 60000);
+  const value = (number, fallback) => {
+    if (number == null || !Number.isFinite(Number(number))) return fallback || 'Unavailable';
+    if (chosen.unit === 'seconds') return Number(number * 1000).toLocaleString('en', {maximumFractionDigits:1}) + ' ms';
+    if (chosen.unit === 'state') return Number(number).toLocaleString('en', {maximumFractionDigits:2});
+    return fallback || Number(number).toLocaleString('en', {maximumSignificantDigits:4});
+  };
+  const title = chosen.metric === 'up' ? 'Target scrape health' : chosen.label;
+  const missing = points.filter(point => point.value == null).length;
+  const replica = chosen.labels?.prometheus_replica || chosen.labels?.replica;
+  return '<section class="overview-metrics"><div class="section-heading"><h3>Relevant performance</h3><button class="evidence-link" data-evidence-link="' + safe(chosen.evidence_id) + '" data-domain="metrics">All performance evidence</button></div>' +
+    '<article class="metric-preview"><div class="metric-preview-heading"><h4>' + safe(title) + '</h4><span class="queue-note">' + safe(minutes) + ' min captured</span></div>' +
+    '<div class="metric-preview-values"><span>' + (rule ? 'Before alert' : 'Reference median') + ' <b>' + safe(value(chosen.baseline_value, chosen.baseline)) + '</b></span><span>Selected <b>' + safe(value(chosen.peak_value, chosen.peak)) + '</b></span>' +
+    (rule ? '<span class="threshold-key">Threshold <b>' + safe(chosen.operator + ' ' + value(chosen.threshold, String(chosen.threshold) + (chosen.unit && chosen.unit !== 'state' ? ' ' + chosen.unit : ''))) + '</b></span>' : '') + '</div>' + sparkline(chosen, 640) +
+    '<div class="chart-times"><time title="' + safe(formatExactDate(start)) + '">' + safe(shortTime(start)) + '</time><span class="alert-key">' + (rule ? 'Alert ' + safe(shortTime(chosen.alert_timestamp)) : 'Marker: selected deviation') + '</span><time title="' + safe(formatExactDate(end)) + '">' + safe(shortTime(end)) + '</time></div>' +
+    '<p class="metric-preview-source">' + safe(chosen.component || 'Rule result') + (replica ? ' · replica ' + safe(replica) : '') + ' · 1 of ' + signals.length + ' captured series' + (missing ? ' · ' + missing + ' missing samples' : '') + '</p>' +
+    (chosen.metric === 'up' ? '<small class="queue-note">0: failed scrape · 1: successful scrape</small>' : '') + '</article></section>';
 }
 function evidencePanel(report) {
   const capture = report.incident || {};
@@ -1158,8 +1257,9 @@ function reportPanel(payload) {
   const exports = capsuleExport(payload);
   const specialists = mediaEvidenceAvailability();
   const evidenceAction = specialists.text
-    ? '<button class="secondary" data-add-evidence="' + safe(selectedEpisodeId || '') + '">' + icon('paperclip') + ' Add context</button>'
+    ? '<button class="context-action" data-add-evidence="' + safe(selectedEpisodeId || '') + '">' + icon('paperclip') + ' Add context</button>'
     : '<a class="button-link" href="/settings#evidence-models" title="Validate the core and specialist models in Settings to attach image or audio evidence">Evidence setup</a>';
+  const contextWorkspace = '<section class="context-workspace" aria-label="Investigation context"><div class="context-workspace-heading"><div><h3>Your context</h3><span class="queue-note">' + ((payload.media_evidence || []).length ? quantity(payload.media_evidence.length, 'attachment') : 'No context added') + '</span></div>' + evidenceAction + '</div>' + mediaEvidencePanel(payload, false) + '</section>';
   const ai = payload.investigation;
   const fallback = ai?.status !== 'ready' ? '<section class="observed-summary"><h3>Alert context</h3><p>' + safe(report.fault_alerts?.[0]?.description || incident.summary) + '</p></section>' : '';
   const d = report.engineering_diagnostics;
@@ -1168,11 +1268,11 @@ function reportPanel(payload) {
   let content;
   if (reportTab === 'evidence') content = (sourceReturn?.episodeId === selectedEpisodeId ? '<div class="source-return"><button type="button" data-return-source>Back to ' + safe(sourceReturn.tab) + '</button></div>' : '') + investigationEvidence(ai || {}, payload.media_evidence || []) + '<h3 class="capture-heading">Selected alert capture</h3>' + evidencePanel(report);
   else if (reportTab === 'timeline') content = timelinePanel(report) + investigationTimeline(ai || {});
-  else if (reportTab === 'investigation') content = '<div class="overview-layout">' + investigationProgress(ai || {}) + briefingPanel(payload, true) + mediaEvidencePanel(payload) + sourceReviewPanel(payload) + '</div>';
-  else content = '<div class="overview-layout"><div>' + investigationScope(payload) + briefingPanel(payload) + fallback + (ai?.assessment ? overviewMetrics(report) : '') + mediaEvidencePanel(payload, false) + '</div>' + investigationProgress(ai || {}, true) + '</div>';
+  else if (reportTab === 'investigation') content = '<div class="overview-layout investigation-layout">' + investigationProgress(ai || {}) + briefingPanel(payload, true) + mediaEvidencePanel(payload) + sourceReviewPanel(payload) + '</div>';
+  else content = '<div class="overview-layout report-workspace">' + investigationScope(payload) + '<div class="report-main">' + briefingPanel(payload) + fallback + contextWorkspace + (ai?.assessment ? overviewMetrics(report) : '') + '</div><div class="report-rail">' + investigationProgress(ai || {}, true) + '</div></div>';
   return '<section id="incident-report"><div class="report-navigation"><div role="tablist" aria-label="Investigation views">' +
     tabs.map(name=>'<button id="tab-' + name + '" role="tab" data-report-tab="' + name + '" aria-selected="' + (name === reportTab) + '" aria-controls="investigation-panel" tabindex="' + (name === reportTab ? 0 : -1) + '">' + name[0].toUpperCase() + name.slice(1) + '</button>').join('') +
-    '</div><div class="report-actions">' + evidenceAction + exports + '</div></div><div id="investigation-panel" role="tabpanel" aria-labelledby="tab-' + reportTab + '" tabindex="0">' + content + '</div><div class="report-technical">' + diagnostics + '</div></section>';
+    '</div><div class="report-actions">' + (reportTab === 'overview' ? '' : evidenceAction) + exports + '</div></div><div id="investigation-panel" role="tabpanel" aria-labelledby="tab-' + reportTab + '" tabindex="0">' + content + '</div><div class="report-technical">' + diagnostics + '</div></section>';
 }
 
 function renderPatterns(state) {
