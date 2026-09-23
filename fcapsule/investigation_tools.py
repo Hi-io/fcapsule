@@ -228,6 +228,9 @@ def historical_episode_result(candidate: dict[str, Any], *, include_hypothesis: 
     episode = {key: value for key, value in candidate.items() if key not in {"observations", "retained_checks"}
                and (include_hypothesis or key != "prior_hypothesis")}
     observations = []
+    selection = candidate.get("member_selection") or {}
+    matching_members = {item["incident_id"] for item in selection.get("selected_members", [])
+                        if item.get("matches_current_alert_identity")}
     retained_checks = candidate.get("retained_checks", [])[-4:]
     for item in candidate.get("observations", [])[:80 - len(retained_checks)]:
         observation = {key: item[key] for key in (
@@ -239,16 +242,22 @@ def historical_episode_result(candidate: dict[str, Any], *, include_hypothesis: 
             # must precede optional rule metadata even in an older check.
             observation["metric_observation"] = {"condition": metric["condition"], **metric}
         observation["source"] = {"episode_id": candidate["episode_id"], "provenance": item.get("provenance", [])}
+        if selection:
+            observation["source"]["matches_current_alert_identity"] = any(
+                row.get("incident_id") in matching_members for row in item.get("provenance", []))
         observations.append(observation)
     for check in retained_checks:
         observations.append({
             "retained_check": check.get("result"),
             "source": {"episode_id": candidate["episode_id"], "check_id": check.get("id"),
                        "tool": check.get("tool"), "finished_at": check.get("finished_at")},
-            "limitation": "Previously saved source observation; its collection time may differ from the incident window.",
+            "limitation": "Previously saved episode-level source observation; it need not concern the matching member and its collection time may differ from the incident window.",
         })
     # These references come from the selected stored candidate, not model input.
     reference_ids = {str(candidate["episode_id"])}
+    reference_ids.update(str(item["incident_id"]) for item in selection.get("selected_members", []))
+    if selection.get("current_incident_id"):
+        reference_ids.add(str(selection["current_incident_id"]))
     reference_ids.update(str(row[key]) for item in candidate.get("observations", [])
                          for row in item.get("provenance", []) for key in ("incident_id", "evidence_id") if row.get(key))
     return scrub({

@@ -144,17 +144,43 @@ class InvestigationService:
                 entries.append({"incident": incident, "record": record, "capsule": capsule, "report": report})
         return entries
 
-    def historical_candidates(self, episode: dict[str, Any]) -> list[dict[str, Any]]:
+    def historical_candidates(self, episode: dict[str, Any], primary_incident_id: str | None = None) -> list[dict[str, Any]]:
         """Bound prior recurrence evidence before exposing it to the investigator."""
 
+        current_id = primary_incident_id or episode.get("primary_incident_id")
+        current = next((item for item in episode.get("signals", []) if item["incident_id"] == current_id), {})
+        identity = current.get("recurrence_key") or (episode.get("recurrence_key") if not primary_incident_id else None)
         candidates = []
         for summary in (episode.get("recurrence") or {}).get("candidates", [])[:3]:
             prior = self.plane.store.get_episode(str(summary["episode_id"]))
-            if not prior:
+            if not prior or prior.get("app_id") != episode.get("app_id"):
                 continue
-            prior_entries = self.entries(prior)
+            # Select from stored identities before loading bounded artifacts. A
+            # matching older member must not disappear behind newer other alerts.
+            signals = sorted(prior.get("signals", []),
+                             key=lambda item: (item.get("started_at", ""), item["incident_id"]), reverse=True)
+            matches = {item["incident_id"] for item in signals if identity and item.get("recurrence_key") == identity}
+            signals.sort(key=lambda item: item["incident_id"] not in matches)
+            selected = signals[:4]
+            prior_entries = self.entries({**prior, "signals": selected})
+            loaded = {item["incident"]["incident_id"] for item in prior_entries}
+            matching_entries = [item for item in prior_entries if item["incident"]["incident_id"] in matches]
+            selection = {
+                "policy": "exact_stored_scope_alert_identity_then_recency",
+                "current_incident_id": current_id, "identity_available": bool(identity),
+                "matching_member_count": len(matches), "retained_matching_member_count": len(matching_entries),
+                "omitted_member_count": max(0, len(signals) - len(selected)),
+                "selected_members": [{"incident_id": item["incident_id"],
+                    "matches_current_alert_identity": item["incident_id"] in matches,
+                    "capture_available": item["incident_id"] in loaded} for item in selected],
+                "limitation": "Identity match is not a cause match. Missing matching captures cannot be replaced by other members or prior diagnoses.",
+            }
+            # Keep the missing selection explicit, not a comparison of unrelated
+            # members or episode-level checks presented as a matching capture.
+            if not matching_entries:
+                prior_entries = []
             evidence = []
-            for entry in prior_entries[-4:]:
+            for entry in prior_entries:
                 report = entry["report"]
                 evidence.append(
                     {
@@ -172,11 +198,12 @@ class InvestigationService:
                 prior_run = {}
             # Use the same retained observation projection as the current episode:
             # display-only impact/configuration summaries omit measured rule values.
-            observations = episode_context(prior, prior_entries[-4:])["evidence"] if prior_entries else []
+            observations = episode_context(prior, prior_entries,
+                matching_entries[0]["incident"]["incident_id"])["evidence"] if matching_entries else []
             retained_checks = [item for item in (prior_run.get("checks", []) if isinstance(prior_run, dict) else [])
                                if isinstance(item, dict) and item.get("status") == "completed"
                                and item.get("tool") in InvestigationTools.CATALOG
-                               and item.get("tool") != "historical_episode"][-4:]
+                               and item.get("tool") != "historical_episode"][-4:] if matching_entries else []
             assessment = prior_run.get("assessment") if isinstance(prior_run, dict) else None
             assessment = assessment if isinstance(assessment, dict) else {}
             prior_hypothesis = {
@@ -193,13 +220,14 @@ class InvestigationService:
                     "ended_at": prior.get("ended_at"),
                     "status": prior["status"],
                     "resource": prior.get("resource"),
+                    "member_selection": selection,
                     "observations": observations,
                     "retained_checks": retained_checks,
                     "availability": "retained" if observations or retained_checks else "unavailable",
-                    "capture_limit": "At most four retained member reports, 80 observations and four completed source checks. Missing records or samples are unknown, not evidence of health or the same cause.",
+                    "capture_limit": "At most four selected member reports, exact stored scope/alert identity first, then recent other members; 80 observations and four episode-level source checks. Missing matching captures remain unavailable, not substituted by other members.",
                     "prior_hypothesis": (
                         {"provenance": "Earlier model output; not independent evidence and not citable.", **prior_hypothesis}
-                        if prior_hypothesis else {}
+                        if prior_hypothesis and matching_entries else {}
                     ),
                     "captured_evidence": evidence,
                 }
@@ -453,7 +481,7 @@ class InvestigationService:
                     *(context.get("priority_evidence_ids") or []),
                     *(item["id"] for item in media_evidence),
                 ]))
-            historical = self.historical_candidates(episode)
+            historical = self.historical_candidates(episode, primary_incident_id)
             context["historical_candidates"] = [
                 {key: item.get(key) for key in ("episode_id", "reference", "title", "started_at", "ended_at", "status", "resource")}
                 for item in historical
