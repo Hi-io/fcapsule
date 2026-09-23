@@ -262,9 +262,14 @@ three provider calls. A malformed evidence review can consume one schema-repair 
 for a maximum of four by default; it stays inside the same total token budget.
 Operators can raise the number of optional model-selected checks to four, for a maximum
 of seven calls when a repair is needed. The default per-investigation reserve is 12,000 tokens and the
-default full-request input cap is 2,100 tokens. The latter includes system instructions,
+default full-request input cap is 3,200 tokens. The latter includes system instructions,
 the tool catalogue, citation IDs and selected evidence; it is not merely a cap on log
-text. Log-query compaction ranks failure signatures above frequent healthy heartbeats,
+text. The higher input default leaves room for multiple image observations and temporal
+anchors without increasing the 12,000-token total reserve, optional check count or output
+limits. Existing explicit settings, including 2,100, are not migrated or raised; the
+Settings input range remains 1,600-12,000. An input-size rejection with an explicitly
+empty call ledger is shown as "Prompt budget exceeded before any model call", not a
+failed model assessment. Log-query compaction ranks failure signatures above frequent healthy heartbeats,
 and an evidence-added revision ranks operator additions ahead of older member priorities
 (newest uploads first). This is a prompt-selection priority, not a confidence or truth
 label. Extracted limitations remain alongside the bounded observation. Priority lists
@@ -352,7 +357,8 @@ same-signature candidates, never proof of a shared cause. Optional `assessment.b
 is at most 500 characters and uses the assessment's evidence IDs. It should distinguish
 the mechanism from the alert symptom with actual observations, including what remains
 unknown. Legacy assessments are still readable; they are not rewritten retroactively.
-Neither the default 2,100-token request boundary nor the total budget is increased.
+That policy retained the then-default 2,100-token request boundary and total budget;
+the current input default is documented above. Its original budget tests remain at 2,100.
 
 Policy `episode-investigation-1.18` adds bounded recovery for malformed relationship
 endpoints, enum values or reasons. A historical episode ID in a current-alert connection

@@ -33,8 +33,34 @@ class AiConfigurationTests(unittest.TestCase):
             plane = ControlPlane(Path(directory) / "state")
             config = plane.ai_configuration()
             self.assertEqual(config["max_total_tokens"], 12000)
-            self.assertEqual(config["max_prompt_tokens"], 2100)
+            self.assertEqual(config["max_prompt_tokens"], 3200)
             self.assertEqual(config["max_checks"], 1)
+            self.assertEqual(config["max_tokens"], 3600)
+
+    def test_invalid_prompt_setting_uses_default_without_rewriting_saved_settings(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": "", "OPENROUTER_API_KEY": ""}):
+            plane = ControlPlane(Path(directory) / "state")
+            for stored in ("", "invalid"):
+                with self.subTest(stored=stored):
+                    plane.store.set_setting("ai_max_prompt_tokens", stored)
+                    config = plane.ai_configuration()
+                    self.assertEqual(config["max_prompt_tokens"], 3200)
+                    self.assertEqual(config["max_total_tokens"], 12000)
+                    self.assertEqual(config["max_checks"], 1)
+                    self.assertEqual(config["max_tokens"], 3600)
+                    self.assertEqual(plane.store.get_setting("ai_max_prompt_tokens"), stored)
+
+    def test_explicit_smaller_prompt_caps_and_existing_bounds_are_preserved(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": "", "OPENROUTER_API_KEY": ""}):
+            plane = ControlPlane(Path(directory) / "state")
+            for requested, expected in ((2100, 2100), (1600, 1600), (1599, 1600), (12001, 12000)):
+                with self.subTest(requested=requested):
+                    config = plane.update_ai_configuration({"max_prompt_tokens": requested})
+                    self.assertEqual(config["max_prompt_tokens"], expected)
+                    self.assertEqual(plane.ai_configuration()["max_prompt_tokens"], expected)
+                    self.assertEqual(config["max_total_tokens"], 12000)
+                    self.assertEqual(config["max_checks"], 1)
+                    self.assertEqual(config["max_tokens"], 3600)
 
     def test_budget_settings_are_bounded_and_available_to_investigator(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": "", "OPENROUTER_API_KEY": ""}):
@@ -48,6 +74,7 @@ class AiConfigurationTests(unittest.TestCase):
             self.assertEqual(config["max_prompt_tokens"], 2100)
             self.assertEqual(config["max_checks"], 1)
             self.assertEqual(config["capability"]["status"], "not_configured")
+            self.assertEqual(plane.update_ai_configuration({"max_tokens": 1000})["max_prompt_tokens"], 2100)
 
     def test_media_key_is_persisted_only_after_a_capability_validates(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": "", "OPENROUTER_API_KEY": ""}):
