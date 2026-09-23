@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 from fcapsule.processing.anonymizer import anonymize_text
@@ -63,6 +64,45 @@ def _bounded(value: Any, depth: int = 0, max_depth: int = 4, max_items: int = 6)
     return _short(value)
 
 
+def _visual_observation(observations: list[Any], budget: int = 1000) -> dict[str, Any]:
+    """Share space between complete extracted facts, independent of their meaning."""
+
+    rows = []
+    for index, item in enumerate(observations[:16]):
+        if not isinstance(item, dict) or not isinstance(item.get("fact"), str):
+            continue
+        fact = anonymize_text(item["fact"]).strip()
+        if fact:
+            rows.append((index, {"fact": fact, "confidence": item.get("confidence")
+                                if item.get("confidence") in {"high", "medium", "low"} else "unspecified"}))
+    # Short complete facts release their unused share to longer ones. Never emit
+    # a prefix as a fact or promote a fact because it resembles a known failure.
+    kept = []
+    remaining = len(rows)
+    for index, row in sorted(rows, key=lambda pair: len(json.dumps(pair[1], ensure_ascii=True))):
+        size = len(json.dumps(row, ensure_ascii=True))
+        if size <= budget // max(1, remaining):
+            kept.append((index, row))
+            budget -= size
+        remaining -= 1
+    return {"facts": [row for _, row in sorted(kept)],
+            "omitted_facts": len(observations) - len(kept)}
+
+
+def _minimal_visual_observation(value: dict[str, Any]) -> dict[str, Any]:
+    reduced = _visual_observation(value["facts"], budget=600)
+    reduced["omitted_facts"] += value.get("omitted_facts", 0)
+    return reduced
+
+
+def _alert_time(item: dict[str, Any]) -> datetime:
+    try:
+        value = datetime.fromisoformat(str(item.get("startsAt") or item.get("started_at")).replace("Z", "+00:00"))
+        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
 def _evidence_item(item: dict[str, Any]) -> dict[str, Any]:
     examples = item.get("examples") or []
     values = {
@@ -78,6 +118,10 @@ def _evidence_item(item: dict[str, Any]) -> dict[str, Any]:
         "revision_priority": True if item.get("revision_priority") else None,
         "metric_observation": compact_metric_observation(item.get("metric_observation")),
     }
+    if item.get("domain") == "image_evidence" and item.get("visual_observations"):
+        values["visual_observation"] = _visual_observation(item["visual_observations"])
+        values.pop("summary", None)
+        values.pop("diagnostic_example", None)
     # Empty keys cost meaningful tokens across several calls without helping a
     # model distinguish hypotheses. The full retained record stays on disk.
     return {key: value for key, value in values.items() if value not in (None, "", [], {})}
@@ -239,8 +283,10 @@ def _log_example(item: dict[str, Any]) -> dict[str, Any] | str | None:
             "buffered_bytes", "page_bytes", "delivery", "rows", "kdf", "rounds", "mode",
             "timeout_seconds", "expected_schema", "response_schema", "query_revision", "endpoint",
         )}
-        return {key: _short(value, 180) for key, value in values.items() if value not in (None, "")}
+        return {"timestamp": example.get("timestamp"),
+                **{key: _short(value, 180) for key, value in values.items() if value not in (None, "")}}
     return {
+        "timestamp": example.get("timestamp"),
         "level": example.get("level"),
         "message": _short(message, 220),
     }
@@ -255,6 +301,8 @@ def _log_observation(result: dict[str, Any]) -> dict[str, Any]:
     values = {
         "matching_patterns": result.get("matching_patterns"),
         "top_signal": _log_example(primary) if primary else None,
+        "first_seen": primary.get("first_seen"),
+        "last_seen": primary.get("last_seen"),
         "occurrences": primary.get("count") if primary else None,
         "sampled": True,
     }
@@ -421,6 +469,9 @@ def _minimal_check_observation(check: dict[str, Any]) -> Any:
     observation = check.get("observation")
     if isinstance(observation, str) and len(observation) <= 180:
         return observation
+    if check.get("tool") == "search_logs" and isinstance(observation, dict):
+        return {key: observation[key] for key in
+                ("top_signal", "first_seen", "last_seen", "occurrences", "sampled") if key in observation}
     if check.get("tool") == "scrape_discovery" and isinstance(observation, dict) and "monitor_selection" in observation:
         if observation.get("compacted_discovery"):
             return observation
@@ -482,10 +533,14 @@ def compact_for_model(
     recent = [_check_item(item, index == len(retained_checks) - 1) for index, item in enumerate(retained_checks)]
     visible_ids.extend(str(item["id"]) for item in recent if item.get("id") and item.get("status") == "completed")
     alerts = []
-    for item in (context.get("alerts") or [])[:12]:
+    source_alerts = context.get("alerts") or []
+    source_alerts = sorted(source_alerts, key=_alert_time)
+    selected_alerts = (source_alerts if len(source_alerts) <= 12 else
+                       [source_alerts[round(index * (len(source_alerts) - 1) / 11)] for index in range(12)])
+    for item in selected_alerts:
         alert = {
             "incident_id": item.get("incident_id"),
-            "alertname": item.get("alertname") or item.get("name"),
+            "alertname": _short(item.get("alertname") or item.get("name") or item.get("alert_identity") or item.get("title"), 100),
             "severity": item.get("severity"),
             "status": item.get("current_status") or item.get("status"),
             "startsAt": item.get("startsAt") or item.get("started_at"),
@@ -506,13 +561,23 @@ def compact_for_model(
         "recurrence": _recurrence(context.get("recurrence")),
         "episode_lifecycle": _bounded(context.get("episode_lifecycle"), max_items=6),
         "alerts": alerts,
+        "omitted_alerts": len(source_alerts) - len(alerts) if len(source_alerts) > len(alerts) else None,
         "impact": _bounded((context.get("impact") or [])[:8], max_items=5),
         "historical_candidates": _bounded((context.get("historical_candidates") or [])[:3], max_items=4),
         "priority_evidence_ids": [item["id"] for item in evidence if item.get("revision_priority")],
     }
     payload.update({key: value for key, value in optional_fields.items() if value not in (None, "", [], {})})
+    protected_images = set([item.get("id") for item in evidence if item.get("visual_observation")][:2])
+
+    def removable_evidence() -> bool:
+        return len(payload["evidence"]) > 1 and payload["evidence"][-1].get("id") not in protected_images
 
     def refresh_visible_ids() -> list[str]:
+        omitted_images = sum(item.get("domain") == "image_evidence" for item in source_evidence) - sum(
+            item.get("visual_observation") is not None or item.get("domain") == "image_evidence"
+            for item in payload["evidence"])
+        if omitted_images:
+            payload["omitted_images"] = omitted_images
         # Do not spend the remaining budget listing priorities already omitted.
         if "priority_evidence_ids" in payload:
             payload["priority_evidence_ids"] = [
@@ -523,12 +588,13 @@ def compact_for_model(
                    if item.get("id") and item.get("status") == "completed")
         return list(dict.fromkeys(ids))
 
+    visible_ids = refresh_visible_ids()
     # Tighten in a deterministic order until the payload meets its intended budget.
     while estimate_tokens(payload) > max_prompt_tokens:
-        if len(payload["evidence"]) > 3:
+        if len(payload["evidence"]) > 3 and removable_evidence():
             payload["evidence"].pop()
             visible_ids = refresh_visible_ids()
-        elif len(payload["evidence"]) > 1 and len(payload["prior_checks"]) > 1 and all(
+        elif removable_evidence() and len(payload["prior_checks"]) > 1 and all(
             item.get("required_observation") for item in payload["prior_checks"]
         ):
             # Source reads are fresher and more discriminating than lower-priority
@@ -575,6 +641,11 @@ def compact_for_model(
             for item in payload["prior_checks"]:
                 item.pop("question", None)
                 item.pop("distinguishes", None)
+        elif any(item.get("visual_observation") != _minimal_visual_observation(item["visual_observation"])
+                 for item in payload["evidence"] if item.get("visual_observation")):
+            for item in payload["evidence"]:
+                if item.get("visual_observation"):
+                    item["visual_observation"] = _minimal_visual_observation(item["visual_observation"])
         elif any(
             item.get("observation")
             and item.get("observation") != _minimal_check_observation(item)
@@ -582,11 +653,16 @@ def compact_for_model(
         ):
             for item in payload["prior_checks"]:
                 item["observation"] = _minimal_check_observation(item)
-        elif len(payload["evidence"]) > 1:
+        elif removable_evidence():
             payload["evidence"].pop()
             visible_ids = refresh_visible_ids()
-        elif payload.get("alerts") and len(payload["alerts"]) > 1:
-            payload["alerts"].pop()
+        elif any(set(item) - {"incident_id", "alertname", "startsAt", "endsAt"} for item in payload.get("alerts", [])):
+            payload["alerts"] = [{key: value for key, value in item.items()
+                                  if key in {"incident_id", "alertname", "startsAt", "endsAt"}}
+                                 for item in payload["alerts"]]
+        elif len(payload.get("alerts", [])) > 2:
+            payload["omitted_alerts"] = payload.get("omitted_alerts", 0) + len(payload["alerts"]) - 2
+            payload["alerts"] = [payload["alerts"][0], payload["alerts"][-1]]
         elif len(payload["prior_checks"]) > 1:
             # Prior episodes are comparisons, not replacements for observations
             # of the current episode. Their later query time is not freshness.
@@ -598,8 +674,6 @@ def compact_for_model(
             payload.pop("historical_candidates", None)
         elif payload.get("episode_lifecycle"):
             payload.pop("episode_lifecycle", None)
-        elif payload.get("alerts"):
-            payload.pop("alerts", None)
         elif payload.get("constraints") != "Evidence may be incomplete.":
             payload["constraints"] = "Evidence may be incomplete."
         elif payload["prior_checks"]:
@@ -607,11 +681,11 @@ def compact_for_model(
             visible_ids = refresh_visible_ids()
         elif payload["evidence"] and len(str(payload["evidence"][0].get("summary") or "")) > 60:
             payload["evidence"][0]["summary"] = _short(payload["evidence"][0].get("summary"), 60)
-        elif payload["evidence"] and set(payload["evidence"][0]) - {"id", "summary", "metric_observation"}:
-            payload["evidence"][0] = {
-                key: payload["evidence"][0][key]
-                for key in ("id", "summary", "metric_observation") if key in payload["evidence"][0]
-            }
+        elif any(set(item) - {"id", "summary", "metric_observation", "visual_observation", "time_range", "limitation"}
+                 for item in payload["evidence"]):
+            payload["evidence"] = [{key: item[key] for key in
+                                    ("id", "summary", "metric_observation", "visual_observation", "time_range", "limitation")
+                                    if key in item} for item in payload["evidence"]]
             visible_ids = refresh_visible_ids()
         else:
             break
