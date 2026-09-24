@@ -215,7 +215,9 @@ class HistoricalCapsuleTests(unittest.TestCase):
 
     def test_retained_review_freezes_inputs_and_exports_its_actual_evidence(self):
         self.expire_raw_sources()
-        os.environ["DEEPSEEK_API_KEY"] = "test-key"
+        os.environ["OPENROUTER_API_KEY"] = "test-key"
+        self.plane.store.set_setting("ai_provider", "openrouter")
+        self.plane.store.set_setting("ai_active_model", "deepseek/deepseek-v4-pro-0813")
         episode_id = self.current_episode()["episode_id"]
         with patch.object(self.plane.briefing_executor, "submit") as submit:
             queued = self.plane.investigator.start_source_disconnected_review(episode_id, "Has the queue signal changed?")
@@ -226,10 +228,11 @@ class HistoricalCapsuleTests(unittest.TestCase):
         # A queued review must use the snapshot named by its fingerprint.
         (Path(self.prior["capsule"]["output_dir"]) / "incident_report.json").unlink()
         client = RetainedClient()
-        with patch("fcapsule.reasoning.source_review.DeepSeekChatClient", return_value=client):
+        with patch("fcapsule.reasoning.source_review.OpenRouterChatClient", return_value=client):
             callback(*args)
         reviews = self.plane.investigator.source_disconnected_reviews(episode_id)
         self.assertEqual(reviews[0]["status"], "ready")
+        self.assertEqual(reviews[0]["provider"], "openrouter")
         self.assertEqual(reviews[0]["model_context"], client.prompts[0]["retained_episode"])
         self.assertIn("42", json.dumps(client.prompts[0]["retained_episode"]["prior_checks"]))
         self.assertIn(self.prior["incident"]["incident_id"], json.dumps(client.prompts[0]["retained_episode"]["prior_checks"]))
@@ -242,6 +245,7 @@ class HistoricalCapsuleTests(unittest.TestCase):
                                             "result": {"summary": "LaterUnrelatedCheck"}}],
         })
         payload = self.plane.incident_report_payload(self.current["incident"]["incident_id"])
+        self.assertEqual(payload["source_disconnected_reviews"][0]["provider"], "openrouter")
         self.assertEqual(payload["source_disconnected_reviews"][0]["retained_checks"], reviews[0]["retained_checks"])
         self.assertNotIn("LaterUnrelatedCheck", json.dumps(payload["source_disconnected_reviews"][0]["retained_checks"]))
         with ZipFile(self.current["capsule"]["archive_path"]) as archive:
@@ -249,11 +253,35 @@ class HistoricalCapsuleTests(unittest.TestCase):
             self.assertNotIn("prometheus_metrics.json", archive.namelist())
             self.assertNotIn("opensearch_logs.json", archive.namelist())
             self.assertEqual(history["source_disconnected_reviews"][0]["retained_context"], reviews[0]["retained_context"])
+            self.assertEqual(history["source_disconnected_reviews"][0]["provider"], "openrouter")
             self.assertIn('"max": 42', json.dumps(history["source_disconnected_reviews"][0]["retained_checks"]))
             self.assertIn("incident_report.json", archive.namelist())
         with patch.object(self.plane.briefing_executor, "submit"):
             refreshed = self.plane.investigator.start_source_disconnected_review(episode_id, "Has the queue signal changed?")
         self.assertNotEqual(queued["review_id"], refreshed["review_id"])
+
+    def test_revision_export_keeps_provider_for_failed_attempts(self):
+        episode_id = self.current_episode()["episode_id"]
+        revision = {
+            "revision_id": "revision-openrouter-failure",
+            "episode_id": episode_id,
+            "revision_reason": "manual_reassessment",
+            "source_mode": "live_sources",
+            "status": "inconclusive",
+            "provider": "openrouter",
+            "model": "deepseek/deepseek-v4-pro-0813",
+            "queued_at": "2026-09-24T10:00:00Z",
+            "finished_at": "2026-09-24T10:00:01Z",
+            "calls": [{"status": "failed", "provider": "openrouter"}],
+        }
+        self.plane.investigator._record_revision(revision)
+        self.plane.investigator._write_revision_exports(episode_id)
+
+        with ZipFile(self.current["capsule"]["archive_path"]) as archive:
+            history = json.loads(archive.read("investigation_revisions.json"))
+        exported = next(item for item in history["revisions"] if item["revision_id"] == revision["revision_id"])
+        self.assertEqual(exported["provider"], "openrouter")
+        self.assertEqual(exported["calls"][0]["provider"], "openrouter")
 
     def test_deleted_episode_does_not_regain_a_review_from_a_queued_snapshot(self):
         os.environ["DEEPSEEK_API_KEY"] = "test-key"

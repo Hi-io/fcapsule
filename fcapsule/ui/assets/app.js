@@ -668,10 +668,12 @@ function sourceReviewPanel(payload) {
   const rows = reviews.slice(0, 3).map(item => {
     const result = item.result || {};
     const usage = item.usage || {};
+    const provider = item.provider === 'deepseek' ? 'DeepSeek' : item.provider === 'openrouter' ? 'OpenRouter' : item.provider;
+    const modelText = [provider, item.model].filter(Boolean).join(' · ');
     const tokenText = Number.isFinite(Number(usage.total_tokens)) && Number(usage.total_tokens) > 0
       ? ' · ' + (usage.complete === false ? 'at least ' : '') + Number(usage.total_tokens).toLocaleString('en') + ' tokens'
       : '';
-    return `<article class="source-review-row"><div><strong>${safe(item.question)}</strong><small>${safe(String(item.status || '').replaceAll('_',' '))} · ${safe(formatDate(item.completed_at || item.created_at))}${tokenText}</small>${result.answer ? `<p>${safe(result.answer)}</p><p class="queue-note">${safe(String(result.sufficiency || '').replaceAll('_',' '))} · ${safe(result.missing_discriminator || '')}</p>` : ''}</div></article>`;
+    return `<article class="source-review-row"><div><strong>${safe(item.question)}</strong><small>${safe(String(item.status || '').replaceAll('_',' '))} · ${safe(formatDate(item.completed_at || item.created_at))}${modelText ? ' · ' + safe(modelText) : ''}${tokenText}</small>${result.answer ? `<p>${safe(result.answer)}</p><p class="queue-note">${safe(String(result.sufficiency || '').replaceAll('_',' '))} · ${safe(result.missing_discriminator || '')}</p>` : ''}</div></article>`;
   }).join('');
   const body = '<p class="queue-note">Ask a narrow question from preserved records only. Live sources are not queried.</p><button class="secondary" data-source-review="' + safe(episodeId) + '">Ask retained-capsule question</button>' + (rows ? '<div class="source-review-list">' + rows + '</div>' : '');
   return disclosure('source-disconnected-review', 'Retained-capsule review', body, reviews.length || '');
@@ -991,7 +993,8 @@ function briefingPanel(payload, detailed = false, evidencePrompt = '') {
     Array.isArray(run.calls) && run.calls.length === 0 && (!assessment || assessment.provenance === 'deterministic_abstention');
   const loading = ['queued','running','waiting'].includes(run.status);
   const saved = run.finished_at ? (zeroCallBudget ? 'Last attempt ' : run.status === 'ready' ? 'Assessment ready ' : run.status === 'inconclusive' ? 'Assessment inconclusive ' : 'Last attempt ') + formatDate(run.finished_at) : '';
-  const header = '<div class="section-heading"><h3>Episode assessment</h3><span class="queue-note">' + safe([run.model, saved].filter(Boolean).join(' · ')) + '</span></div>';
+  const provider = run.provider === 'deepseek' ? 'DeepSeek' : run.provider === 'openrouter' ? 'OpenRouter' : run.provider;
+  const header = '<div class="section-heading"><h3>Episode assessment</h3><span class="queue-note">' + safe([provider, run.model, saved].filter(Boolean).join(' · ')) + '</span></div>';
   if (zeroCallBudget) return '<section class="briefing">' + header + '<div class="analysis-state" role="status" aria-live="polite"><div><strong>Prompt budget exceeded before any model call</strong>' +
     '<p>Retained evidence and source checks remain available. Review the prompt budget before reassessing.</p>' +
     '<button class="secondary" data-investigate="' + safe(run.episode_id) + '">Reassess episode</button>' + evidencePrompt + '</div></div></section>';

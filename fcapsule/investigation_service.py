@@ -69,7 +69,8 @@ class InvestigationService:
                 continue
             if isinstance(state, dict):
                 review.update({key: state[key] for key in
-                               ("retained_context", "retained_checks", "model_context", "available_evidence_ids") if key in state})
+                               ("provider", "model", "retained_context", "retained_checks", "model_context",
+                                "available_evidence_ids") if key in state})
         return reviews
 
     def _record_revision(self, state: dict[str, Any]) -> None:
@@ -109,7 +110,7 @@ class InvestigationService:
         }
         revision_details = []
         exported_keys = (
-            "revision_id", "parent_revision_id", "revision_reason", "source_mode", "status", "queued_at",
+            "revision_id", "parent_revision_id", "revision_reason", "source_mode", "status", "provider", "queued_at",
             "started_at", "finished_at", "model", "policy_version", "message", "validation_error",
             "assessment", "checks", "calls", "review", "findings", "usage", "token_budget",
             "investigation_contract", "evidence_manifest", "input_fingerprint",

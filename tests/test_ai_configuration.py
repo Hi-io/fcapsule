@@ -111,11 +111,18 @@ class AiConfigurationTests(unittest.TestCase):
             {"DEEPSEEK_API_KEY": "existing-deepseek-key", "OPENROUTER_API_KEY": "existing-router-key", "FCAPSULE_LLM_PROVIDER": ""},
         ), patch("fcapsule.control_plane.OpenRouterChatClient", _FailingCoreClient):
             plane = ControlPlane(Path(directory) / "state")
+            current = plane.ai_configuration()
+            plane._set_capability(
+                "ai_core_capability", "existing-deepseek-key", current["model"], "ready",
+                "Existing DeepSeek key validated.", provider="deepseek",
+            )
             with self.assertRaisesRegex(ValueError, "not saved"):
                 plane.update_ai_configuration({"provider": "openrouter", "api_key": "candidate-openrouter-key-123"})
 
             self.assertEqual(os.environ["OPENROUTER_API_KEY"], "existing-router-key")
             self.assertEqual(plane.ai_configuration()["provider"], "deepseek")
+            self.assertEqual(plane.ai_configuration()["capability"]["status"], "ready")
+            self.assertEqual(plane.ai_configuration()["capability"]["message"], "Existing DeepSeek key validated.")
             saved_env = Path(directory) / "state" / ".env"
             self.assertFalse(saved_env.exists())
 

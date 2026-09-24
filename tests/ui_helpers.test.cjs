@@ -278,7 +278,7 @@ test('assessment presents one primary explanation and retains distinct observati
     safe:value=>String(value ?? ''), formatDate:value=>value, selectedEpisodeId:'episode',
     investigationRefs:()=>'', investigationText:(_run,text)=>String(text ?? ''), disclosure:(id,title,body)=>'<details><summary>'+title+'</summary>'+body+'</details>',
   });
-  const html = render({investigation:{status:'ready',model:'test-model',finished_at:'done',
+  const html = render({investigation:{status:'ready',provider:'openrouter',model:'test-model',finished_at:'done',
     assessment:{summary:'Alert scope',likely_mechanism:'Pool saturation',next_action:'Check pool usage',
       expected_finding:'Pool is full',uncertainty:'Exact caller unknown',evidence_ids:[],hypotheses:[],connections:[]},
     findings:[{id:'primary',title:'Likely explanation',summary:'Pool saturation',evidence_ids:[]},
@@ -290,11 +290,23 @@ test('assessment presents one primary explanation and retains distinct observati
   assert.match(html, /<details><summary>Key observations<\/summary>/);
   assert.match(html, /<details><summary>Why this fits<\/summary>/);
   assert.match(html, /Still unconfirmed:/);
+  assert.match(html, /OpenRouter · test-model/);
   assert.doesNotMatch(html, /Full assessment|Capture context|Explanations considered/);
   assert.match(html, /class="assessment-decision"/);
   const detailed = render({investigation:{status:'ready',assessment:{summary:'Alert scope',likely_mechanism:'Pool saturation',basis:'Connections reached the configured cap.',hypotheses:[{explanation:'Pool full',reason:'At cap',status:'supported'}]},findings:[{title:'Database observation',summary:'Connections rose'}]}},true);
   assert.match(detailed,/Capture context|Retained findings/);
   assert.doesNotMatch(detailed,/class="brief-lead"/);
+});
+
+test('retained-capsule review identifies its provider and model', () => {
+  const panel = helper('sourceReviewPanel', 'fileToBase64', {
+    safe:value=>String(value ?? ''), formatDate:value=>value, selectedEpisodeId:'episode',
+    disclosure:(_id,_title,body)=>body,
+  });
+  const html = panel({source_disconnected_reviews:[{
+    question:'What changed?', status:'ready', provider:'openrouter', model:'deepseek/example', created_at:'today',
+  }]});
+  assert.match(html, /OpenRouter · deepseek\/example/);
 });
 
 test('conflicting investigator finding is visible rather than silently merged', () => {

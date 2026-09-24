@@ -87,6 +87,16 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(state["provider"], "openrouter")
         self.assertTrue(all(call["provider"] == "openrouter" for call in state["calls"]))
 
+    def test_failed_openrouter_call_retains_selected_provider(self):
+        state, _ = self.run_case(
+            [RuntimeError("provider unavailable")], max_checks=0, provider="openrouter",
+        )
+
+        self.assertEqual(state["status"], "inconclusive")
+        self.assertEqual(state["provider"], "openrouter")
+        self.assertEqual(state["calls"][0]["status"], "failed")
+        self.assertEqual(state["calls"][0]["provider"], "openrouter")
+
     def test_provider_setting_selects_openrouter_client_without_deepseek_fallback(self):
         context = {
             **self.context,

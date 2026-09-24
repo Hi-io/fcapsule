@@ -323,7 +323,16 @@ class ControlPlane:
             return OpenRouterChatClient(api_key=api_key, timeout_seconds=timeout_seconds)
         raise ValueError("provider must be deepseek or openrouter")
 
-    def _validate_core(self, model: str, credential: str, provider: str = "deepseek") -> dict[str, Any]:
+    def _validate_core(
+        self, model: str, credential: str, provider: str = "deepseek", *, persist: bool = True,
+    ) -> dict[str, Any]:
+        def record(status: str, message: str, usage: dict[str, Any] | None = None) -> dict[str, Any]:
+            if persist:
+                return self._set_capability(
+                    "ai_core_capability", credential, model, status, message, usage, provider=provider,
+                )
+            return {"status": status, "message": message[:300], "usage": usage or {}}
+
         try:
             result = self.core_chat_client(provider, timeout_seconds=35, api_key=credential).chat(
                 ChatRequest(
@@ -337,13 +346,8 @@ class ControlPlane:
             if not str(result.get("content", "")).strip():
                 raise LLMUnavailableError("Provider returned no usable validation output")
         except (LLMUnavailableError, OSError, ValueError) as error:
-            return self._set_capability(
-                "ai_core_capability", credential, model, _capability_status(error), str(error), provider=provider,
-            )
-        return self._set_capability(
-            "ai_core_capability", credential, model, "ready", "Core model accepted a bounded JSON canary.",
-            result.get("usage"), provider=provider,
-        )
+            return record(_capability_status(error), str(error))
+        return record("ready", "Core model accepted a bounded JSON canary.", result.get("usage"))
 
     def validate_ai_configuration(self) -> dict[str, Any]:
         config = self.ai_configuration()
@@ -390,7 +394,7 @@ class ControlPlane:
         if api_key and len(api_key) < 12:
             raise ValueError("API key appears too short")
         if api_key:
-            validation = self._validate_core(model, api_key, provider)
+            validation = self._validate_core(model, api_key, provider, persist=False)
             if validation["status"] != "ready":
                 raise ValueError(f"Replacement credential was not saved: {validation['message']}")
             write_env_value(self.state_dir / ".env", CORE_PROVIDER_KEYS[provider], api_key)
@@ -401,6 +405,11 @@ class ControlPlane:
         self.store.set_setting("ai_max_total_tokens", str(maximum_total_tokens))
         self.store.set_setting("ai_max_prompt_tokens", str(maximum_prompt_tokens))
         self.store.set_setting("ai_max_checks", str(maximum_checks))
+        if api_key:
+            self._set_capability(
+                "ai_core_capability", api_key, model, "ready", validation["message"],
+                validation.get("usage"), provider=provider,
+            )
         if not api_key and (model != current["model"] or provider != current["provider"]):
             self.store.set_setting("ai_core_capability", "")
         self._persist_ai_settings()

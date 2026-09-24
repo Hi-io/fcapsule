@@ -527,7 +527,8 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
         if response_limit < 256:
             raise ValueError("Investigation token budget reached before another model response could be reserved")
         call = {"started_at": now(), "status": "running", "reasoning_effort": effort, "phase": phase,
-                "estimated_prompt_tokens": estimated_prompt, "maximum_completion_tokens": response_limit}
+                "provider": provider, "estimated_prompt_tokens": estimated_prompt,
+                "maximum_completion_tokens": response_limit}
         call["visible_evidence_ids"] = list(payload.get("available_evidence_ids") or [])
         call["model_context"] = payload["episode"]
         state["calls"].append(call)
