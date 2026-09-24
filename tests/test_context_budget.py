@@ -223,8 +223,14 @@ class ContextBudgetTests(unittest.TestCase):
         self.assertEqual(observation["top_signal"]["buffered_bytes"], "141432000")
 
     def test_structured_log_fields_and_relation_tokens_survive_prompt_compaction(self):
-        fields = {"error_code": "ECONNREFUSED", "status_code": 503, "request_id": "request-4821",
-                  "authorization": "Bearer do-not-send"}
+        fields = {
+            "error_code": "ECONNREFUSED", "status_code": 503, "request_id": "request-4821",
+            "dependency_duration_ms": 125.5,
+            "mysql_error_code": 1062, "constraint_name": "reservation_events.PRIMARY",
+            "final_upstream_status": 200,
+            "query_revision": "v2", "timeout_seconds": 0.05,
+            "authorization": "Bearer do-not-send",
+        }
         context = {"episode_id": "structured-logs", "evidence": [], "alerts": []}
         checks = [{
             "id": "Q-log", "tool": "search_logs", "status": "completed", "required_observation": True,
@@ -242,8 +248,15 @@ class ContextBudgetTests(unittest.TestCase):
         self.assertEqual(observation["fields"]["request_id"], token)
         self.assertEqual(observation["top_signal"]["error_code"], "ECONNREFUSED")
         self.assertEqual(observation["top_signal"]["status_code"], "503")
+        self.assertEqual(observation["top_signal"]["dependency_duration_ms"], "125.5")
+        self.assertEqual(observation["top_signal"]["mysql_error_code"], "1062")
+        self.assertEqual(observation["top_signal"]["constraint"], "reservation_events.PRIMARY")
+        self.assertEqual(observation["top_signal"]["final_upstream_status"], "200")
+        self.assertEqual(observation["top_signal"]["query_revision"], "v2")
+        self.assertEqual(observation["top_signal"]["timeout_seconds"], "0.05")
         self.assertNotIn("request-4821", json.dumps(compact))
         self.assertNotIn("do-not-send", json.dumps(compact))
+        self.assertLessEqual(estimate_tokens(compact), 1200)
 
     def test_capsule_log_diagnostic_fields_survive_compaction(self):
         context = {

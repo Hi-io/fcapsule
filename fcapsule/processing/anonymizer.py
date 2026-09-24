@@ -45,6 +45,7 @@ _DIAGNOSTIC_ALIASES = {
     "httpstatus": "status_code",
     "httpstatuscode": "status_code",
     "httpresponsestatuscode": "status_code",
+    "finalupstreamstatus": "final_upstream_status",
     "sqlstate": "sqlstate",
     "mysqlerrorcode": "mysql_error_code",
     "errorcode": "error_code",
@@ -55,10 +56,22 @@ _DIAGNOSTIC_ALIASES = {
     "exceptionmessage": "error_message",
     "reason": "reason",
     "disposition": "disposition",
+    "failurekind": "failure_kind",
+    "retryable": "retryable",
+    "attemptlimit": "attempt_limit",
+    "timedoutattempts": "timed_out_attempts",
+    "latecompletionpossible": "late_completion_possible",
+    "remotecancellationpropagated": "remote_cancellation_propagated",
+    "priortimedoutattemptsmaystillberunning": "prior_timed_out_attempts_may_still_be_running",
     "payloadencoding": "payload_encoding",
     "maxconnections": "max_connections",
+    "threadsconnected": "threads_connected",
+    "poolcheckedout": "pool_checked_out",
+    "utilization": "utilization",
     "memorylimit": "memory_limit",
     "bufferedbytes": "buffered_bytes",
+    "maximumbufferedbytes": "maximum_buffered_bytes",
+    "bufferedpages": "buffered_pages",
     "pagebytes": "page_bytes",
     "delivery": "delivery",
     "acknowledgement": "acknowledgement",
@@ -83,13 +96,18 @@ _DIAGNOSTIC_ALIASES = {
     "mode": "mode",
     "timeoutseconds": "timeout_seconds",
     "timeoutms": "timeout_ms",
+    "dependencytimeoutseconds": "dependency_timeout_seconds",
+    "dependencytimeoutms": "dependency_timeout_ms",
     "durationms": "duration_ms",
+    "dependencydurationms": "dependency_duration_ms",
+    "upstreamdurationms": "upstream_duration_ms",
     "retrycount": "retry_count",
     "attempt": "attempt",
     "expectedschema": "expected_schema",
     "responseschema": "response_schema",
     "schemaversion": "schema_version",
     "queryrevision": "query_revision",
+    "constraintname": "constraint",
     "endpoint": "endpoint",
     "host": "host",
     "port": "port",
@@ -126,16 +144,23 @@ _SENSITIVE_FIELD_PARTS = (
 _MAX_DIAGNOSTIC_FIELDS = 12
 _MAX_DIAGNOSTIC_CANDIDATES = 96
 _FIELD_NAME_LISTS = {"missing_fields", "observed_fields", "expected_fields", "changed_fields"}
+_SAFE_CONSTRAINT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$.-]{0,95}$")
 _DIAGNOSTIC_FIELD_PRIORITY = {
     name: index for index, name in enumerate((
-        "outcome", "validation_failure", "observed_status", "upstream_status", "consumer_status",
-        "status_code", "mysql_error_code", "error_code", "error_type", "sqlstate", "missing_fields",
+        "outcome", "validation_failure", "observed_status", "upstream_status", "final_upstream_status",
+        "consumer_status", "status_code", "mysql_error_code", "failure_kind", "error_code", "error_type",
+        "sqlstate", "missing_fields",
         "observed_fields", "expected_fields", "changed_fields", "response_schema", "expected_schema",
         "schema_version", "ownership_match", "constraint", "lock_order", "acknowledgement",
         "consumer_decision", "request_key_id", "accepted_key_id", "signing_key_id", "pair_id",
         "first_sku", "second_sku", "owner_ref", "order_ref", "existing_order_ref",
-        "reason", "disposition", "timeout_ms", "timeout_seconds", "duration_ms",
-        "retry_count", "buffered_bytes", "max_connections", "exit_code", "status",
+        "reason", "disposition", "timeout_ms", "timeout_seconds", "dependency_timeout_ms",
+        "dependency_timeout_seconds", "duration_ms", "dependency_duration_ms", "upstream_duration_ms",
+        "retryable", "attempt", "attempt_limit", "timed_out_attempts", "late_completion_possible",
+        "remote_cancellation_propagated", "prior_timed_out_attempts_may_still_be_running",
+        "retry_count", "buffered_bytes", "maximum_buffered_bytes", "buffered_pages", "page_bytes",
+        "max_connections", "threads_connected", "pool_checked_out", "utilization", "memory_limit",
+        "exit_code", "status",
     ))
 }
 
@@ -223,6 +248,8 @@ def diagnostic_fields(
         text = str(item).strip()
         if not text:
             continue
+        if canonical == "constraint" and not _SAFE_CONSTRAINT_RE.fullmatch(text):
+            text = "<REDACTED>"
         if canonical in _VERSION_ONLY_IDENTIFIER_FIELDS:
             text = _key_version(text) or _relation_token(text)
         else:
@@ -263,6 +290,8 @@ def _canonical_diagnostic_key(value: str) -> str | None:
     direct = _DIAGNOSTIC_ALIASES.get(normalized) or _DIAGNOSTIC_ALIASES.get(leaf)
     if direct:
         return direct
+    if normalized == "constraint":
+        return "constraint"
     parent = value.rsplit(".", 1)[0].rsplit(".", 1)[-1].casefold() if "." in value else ""
     if leaf in {"code", "type", "message"} and parent in {"error", "exception"}:
         return {"code": "error_code", "type": "error_type", "message": "error_message"}[leaf]

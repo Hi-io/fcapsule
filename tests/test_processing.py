@@ -152,6 +152,34 @@ class ProcessingTests(unittest.TestCase):
 
         self.assertEqual(first, second)
         self.assertNotEqual(first, other_failure)
+    def test_structured_operational_diagnostics_keep_failure_context_safely(self):
+        fields = diagnostic_fields(None, {
+            "mysql_error_code": 1062,
+            "constraint_name": "reservation_events.PRIMARY",
+            "final_upstream_status": 200,
+            "dependency_duration_ms": 125.5,
+            "dependency_timeout_seconds": 0.05,
+            "query_revision": "v2",
+            "maximum_buffered_bytes": 100663296,
+            "request_id": "request-private-42",
+            "owner_run_id": "run-private-84",
+            "password": "do-not-retain",
+        })
+
+        self.assertEqual(fields["mysql_error_code"], "1062")
+        self.assertEqual(fields["constraint"], "reservation_events.PRIMARY")
+        self.assertEqual(fields["final_upstream_status"], "200")
+        self.assertEqual(fields["dependency_duration_ms"], "125.5")
+        self.assertEqual(fields["dependency_timeout_seconds"], "0.05")
+        self.assertEqual(fields["query_revision"], "v2")
+        self.assertEqual(fields["maximum_buffered_bytes"], "100663296")
+        self.assertTrue(fields["request_id"].startswith("<REF:"))
+        self.assertTrue(fields["owner_run_id"].startswith("<REF:"))
+        self.assertNotIn("request-private-42", repr(fields))
+        self.assertNotIn("run-private-84", repr(fields))
+        self.assertNotIn("do-not-retain", repr(fields))
+        self.assertEqual(diagnostic_fields(None, {"constraint_name": "customer@example.com"})["constraint"],
+                         "<REDACTED>")
 
     def test_reduced_linked_entities_use_same_opaque_identifier(self):
         identifier = "a9c74440-635f-4ca3-99a1-c989391fb843"

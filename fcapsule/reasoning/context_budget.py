@@ -258,6 +258,8 @@ def _evidence_priority(item: dict[str, Any], priority_ids: set[str]) -> tuple[in
         "buffered", "allocated", "memory", "throttl", "pbkdf", "kdf", "rounds",
         "limit", "retry", "rejected", "mismatch", "schema", "version", "endpoint",
         "route", "authorization", "connection", "deadlock", "lock wait", "constraint",
+        "ownership_match", "mysql_error_code", "upstream_status", "duration_ms",
+        "query_revision", "timeout_seconds",
     )
     return (
         1,
@@ -281,6 +283,8 @@ def _pattern_priority(item: dict[str, Any]) -> tuple[int, int, int, int]:
         "buffered", "allocated", "memory", "throttl", "pbkdf", "kdf", "rounds",
         "limit", "retry", "rejected", "mismatch", "schema", "version", "endpoint",
         "route", "authorization", "connection", "deadlock", "lock wait", "constraint",
+        "ownership_match", "mysql_error_code", "upstream_status", "duration_ms",
+        "query_revision", "timeout_seconds",
     )
     try:
         count = int(item.get("count", 0))
