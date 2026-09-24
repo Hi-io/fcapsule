@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from fcapsule.investigation_tools import scrub
 from fcapsule.reasoning.context_budget import compact_for_model, estimate_tokens
-from fcapsule.reasoning.llm_client import ChatRequest, DeepSeekChatClient
+from fcapsule.reasoning.llm_client import ChatRequest, DeepSeekChatClient, OpenRouterChatClient
 
 
 SYSTEM = """Answer one diagnostic question using only the retained FCAPSule evidence supplied below.
@@ -106,6 +106,7 @@ def run_source_disconnected_review(
     max_prompt_tokens: int = 2200,
     max_total_tokens: int = 3500,
     client: Any = None,
+    provider: str = "deepseek",
 ) -> dict[str, Any]:
     """Run exactly one model call, with no live adapter or tool object available."""
 
@@ -115,7 +116,8 @@ def run_source_disconnected_review(
     started = time.monotonic()
     state = {
         "version": "1", "episode_id": context["episode_id"], "source_mode": "retained_only",
-        "status": "running", "question": clean_question, "model": model, "started_at": _now(),
+        "status": "running", "question": clean_question, "model": model,
+        "provider": getattr(client, "provider", provider), "started_at": _now(),
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
         "token_budget": {"maximum_total_tokens": max_total_tokens, "maximum_prompt_tokens": max_prompt_tokens,
                          "estimated_prompt_tokens": 0, "maximum_completion_tokens": 0,
@@ -165,13 +167,21 @@ def run_source_disconnected_review(
             "remaining_tokens": max(0, max_total_tokens - reservation),
         })
         publish(state)
-        response = (client or DeepSeekChatClient(timeout_seconds=90)).chat(ChatRequest(
+        if client is None:
+            if provider == "deepseek":
+                client = DeepSeekChatClient(timeout_seconds=90)
+            elif provider == "openrouter":
+                client = OpenRouterChatClient(timeout_seconds=90)
+            else:
+                raise ValueError("provider must be deepseek or openrouter")
+        response = client.chat(ChatRequest(
             model=model,
             messages=[{"role": "system", "content": SYSTEM}, {"role": "user", "content": json.dumps(prompt, ensure_ascii=True)}],
             max_tokens=completion_limit,
             reasoning_effort="none",
             json_output=True,
         ))
+        state["provider"] = response.get("provider", state["provider"])
         usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
         for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
             if isinstance(usage.get(key), int):

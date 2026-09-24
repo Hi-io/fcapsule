@@ -390,7 +390,7 @@ class InvestigationService:
             state = {
                 "review_id": review_id, "episode_id": episode_id, "question": clean_question,
                 "input_fingerprint": fingerprint, "source_mode": "retained_only", "status": "queued",
-                "model": config["model"], "created_at": now(), "result": None,
+                "provider": config["provider"], "model": config["model"], "created_at": now(), "result": None,
             }
             self._write_source_review(state)
             self.source_review_jobs.add(review_id)
@@ -459,7 +459,7 @@ class InvestigationService:
                         raise RuntimeError("Source-disconnected review cancelled after shutdown or deletion")
                     state.update(review_id=review_id, episode_id=episode_id, question=queued["question"],
                                  input_fingerprint=queued["input_fingerprint"], model=config["model"],
-                                 created_at=queued["created_at"], source_mode="retained_only")
+                                 provider=config["provider"], created_at=queued["created_at"], source_mode="retained_only")
                     self._write_source_review(state)
                     if state.get("status") in {"ready", "incomplete"}:
                         self._write_revision_exports(episode_id)
@@ -469,6 +469,7 @@ class InvestigationService:
                 min(config["max_tokens"], 700), publish,
                 max_prompt_tokens=min(config["max_prompt_tokens"], 2200),
                 max_total_tokens=min(config["max_total_tokens"], 3500),
+                provider=config["provider"],
             )
         except Exception as error:
             with self.plane.briefing_lock:
@@ -513,6 +514,7 @@ class InvestigationService:
             evidence_manifest = self.plane.evidence.manifest(episode_id)
             fingerprint = self.fingerprint(entries, evidence_manifest, primary_incident_id)
             previous = self.read(episode_id)
+            config = self.plane.ai_configuration()
             if any(call.get("status") == "running" for call in previous.get("calls", [])):
                 previous.setdefault("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})["complete"] = False
             if not retry and previous.get("input_fingerprint") == fingerprint and previous.get("status") in {"ready", "incomplete", "inconclusive"}:
@@ -521,12 +523,13 @@ class InvestigationService:
             state = {"version": "1", "episode_id": episode_id, "revision_id": revision_id,
                      "parent_revision_id": previous.get("revision_id"), "revision_reason": reason,
                      "source_mode": source_mode, "status": "queued", "queued_at": now(),
+                     "provider": config["provider"], "model": config["model"],
                      "input_fingerprint": fingerprint, "checks": [], "assessment": None,
                      "attempt": previous.get("attempt", 0) + 1, "evidence_manifest": evidence_manifest,
                      "primary_incident_id": primary_incident_id}
             history = list(previous.get("previous_runs", []))
             if previous.get("started_at"):
-                history.append({key: previous.get(key) for key in ("attempt", "started_at", "finished_at", "status", "usage", "assessment", "checks", "calls", "draft_assessment", "review", "policy_version")})
+                history.append({key: previous.get(key) for key in ("attempt", "started_at", "finished_at", "status", "provider", "model", "usage", "assessment", "checks", "calls", "draft_assessment", "review", "policy_version")})
             state["previous_runs"] = history[-3:]
             if previous.get("usage"):
                 prior = previous.get("lifetime_usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True})
@@ -535,7 +538,7 @@ class InvestigationService:
                 state["lifetime_usage"]["complete"] = prior.get("complete", True) and previous["usage"].get("complete", False)
             elif previous.get("lifetime_usage"):
                 state["lifetime_usage"] = previous["lifetime_usage"]
-            if not self.plane.ai_configuration()["api_key_configured"]:
+            if not config["api_key_configured"]:
                 state.update(status="not_configured", message="Add a provider key in Settings to enable episode investigation.")
             elif not retry and len(entries) < min(12, len(episode["signals"])):
                 state.update(status="waiting", message="Waiting for the episode's reports to finish.")
@@ -624,6 +627,7 @@ class InvestigationService:
             )
             config = self.plane.ai_configuration()
             context["investigation_limits"] = {
+                "provider": config["provider"],
                 "max_checks": config["max_checks"],
                 "max_total_tokens": config["max_total_tokens"],
                 "max_prompt_tokens": config["max_prompt_tokens"],
@@ -635,6 +639,7 @@ class InvestigationService:
                     if self.stopping or not current or not original_ids.issubset({item["incident_id"] for item in current["signals"]}):
                         raise RuntimeError("Investigation cancelled after shutdown or membership deletion")
                     state.update(input_fingerprint=input_fingerprint, attempt=queued["attempt"],
+                                 provider=config["provider"], model=config["model"],
                                  lifetime_usage=queued.get("lifetime_usage", {}), previous_runs=queued.get("previous_runs", []),
                                  revision_id=queued.get("revision_id"), parent_revision_id=queued.get("parent_revision_id"),
                                  primary_incident_id=primary_incident_id,

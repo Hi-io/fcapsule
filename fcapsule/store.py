@@ -19,6 +19,8 @@ from typing import Any
 DEFAULT_MODEL_PROFILES = (
     ("deepseek-v4-flash", "deepseek", 2400, False),
     ("deepseek-v4-pro", "deepseek", 3600, True),
+    ("deepseek/deepseek-v4-flash-0731", "openrouter", 2400, False),
+    ("deepseek/deepseek-v4-pro-0813", "openrouter", 3600, True),
 )
 
 EPISODE_JOIN_MINUTES = 15
@@ -1403,8 +1405,8 @@ class FCAPSuleStore:
     def upsert_model_profile(self, model_id: str, provider: str, enabled: bool, max_tokens: int) -> dict[str, Any]:
         if not model_id or any(character.isspace() for character in model_id):
             raise ValueError("model_id must be a non-empty identifier without spaces")
-        if provider != "deepseek":
-            raise ValueError("Only the configured DeepSeek-compatible provider is supported by this runtime")
+        if provider not in {"deepseek", "openrouter"}:
+            raise ValueError("provider must be deepseek or openrouter")
         if max_tokens < 256 or max_tokens > 16000:
             raise ValueError("max_tokens must be between 256 and 16000")
         with self._connect() as connection:

@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import unittest
@@ -5,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fcapsule.control_plane import ControlPlane
+from fcapsule.reasoning.llm_client import LLMUnavailableError
 from fcapsule.reasoning.openrouter import OpenRouterError
 
 
@@ -32,10 +34,101 @@ class AiConfigurationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": "", "OPENROUTER_API_KEY": ""}):
             plane = ControlPlane(Path(directory) / "state")
             config = plane.ai_configuration()
+            self.assertEqual(config["provider"], "deepseek")
+            self.assertEqual(config["model"], "deepseek-v4-pro")
             self.assertEqual(config["max_total_tokens"], 12000)
             self.assertEqual(config["max_prompt_tokens"], 3200)
             self.assertEqual(config["max_checks"], 1)
             self.assertEqual(config["max_tokens"], 3600)
+
+    def test_explicit_provider_selection_persists_and_does_not_fall_back(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ,
+            {"DEEPSEEK_API_KEY": "existing-deepseek-key", "OPENROUTER_API_KEY": "", "FCAPSULE_LLM_PROVIDER": ""},
+        ):
+            plane = ControlPlane(Path(directory) / "state")
+            config = plane.update_ai_configuration({"provider": "openrouter"})
+
+            self.assertEqual(config["provider"], "openrouter")
+            self.assertEqual(config["model"], "deepseek/deepseek-v4-pro-0813")
+            self.assertFalse(config["api_key_configured"])
+            self.assertEqual(config["capability"]["status"], "not_configured")
+            self.assertEqual(plane.ai_configuration()["provider"], "openrouter")
+            saved = json.loads((Path(directory) / "state" / "ai-settings.json").read_text())
+            self.assertEqual(saved["provider"], "openrouter")
+            self.assertNotIn("existing-deepseek-key", json.dumps(saved))
+
+    def test_provider_specific_key_canary_uses_openrouter_and_saves_only_after_success(self):
+        class _CoreClient:
+            instances = []
+
+            def __init__(self, api_key, timeout_seconds):
+                self.api_key = api_key
+                self.instances.append(self)
+
+            def chat(self, request):
+                self.request = request
+                return {"content": '{"status":"ok"}', "usage": {"total_tokens": 2}}
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ,
+            {"DEEPSEEK_API_KEY": "existing-deepseek-key", "OPENROUTER_API_KEY": "", "FCAPSULE_LLM_PROVIDER": ""},
+        ), patch("fcapsule.control_plane.OpenRouterChatClient", _CoreClient):
+            plane = ControlPlane(Path(directory) / "state")
+            config = plane.update_ai_configuration({"provider": "openrouter", "api_key": "candidate-openrouter-key-123"})
+
+            self.assertEqual(config["provider"], "openrouter")
+            self.assertEqual(config["capability"]["status"], "ready")
+            self.assertTrue(config["api_key_configured"])
+            self.assertEqual(_CoreClient.instances[0].api_key, "candidate-openrouter-key-123")
+            self.assertTrue(_CoreClient.instances[0].request.json_output)
+            self.assertEqual(os.environ["DEEPSEEK_API_KEY"], "existing-deepseek-key")
+            self.assertNotIn("candidate-openrouter-key-123", json.dumps(config))
+            saved = json.loads((Path(directory) / "state" / "ai-settings.json").read_text())
+            self.assertNotIn("candidate-openrouter-key-123", json.dumps(saved))
+
+            media_model = plane.media_configuration()["vision"]["model"]
+            plane._set_capability(
+                "media_vision_capability", "candidate-openrouter-key-123", media_model, "ready", "validated",
+            )
+            self.assertEqual(plane.media_configuration()["vision"]["capability"]["status"], "ready")
+            rotated = plane.update_ai_configuration({"api_key": "replacement-openrouter-key-456"})
+            self.assertEqual(rotated["capability"]["status"], "ready")
+            self.assertEqual(
+                plane.media_configuration()["vision"]["capability"]["status"], "not_validated",
+            )
+
+    def test_failed_openrouter_core_canary_does_not_replace_existing_key_or_provider(self):
+        class _FailingCoreClient:
+            def __init__(self, api_key, timeout_seconds):
+                self.api_key = api_key
+
+            def chat(self, request):
+                raise LLMUnavailableError("OpenRouter API returned HTTP 402: insufficient credit")
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ,
+            {"DEEPSEEK_API_KEY": "existing-deepseek-key", "OPENROUTER_API_KEY": "existing-router-key", "FCAPSULE_LLM_PROVIDER": ""},
+        ), patch("fcapsule.control_plane.OpenRouterChatClient", _FailingCoreClient):
+            plane = ControlPlane(Path(directory) / "state")
+            with self.assertRaisesRegex(ValueError, "not saved"):
+                plane.update_ai_configuration({"provider": "openrouter", "api_key": "candidate-openrouter-key-123"})
+
+            self.assertEqual(os.environ["OPENROUTER_API_KEY"], "existing-router-key")
+            self.assertEqual(plane.ai_configuration()["provider"], "deepseek")
+            saved_env = Path(directory) / "state" / ".env"
+            self.assertFalse(saved_env.exists())
+
+    def test_persisted_provider_selection_takes_precedence_over_environment(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ,
+            {"DEEPSEEK_API_KEY": "", "OPENROUTER_API_KEY": "", "FCAPSULE_LLM_PROVIDER": "openrouter"},
+        ):
+            plane = ControlPlane(Path(directory) / "state")
+            self.assertEqual(plane.ai_configuration()["provider"], "openrouter")
+            plane.update_ai_configuration({"provider": "deepseek", "model": "deepseek-v4-flash"})
+            self.assertEqual(plane.ai_configuration()["provider"], "deepseek")
+            self.assertEqual(plane.ai_configuration()["model"], "deepseek-v4-flash")
 
     def test_invalid_prompt_setting_uses_default_without_rewriting_saved_settings(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": "", "OPENROUTER_API_KEY": ""}):

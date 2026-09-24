@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 from fcapsule.investigation_tools import InvestigationTools, scrub
 from fcapsule.reasoning.context_budget import compact_for_model, estimate_tokens
-from fcapsule.reasoning.llm_client import ChatRequest, DeepSeekChatClient
+from fcapsule.reasoning.llm_client import ChatRequest, DeepSeekChatClient, OpenRouterChatClient
 
 
 def now() -> str:
@@ -428,8 +428,9 @@ def inconclusive_assessment(evidence_ids: set[str], error: Exception | None = No
 def run_investigation(context: dict[str, Any], tools: InvestigationTools, model: str, max_tokens: int,
                       publish: Callable[[dict[str, Any]], None], max_checks: int | None = None,
                       max_total_tokens: int | None = None, max_prompt_tokens: int | None = None,
-                      client: Any = None) -> dict[str, Any]:
+                      client: Any = None, provider: str | None = None) -> dict[str, Any]:
     limits = context.get("investigation_limits") if isinstance(context.get("investigation_limits"), dict) else {}
+    provider = provider or str(limits.get("provider") or "deepseek")
     max_checks = int(limits.get("max_checks", 2) if max_checks is None else max_checks)
     max_total_tokens = int(limits.get("max_total_tokens", 18000) if max_total_tokens is None else max_total_tokens)
     max_prompt_tokens = int(limits.get("max_prompt_tokens", 3200) if max_prompt_tokens is None else max_prompt_tokens)
@@ -443,7 +444,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
         raise ValueError("max_prompt_tokens must be between 1200 and 12000")
     state = {"version": "1", "episode_id": context["episode_id"], "status": "running", "started_at": now(),
               "policy_version": "episode-investigation-1.23", "max_completion_tokens_per_call": max_tokens,
-             "model": model, "context": context, "checks": [], "calls": [], "assessment": None,
+             "provider": provider, "model": model, "context": context, "checks": [], "calls": [], "assessment": None,
              "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
              "token_budget": {"maximum_total_tokens": max_total_tokens, "maximum_prompt_tokens": max_prompt_tokens,
                               "maximum_checks": max_checks, "estimated_prompt_tokens": 0,
@@ -540,6 +541,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
         publish(state)
         response = client.chat(ChatRequest(model=model, messages=[{"role": "system", "content": system},
             {"role": "user", "content": encoded}], max_tokens=response_limit, reasoning_effort=effort, json_output=True))
+        call["provider"] = response.get("provider", provider)
         usage = response.get("usage") or {}
         call.update({"status": "completed", "finished_at": now(), "usage": usage,
                      "latency_seconds": response.get("latency_seconds"), "finish_reason": response.get("finish_reason")})
@@ -636,7 +638,13 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
     }
     require_connections = len(alert_identities) > 1
     try:
-        client = client or DeepSeekChatClient(timeout_seconds=90)
+        if client is None:
+            if provider == "deepseek":
+                client = DeepSeekChatClient(timeout_seconds=90)
+            elif provider == "openrouter":
+                client = OpenRouterChatClient(timeout_seconds=90)
+            else:
+                raise ValueError("provider must be deepseek or openrouter")
         for turn in range(max_checks + 1):
             if time.monotonic() - started > 420:
                 state["status"] = "incomplete"

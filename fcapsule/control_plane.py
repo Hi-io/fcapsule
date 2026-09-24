@@ -30,7 +30,7 @@ from fcapsule.live_sources import LiveSourceCoordinator
 from fcapsule.investigation_service import InvestigationService
 from fcapsule.pipeline import investigate_case
 from fcapsule.reasoning.incident_briefing import generate_incident_briefing
-from fcapsule.reasoning.llm_client import ChatRequest, DeepSeekChatClient, LLMUnavailableError
+from fcapsule.reasoning.llm_client import ChatRequest, DeepSeekChatClient, LLMUnavailableError, OpenRouterChatClient
 from fcapsule.reasoning.openrouter import OpenRouterClient, OpenRouterError
 from fcapsule.related_groups import RelatedEpisodeService
 from fcapsule.store import FCAPSuleStore, utc_now
@@ -81,6 +81,13 @@ def _resource_identity(
 MEDIA_DEFAULTS = {
     "vision_model": "qwen/qwen3-vl-8b-instruct",
     "asr_model": "qwen/qwen3-asr-0.6b",
+}
+
+CORE_PROVIDER_LABELS = {"deepseek": "DeepSeek", "openrouter": "OpenRouter"}
+CORE_PROVIDER_KEYS = {"deepseek": "DEEPSEEK_API_KEY", "openrouter": "OPENROUTER_API_KEY"}
+CORE_DEFAULT_MODELS = {
+    "deepseek": "deepseek-v4-pro",
+    "openrouter": "deepseek/deepseek-v4-pro-0813",
 }
 
 
@@ -198,8 +205,10 @@ class ControlPlane:
     def _empty_phases() -> dict[str, dict[str, Any]]:
         return {"capsule": {"status": "waiting", "message": "Waiting"}}
 
-    def _capability(self, setting_key: str, credential: str | None, model: str) -> dict[str, Any]:
-        """Return a capability state only when it matches the active key/model pair."""
+    def _capability(
+        self, setting_key: str, credential: str | None, model: str, provider: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a capability state only when it matches the active provider/key/model."""
 
         if not credential:
             return {"status": "not_configured", "last_checked_at": None, "message": "No local credential is configured."}
@@ -208,7 +217,12 @@ class ControlPlane:
             saved = json.loads(raw)
         except json.JSONDecodeError:
             saved = {}
-        if not isinstance(saved, dict) or saved.get("credential_fingerprint") != _credential_fingerprint(credential) or saved.get("model") != model:
+        if (
+            not isinstance(saved, dict)
+            or saved.get("credential_fingerprint") != _credential_fingerprint(credential)
+            or saved.get("model") != model
+            or (provider is not None and saved.get("provider", "deepseek") != provider)
+        ):
             return {"status": "not_validated", "last_checked_at": None, "message": "Validate this credential and model before enabling the capability."}
         return {
             "status": str(saved.get("status") or "not_validated"),
@@ -217,7 +231,10 @@ class ControlPlane:
             "usage": saved.get("usage") if isinstance(saved.get("usage"), dict) else {},
         }
 
-    def _set_capability(self, setting_key: str, credential: str, model: str, status: str, message: str, usage: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _set_capability(
+        self, setting_key: str, credential: str, model: str, status: str, message: str,
+        usage: dict[str, Any] | None = None, provider: str | None = None,
+    ) -> dict[str, Any]:
         value = {
             "credential_fingerprint": _credential_fingerprint(credential),
             "model": model,
@@ -226,29 +243,42 @@ class ControlPlane:
             "last_checked_at": utc_now(),
             "usage": usage or {},
         }
+        if provider is not None:
+            value["provider"] = provider
         self.store.set_setting(setting_key, json.dumps(value, ensure_ascii=True, separators=(",", ":")))
-        return self._capability(setting_key, credential, model)
+        return self._capability(setting_key, credential, model, provider)
 
     def ai_configuration(self) -> dict[str, Any]:
         """Return local AI settings without ever returning a credential."""
 
         profiles = self.store.list_model_profiles()
-        default = next((item for item in profiles if item["model_id"] == "deepseek-v4-pro"), profiles[0])
-        model = self.store.get_setting("ai_active_model", str(default["model_id"])) or str(default["model_id"])
+        configured_provider = self.store.get_setting("ai_provider")
+        provider = str(configured_provider or os.environ.get("FCAPSULE_LLM_PROVIDER") or "deepseek").strip().lower()
+        if provider not in CORE_PROVIDER_KEYS:
+            raise ValueError("FCAPSULE_LLM_PROVIDER must be deepseek or openrouter")
+        default_model_id = CORE_DEFAULT_MODELS[provider]
+        default = next((item for item in profiles if item["model_id"] == default_model_id), profiles[0])
+        saved_model = self.store.get_setting("ai_active_model")
+        if configured_provider is None and saved_model:
+            saved_profile = next((item for item in profiles if item["model_id"] == saved_model), None)
+            if saved_profile and saved_profile["provider"] != provider:
+                saved_model = None
+        model = saved_model or str(default["model_id"])
         max_tokens = _bounded_int(self.store.get_setting("ai_max_tokens", str(default["max_tokens"])), int(default["max_tokens"]), 256, 6000)
         maximum_total_tokens = _bounded_int(self.store.get_setting("ai_max_total_tokens", "12000"), 12000, 4000, 100000)
         maximum_prompt_tokens = _bounded_int(self.store.get_setting("ai_max_prompt_tokens", "3200"), 3200, 1600, 12000)
         maximum_checks = _bounded_int(self.store.get_setting("ai_max_checks", "1"), 1, 0, 4)
-        credential = os.environ.get("DEEPSEEK_API_KEY")
+        credential = os.environ.get(CORE_PROVIDER_KEYS[provider])
         return {
-            "provider": "deepseek",
+            "provider": provider,
+            "providers": [{"id": key, "label": label} for key, label in CORE_PROVIDER_LABELS.items()],
             "model": model,
             "max_tokens": max_tokens,
             "max_total_tokens": maximum_total_tokens,
             "max_prompt_tokens": maximum_prompt_tokens,
             "max_checks": maximum_checks,
             "api_key_configured": bool(credential),
-            "capability": self._capability("ai_core_capability", credential, model),
+            "capability": self._capability("ai_core_capability", credential, model, provider),
             "models": profiles,
             "config_path": str(self.ai_config_path),
         }
@@ -259,13 +289,14 @@ class ControlPlane:
         vision_model = self.store.get_setting("media_vision_model", MEDIA_DEFAULTS["vision_model"]) or MEDIA_DEFAULTS["vision_model"]
         asr_model = self.store.get_setting("media_asr_model", MEDIA_DEFAULTS["asr_model"]) or MEDIA_DEFAULTS["asr_model"]
         credential = os.environ.get("OPENROUTER_API_KEY")
-        core = self.ai_configuration()["capability"]
+        ai = self.ai_configuration()
+        core = ai["capability"]
         return {
             "provider": "openrouter",
             "api_key_configured": bool(credential),
             "vision": {"model": vision_model, "capability": self._capability("media_vision_capability", credential, vision_model)},
             "audio": {"model": asr_model, "capability": self._capability("media_audio_capability", credential, asr_model)},
-            "core_investigator": {"model": self.ai_configuration()["model"], "capability": core},
+            "core_investigator": {"provider": ai["provider"], "model": ai["model"], "capability": core},
         }
 
     def media_submission_allowed(self, kind: str) -> tuple[bool, str]:
@@ -282,9 +313,19 @@ class ControlPlane:
             return False, f"Validate the selected {kind} model before adding media evidence."
         return True, ""
 
-    def _validate_core(self, model: str, credential: str) -> dict[str, Any]:
+    def core_chat_client(self, provider: str | None = None, timeout_seconds: int = 90, api_key: str | None = None):
+        """Build the selected core provider client without any implicit fallback."""
+
+        selected = provider or self.ai_configuration()["provider"]
+        if selected == "deepseek":
+            return DeepSeekChatClient(api_key=api_key, timeout_seconds=timeout_seconds)
+        if selected == "openrouter":
+            return OpenRouterChatClient(api_key=api_key, timeout_seconds=timeout_seconds)
+        raise ValueError("provider must be deepseek or openrouter")
+
+    def _validate_core(self, model: str, credential: str, provider: str = "deepseek") -> dict[str, Any]:
         try:
-            result = DeepSeekChatClient(api_key=credential, timeout_seconds=35).chat(
+            result = self.core_chat_client(provider, timeout_seconds=35, api_key=credential).chat(
                 ChatRequest(
                     model=model,
                     messages=[{"role": "user", "content": "Return the JSON object {\"status\":\"ok\"}."}],
@@ -296,15 +337,20 @@ class ControlPlane:
             if not str(result.get("content", "")).strip():
                 raise LLMUnavailableError("Provider returned no usable validation output")
         except (LLMUnavailableError, OSError, ValueError) as error:
-            return self._set_capability("ai_core_capability", credential, model, _capability_status(error), str(error))
-        return self._set_capability("ai_core_capability", credential, model, "ready", "Core model accepted a bounded JSON canary.", result.get("usage"))
+            return self._set_capability(
+                "ai_core_capability", credential, model, _capability_status(error), str(error), provider=provider,
+            )
+        return self._set_capability(
+            "ai_core_capability", credential, model, "ready", "Core model accepted a bounded JSON canary.",
+            result.get("usage"), provider=provider,
+        )
 
     def validate_ai_configuration(self) -> dict[str, Any]:
         config = self.ai_configuration()
-        credential = os.environ.get("DEEPSEEK_API_KEY")
+        credential = os.environ.get(CORE_PROVIDER_KEYS[config["provider"]])
         if not credential:
             return config
-        self._validate_core(str(config["model"]), credential)
+        self._validate_core(str(config["model"]), credential, str(config["provider"]))
         self._persist_ai_settings()
         return self.ai_configuration()
 
@@ -329,7 +375,11 @@ class ControlPlane:
         """Update bounded investigator settings; verify a replacement key before saving it."""
 
         current = self.ai_configuration()
-        model = str(payload.get("model", current["model"])).strip()
+        provider = str(payload.get("provider", current["provider"])).strip().lower()
+        if provider not in CORE_PROVIDER_KEYS:
+            raise ValueError("Provider must be deepseek or openrouter")
+        model_default = CORE_DEFAULT_MODELS[provider] if provider != current["provider"] else current["model"]
+        model = str(payload.get("model", model_default)).strip()
         if not model or any(character.isspace() for character in model):
             raise ValueError("Model ID must be a non-empty identifier without spaces")
         max_tokens = _bounded_int(payload.get("max_tokens", current["max_tokens"]), current["max_tokens"], 256, 6000)
@@ -340,17 +390,18 @@ class ControlPlane:
         if api_key and len(api_key) < 12:
             raise ValueError("API key appears too short")
         if api_key:
-            validation = self._validate_core(model, api_key)
+            validation = self._validate_core(model, api_key, provider)
             if validation["status"] != "ready":
                 raise ValueError(f"Replacement credential was not saved: {validation['message']}")
-            write_env_value(self.state_dir / ".env", "DEEPSEEK_API_KEY", api_key)
-        self.store.upsert_model_profile(model, "deepseek", True, max_tokens)
+            write_env_value(self.state_dir / ".env", CORE_PROVIDER_KEYS[provider], api_key)
+        self.store.upsert_model_profile(model, provider, True, max_tokens)
+        self.store.set_setting("ai_provider", provider)
         self.store.set_setting("ai_active_model", model)
         self.store.set_setting("ai_max_tokens", str(max_tokens))
         self.store.set_setting("ai_max_total_tokens", str(maximum_total_tokens))
         self.store.set_setting("ai_max_prompt_tokens", str(maximum_prompt_tokens))
         self.store.set_setting("ai_max_checks", str(maximum_checks))
-        if not api_key and model != current["model"]:
+        if not api_key and (model != current["model"] or provider != current["provider"]):
             self.store.set_setting("ai_core_capability", "")
         self._persist_ai_settings()
         self.investigator.resume()
@@ -1006,7 +1057,10 @@ class ControlPlane:
         if not payload or not payload.get("report") or not payload.get("record"):
             raise ValueError("Build an incident report before requesting an AI briefing")
         config = self.ai_configuration()
-        result = generate_incident_briefing(payload["report"], model=config["model"], max_tokens=config["max_tokens"])
+        result = generate_incident_briefing(
+            payload["report"], model=config["model"], max_tokens=config["max_tokens"],
+            provider=config["provider"],
+        )
         with self.briefing_lock:
             if self.store.get_incident(incident_id):
                 output_dir = Path(payload["record"]["output_dir"])

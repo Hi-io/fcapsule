@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from fcapsule.reasoning.llm_client import ChatRequest, DeepSeekChatClient, LLMUnavailableError
+from fcapsule.reasoning.llm_client import ChatRequest, DeepSeekChatClient, LLMUnavailableError, OpenRouterChatClient
 
 
 def _available_evidence(report: dict[str, Any]) -> dict[str, str]:
@@ -130,11 +130,19 @@ def generate_incident_briefing(
     model: str = "deepseek-v4-pro",
     max_tokens: int = 1500,
     timeout_seconds: int = 120,
+    client: Any = None,
+    provider: str = "deepseek",
 ) -> dict[str, Any]:
     """Generate a safe enhancement; callers keep the deterministic report on failure."""
 
     try:
-        client = DeepSeekChatClient(timeout_seconds=timeout_seconds)
+        if client is None:
+            if provider == "deepseek":
+                client = DeepSeekChatClient(timeout_seconds=timeout_seconds)
+            elif provider == "openrouter":
+                client = OpenRouterChatClient(timeout_seconds=timeout_seconds)
+            else:
+                raise ValueError("provider must be deepseek or openrouter")
         # Reasoning-capable models may spend tokens before emitting the compact JSON.
         response = client.chat(ChatRequest(model=model, messages=build_briefing_prompt(report), max_tokens=max_tokens))
     except LLMUnavailableError as exc:
@@ -149,6 +157,7 @@ def generate_incident_briefing(
         "status": "ready",
         "briefing_version": "2",
         "model": model,
+        "provider": response.get("provider", getattr(client, "provider", "deepseek")),
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "latency_seconds": response.get("latency_seconds"),
         "briefing": briefing,

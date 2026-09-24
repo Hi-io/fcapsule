@@ -1,7 +1,7 @@
 import copy
 import json
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from fcapsule.episode_investigation import SYSTEM, RELATIONSHIP_REVIEW_SYSTEM, EVIDENCE_REVIEW_SYSTEM, assessment_payload, normalize_evidence_citations, run_investigation, validate_assessment
 from fcapsule.investigation_tools import InvestigationTools, episode_context, log_patterns, metric_summary, scrub, stamp
@@ -21,13 +21,15 @@ class FakeClient:
     def __init__(self, decisions):
         self.decisions = iter(decisions)
         self.requests = []
+        self.provider = "deepseek"
 
     def chat(self, request):
         self.requests.append(request)
         decision = next(self.decisions)
         if isinstance(decision, Exception):
             raise decision
-        return {"content": json.dumps(decision), "usage": {"prompt_tokens": 100, "completion_tokens": 30, "total_tokens": 130}}
+        return {"content": json.dumps(decision), "provider": self.provider,
+                "usage": {"prompt_tokens": 100, "completion_tokens": 30, "total_tokens": 130}}
 
 
 class NoUsageClient(FakeClient):
@@ -50,11 +52,14 @@ class InvestigationEngineTests(unittest.TestCase):
 
     def run_case(self, decisions, **kwargs):
         model_max_tokens = kwargs.pop("model_max_tokens", 1000)
+        provider = kwargs.pop("provider", "deepseek")
         if decisions and isinstance(decisions[-1], dict) and decisions[-1].get("action") == "finish":
             decisions = [*decisions, copy.deepcopy(decisions[-1])]
         client = FakeClient(decisions)
+        client.provider = provider
         state = run_investigation(self.context, self.kit, "test-model", model_max_tokens,
-                                  lambda state: self.progress.append(copy.deepcopy(state)), client=client, **kwargs)
+                                  lambda state: self.progress.append(copy.deepcopy(state)), client=client,
+                                  provider=provider, **kwargs)
         return state, client
 
     def test_preserves_before_model_and_updates_from_real_tool_observation(self):
@@ -69,6 +74,42 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertIn('"reason":"Error"', client.requests[1].messages[1]["content"])
         self.assertEqual(self.progress[0]["checks"][0]["status"], "running")
         self.assertEqual(state["source_retention"], "unknown")
+
+    def test_selected_openrouter_provider_is_recorded_on_the_real_investigation_path(self):
+        state, _ = self.run_case(
+            [{"action": "finish", "assessment": assessment("Q001")}],
+            max_checks=0,
+            provider="openrouter",
+        )
+
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["provider"], "openrouter")
+        self.assertTrue(all(call["provider"] == "openrouter" for call in state["calls"]))
+
+    def test_provider_setting_selects_openrouter_client_without_deepseek_fallback(self):
+        context = {
+            **self.context,
+            "investigation_limits": {
+                "provider": "openrouter", "max_checks": 0,
+                "max_total_tokens": 12000, "max_prompt_tokens": 3200,
+            },
+        }
+        client = FakeClient([
+            {"action": "finish", "assessment": assessment("Q001")},
+            {"action": "finish", "assessment": assessment("Q001")},
+        ])
+        client.provider = "openrouter"
+        with patch("fcapsule.episode_investigation.OpenRouterChatClient", return_value=client) as router, \
+                patch("fcapsule.episode_investigation.DeepSeekChatClient") as deepseek:
+            state = run_investigation(
+                context, self.kit, "deepseek/deepseek-v4-pro-0813", 1000,
+                lambda _state: None,
+            )
+
+        router.assert_called_once_with(timeout_seconds=90)
+        deepseek.assert_not_called()
+        self.assertEqual(state["provider"], "openrouter")
+        self.assertEqual(state["model"], "deepseek/deepseek-v4-pro-0813")
 
     def test_invalid_citation_never_becomes_ready(self):
         state, _ = self.run_case([{"action": "finish", "assessment": assessment("Q999")}], max_checks=0)

@@ -51,7 +51,7 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(overview["totals"]["applications"], 1)
             self.assertEqual(overview["totals"]["degraded_applications"], 1)
             self.assertEqual(overview["totals"]["raw_bytes_observed"], 100000)
-            self.assertEqual(len(overview["models"]), 2)
+            self.assertEqual(len(overview["models"]), 4)
 
     def test_related_signals_are_grouped_into_operator_episodes(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -214,6 +214,9 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(profile["max_tokens"], 2200)
             store.set_setting("ai_active_model", profile["model_id"])
             self.assertEqual(store.get_setting("ai_active_model"), "deepseek-v4-experimental")
+            router = store.upsert_model_profile("deepseek/deepseek-v4-pro-0813", "openrouter", True, 3600)
+            self.assertEqual(router["provider"], "openrouter")
+            self.assertEqual(router["max_tokens"], 3600)
             with self.assertRaises(ValueError):
                 store.upsert_model_profile("other-model", "unsupported", True, 1200)
 
