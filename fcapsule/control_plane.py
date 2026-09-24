@@ -382,6 +382,7 @@ class ControlPlane:
         provider = str(payload.get("provider", current["provider"])).strip().lower()
         if provider not in CORE_PROVIDER_KEYS:
             raise ValueError("Provider must be deepseek or openrouter")
+        target_key_was_configured = bool(os.environ.get(CORE_PROVIDER_KEYS[provider]))
         model_default = CORE_DEFAULT_MODELS[provider] if provider != current["provider"] else current["model"]
         model = str(payload.get("model", model_default)).strip()
         if not model or any(character.isspace() for character in model):
@@ -413,7 +414,10 @@ class ControlPlane:
         if not api_key and (model != current["model"] or provider != current["provider"]):
             self.store.set_setting("ai_core_capability", "")
         self._persist_ai_settings()
-        self.investigator.resume()
+        # Provider/model edits alone must not turn retained backlog into model jobs.
+        # Adding a validated key is an explicit unblock action for work held without that provider's key.
+        if api_key and not target_key_was_configured:
+            self.investigator.resume()
         return self.ai_configuration()
 
     def update_media_configuration(self, payload: dict[str, Any]) -> dict[str, Any]:

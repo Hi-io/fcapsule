@@ -98,6 +98,27 @@ class AiConfigurationTests(unittest.TestCase):
                 plane.media_configuration()["vision"]["capability"]["status"], "not_validated",
             )
 
+    def test_blank_openrouter_key_save_preserves_configured_credential(self):
+        class _CoreClient:
+            def __init__(self, api_key, timeout_seconds):
+                self.api_key = api_key
+
+            def chat(self, request):
+                return {"content": '{"status":"ok"}', "usage": {"total_tokens": 1}}
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ,
+            {"DEEPSEEK_API_KEY": "", "OPENROUTER_API_KEY": "", "FCAPSULE_LLM_PROVIDER": ""},
+        ), patch("fcapsule.control_plane.OpenRouterChatClient", _CoreClient):
+            plane = ControlPlane(Path(directory) / "state")
+            plane.update_ai_configuration({"provider": "openrouter", "api_key": "saved-openrouter-key-123"})
+
+            config = plane.update_ai_configuration({"provider": "openrouter", "api_key": ""})
+
+            self.assertEqual(os.environ["OPENROUTER_API_KEY"], "saved-openrouter-key-123")
+            self.assertTrue(config["api_key_configured"])
+            self.assertIn("OPENROUTER_API_KEY=saved-openrouter-key-123", (Path(directory) / "state" / ".env").read_text())
+
     def test_failed_openrouter_core_canary_does_not_replace_existing_key_or_provider(self):
         class _FailingCoreClient:
             def __init__(self, api_key, timeout_seconds):

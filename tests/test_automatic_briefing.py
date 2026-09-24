@@ -11,6 +11,14 @@ from fcapsule.control_plane import ControlPlane
 from tests.common import REFERENCE_CASE
 
 
+class _InlineExecutor:
+    def submit(self, function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    def shutdown(self, **_kwargs):
+        return None
+
+
 class AutomaticInvestigationTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -57,6 +65,123 @@ class AutomaticInvestigationTests(unittest.TestCase):
         result = self.control.incident_report_payload(self.id)
         self.assertIsNotNone(result["report"])
         self.assertEqual(result["investigation"]["status"], "not_configured")
+
+    def test_provider_switch_does_not_auto_queue_unrelated_retained_backlog(self):
+        self.control.briefing_executor.shutdown(wait=True)
+        self.control.briefing_executor = _InlineExecutor()
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "", "OPENROUTER_API_KEY": ""}):
+            self.control._build_capsule(self.id)
+            second = self.control.store.record_incident({
+                **self.incident,
+                "incident_id": "unrelated-backlog",
+                "scenario": "Unrelated retained report",
+                "recurrence_key": "unrelated-backlog-family",
+                "resource_name": "payments-worker",
+                "alert_identity": "PaymentsAlert",
+            })
+            second_episode_id = self.control.store.episode_for_incident(second["incident_id"])["episode_id"]
+            self.assertNotEqual(second_episode_id, self.episode_id)
+            self.control._build_capsule(second["incident_id"])
+            self.control.investigator.path(second_episode_id).unlink()
+
+        episode_ids = [self.episode_id, second_episode_id]
+        prior = {episode_id: self.control.investigator.read(episode_id) for episode_id in episode_ids}
+        self.assertEqual(prior[self.episode_id]["status"], "not_configured")
+        self.assertEqual(prior[second_episode_id]["status"], "not_started")
+
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "already-configured-router-key"}), patch(
+            "fcapsule.investigation_service.run_investigation"
+        ) as generate:
+            self.control.update_ai_configuration({"provider": "openrouter"})
+
+        generate.assert_not_called()
+        for episode_id in episode_ids:
+            current = self.control.investigator.read(episode_id)
+            self.assertEqual(current["status"], prior[episode_id]["status"])
+            self.assertEqual(current.get("revision_id"), prior[episode_id].get("revision_id"))
+
+    def test_configuring_previously_missing_provider_key_resumes_blocked_work(self):
+        self.control.briefing_executor.shutdown(wait=True)
+        self.control.briefing_executor = _InlineExecutor()
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "", "OPENROUTER_API_KEY": ""}):
+            self.control._build_capsule(self.id)
+
+        contexts = []
+
+        def finish(context, _tools, _model, _max_tokens, publish):
+            contexts.append(context)
+            publish({"episode_id": context["episode_id"], "status": "ready", "checks": [],
+                     "assessment": {"summary": "Retained"}})
+
+        with patch.object(
+            self.control, "_validate_core", return_value={"status": "ready", "message": "Validated."}
+        ), patch("fcapsule.investigation_service.run_investigation", side_effect=finish) as generate:
+            self.control.update_ai_configuration({"api_key": "new-deepseek-key-123"})
+
+        generate.assert_called_once()
+        self.assertEqual(contexts[0]["episode_id"], self.episode_id)
+        self.assertEqual(contexts[0]["investigation_limits"]["provider"], "deepseek")
+        self.assertEqual(self.control.investigator.read(self.episode_id)["status"], "ready")
+
+    def test_402_failure_stays_historical_until_explicit_openrouter_retry(self):
+        self.control.briefing_executor.shutdown(wait=True)
+        self.control.briefing_executor = _InlineExecutor()
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "", "OPENROUTER_API_KEY": ""}):
+            self.control._build_capsule(self.id)
+
+        def fail_with_402(context, _tools, _model, _max_tokens, publish):
+            self.assertEqual(context["investigation_limits"]["provider"], "deepseek")
+            publish({
+                "episode_id": context["episode_id"], "status": "incomplete",
+                "finished_at": "2026-09-24T00:00:00Z",
+                "message": "DeepSeek API returned HTTP 402: insufficient credit",
+                "checks": [], "assessment": None,
+                "calls": [{"status": "failed", "provider": "deepseek", "error": "HTTP 402"}],
+            })
+
+        with patch.dict(os.environ, {
+            "DEEPSEEK_API_KEY": "existing-deepseek-key", "OPENROUTER_API_KEY": "existing-openrouter-key",
+        }), patch("fcapsule.investigation_service.run_investigation", side_effect=fail_with_402):
+            self.control.investigator.start(self.episode_id, retry=True)
+
+            failed = self.control.investigator.read(self.episode_id)
+            original_revision_id = failed["revision_id"]
+            retained_fingerprint = failed["input_fingerprint"]
+            self.assertEqual(failed["status"], "incomplete")
+
+            self.control.update_ai_configuration({"provider": "openrouter"})
+            after_switch = self.control.investigator.read(self.episode_id)
+            self.assertEqual(after_switch["revision_id"], original_revision_id)
+            self.assertEqual(after_switch["status"], "incomplete")
+            self.assertEqual(after_switch["input_fingerprint"], retained_fingerprint)
+            self.assertIn("402", after_switch["message"])
+
+            retry_contexts = []
+
+            def finish_on_openrouter(context, _tools, _model, _max_tokens, publish):
+                retry_contexts.append(context)
+                publish({
+                    "episode_id": context["episode_id"], "status": "ready", "checks": [],
+                    "assessment": {"summary": "Retained evidence reviewed."},
+                    "calls": [{"status": "completed", "provider": "openrouter"}],
+                })
+
+            with patch("fcapsule.investigation_service.run_investigation", side_effect=finish_on_openrouter):
+                self.control.investigator.start(self.episode_id, retry=True)
+
+            retried = self.control.investigator.read(self.episode_id)
+            self.assertEqual(retry_contexts[0]["episode_id"], self.episode_id)
+            self.assertEqual(retry_contexts[0]["investigation_limits"]["provider"], "openrouter")
+            self.assertEqual(retried["input_fingerprint"], retained_fingerprint)
+            self.assertEqual(retried["parent_revision_id"], original_revision_id)
+            self.assertEqual(retried["status"], "ready")
+
+            revisions = self.control.investigator.revisions(self.episode_id)
+            old_revision = next(item for item in revisions if item["revision_id"] == original_revision_id)
+            old_state = json.loads(Path(old_revision["state_path"]).read_text())
+            self.assertEqual(old_revision["status"], "incomplete")
+            self.assertIn("402", old_state["message"])
+            self.assertEqual(old_state["calls"][0]["provider"], "deepseek")
 
     def test_evidence_revision_marks_newest_media_ahead_of_member_priorities(self):
         self.control._build_capsule(self.id)
