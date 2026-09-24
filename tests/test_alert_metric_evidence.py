@@ -11,7 +11,10 @@ from urllib.parse import parse_qs, urlparse
 import promql_parser as promql
 
 from fcapsule.adapters.alert_expression import UnavailableExpression, plan_alert_expression
-from fcapsule.adapters.prometheus_adapter import MAX_ALERT_POINTS, MAX_ALERT_SERIES, PrometheusAdapter
+from fcapsule.adapters.prometheus_adapter import (
+    MAX_ALERT_POINTS, MAX_ALERT_SERIES, MAX_ALERT_SOURCE_POINTS, MAX_ALERT_SOURCE_SERIES,
+    PrometheusAdapter,
+)
 from fcapsule.attention.evidence_scorer import score_evidence
 from fcapsule.attention.evidence_selector import select_evidence
 from fcapsule.incident_report import build_incident_report
@@ -205,7 +208,8 @@ class AlertMetricCaptureTests(unittest.TestCase):
             'and on(namespace,pod,service) (up{namespace="shop",service="mysql-exporter"} == 1)'
         )
         captured = self.collect(query=expression)
-        sent = parse_qs(urlparse(self.adapter.transport.request.call_args.args[0]).query)["query"][0]
+        first_path = self.adapter.transport.request.call_args_list[0].args[0]
+        sent = parse_qs(urlparse(first_path).query)["query"][0]
         parsed = promql.parse(sent)
         self.assertIsInstance(parsed, promql.VectorSelector)
         self.assertEqual(parsed.name, "order_checkout_latency_p95_seconds")
@@ -264,13 +268,189 @@ class AlertMetricCaptureTests(unittest.TestCase):
                 self.assertEqual(captured["alert_evidence"]["capture_mode"], capture_mode)
                 self.assertEqual(captured["alert_evidence"]["threshold"], threshold)
                 self.assertEqual(len(captured["series"]), 1)
-                sent = parse_qs(urlparse(self.adapter.transport.request.call_args.args[0]).query)["query"][0]
+                sent = parse_qs(urlparse(self.adapter.transport.request.call_args_list[0].args[0]).query)["query"][0]
                 parsed = promql.parse(sent)
                 names = []
                 promql.walk(parsed, pre_visit=lambda node: names.append(node.name) if isinstance(node, promql.VectorSelector) else None)
                 self.assertIn(metric_name, names)
                 self.assertNotIn("time", names)
                 self.assertNotIn("up", names)
+
+    def test_retained_pm_rules_capture_raw_application_sources(self):
+        cases = (
+            (
+                "mysql-connections",
+                '(inventory_mysql_client_sessions_active{namespace="fcapsule-lab",service="inventory-api"} '
+                '/ clamp_min(inventory_mysql_server_max_connections{namespace="fcapsule-lab",service="inventory-api"}, 1)) > 0.8 '
+                'and on (namespace, pod, service) (inventory_mysql_server_max_connections{namespace="fcapsule-lab",service="inventory-api"} > 0) '
+                'and on (namespace, pod, service) (time() - inventory_mysql_sample_timestamp_seconds{namespace="fcapsule-lab",service="inventory-api"} < 45) '
+                'and on (namespace, pod, service) (time() - timestamp(inventory_mysql_client_sessions_active{namespace="fcapsule-lab",service="inventory-api"}) < 30) '
+                'and on (namespace, pod, service) (up{namespace="fcapsule-lab",service="inventory-api"} == 1)',
+                "inventory-api-1", "inventory-api", {"service": "inventory-api", "severity": "critical"},
+                {"inventory_mysql_client_sessions_active", "inventory_mysql_server_max_connections", "inventory_mysql_sample_timestamp_seconds"},
+            ),
+            (
+                "cpu-saturation",
+                'sum by (namespace, pod, container) (rate(container_cpu_usage_seconds_total{container="worker",image!="",namespace="fcapsule-lab"}[1m])) '
+                '/ max by (namespace, pod, container) (kube_pod_container_resource_limits{container="worker",namespace="fcapsule-lab",resource="cpu",unit="core"}) > 0.75',
+                "lab-worker-1", "lab-worker", {"service": "lab-worker", "severity": "critical"},
+                {"container_cpu_usage_seconds_total", "kube_pod_container_resource_limits"},
+            ),
+            (
+                "downstream-latency",
+                '(orders_checkout_latency_p95_seconds{namespace="fcapsule-lab",service="orders-api"} > 0.25) '
+                'and on (namespace, pod, service) (orders_checkout_latency_sample_count{namespace="fcapsule-lab",service="orders-api"} >= 10) '
+                'and on (namespace, pod, service) (time() - orders_checkout_latency_latest_sample_timestamp_seconds{namespace="fcapsule-lab",service="orders-api"} < 30) '
+                'and on (namespace, pod, service) (up{namespace="fcapsule-lab",service="orders-api"} == 1)',
+                "orders-api-1", "orders-api", {"service": "orders-api", "severity": "warning"},
+                {"orders_checkout_latency_sample_count", "orders_checkout_latency_latest_sample_timestamp_seconds"},
+            ),
+        )
+        start = datetime(2026, 9, 24, tzinfo=timezone.utc)
+        for name, query, pod, service, rule_labels, source_names in cases:
+            with self.subTest(rule=name):
+                self.adapter.transport.reset_mock()
+                scope_labels = {"namespace": "fcapsule-lab", "pod": pod, "service": service}
+                source_results = {metric: {
+                    "metric": {"__name__": metric, **scope_labels},
+                    "values": [[start.timestamp(), "1"], [start.timestamp() + 15, "2"]],
+                } for metric in sorted(source_names)}
+                main_response = {"status": "success", "data": {"resultType": "matrix", "result": [{
+                        "metric": scope_labels,
+                        "values": [[start.timestamp(), "0.85"], [start.timestamp() + 15, "0.9"]],
+                    }]}}
+
+                request_index = [0]
+
+                def query_response(path):
+                    if request_index[0] == 0:
+                        request_index[0] += 1
+                        return main_response
+                    request_index[0] += 1
+                    query_text = parse_qs(urlparse(path).query)["query"][0]
+                    matched = [metric for metric in source_names if metric in query_text]
+                    return {"status": "success", "data": {"resultType": "matrix", "result": [
+                        source_results[metric] for metric in matched
+                    ]}}
+
+                self.adapter.transport.request.side_effect = query_response
+                trigger = alert(query, labels=scope_labels)
+                trigger["rule"]["labels"] = rule_labels
+                captured = self.adapter.collect_alert_metrics(
+                    trigger, "fcapsule-lab", pod, start, start + timedelta(minutes=1),
+                )
+                source_capture = captured["alert_evidence"]["source_metric_capture"]
+                self.assertEqual(source_capture["status"], "available")
+                self.assertEqual(set(source_capture["metric_names"]), source_names)
+                sources = [series for series in captured["series"] if series["signal_origin"] == "alert_rule_source"]
+                self.assertEqual({series["metric"] for series in sources}, source_names)
+                self.assertTrue(all(series["scope"] == {"namespace": "fcapsule-lab", "pod": pod} for series in sources))
+                self.assertTrue(all("threshold" not in series and "operator" not in series for series in sources))
+                self.assertTrue(all(all(point[1] is not None for point in series["values"]) for series in sources))
+                _validate_metrics({"series": sources})
+                self.assertGreater(source_capture["omitted_missing_or_non_finite_points"], 0)
+                self.assertGreaterEqual(len(self.adapter.transport.request.call_args_list), 2)
+                for request in self.adapter.transport.request.call_args_list[1:]:
+                    source_params = parse_qs(urlparse(request.args[0]).query)
+                    source_query = source_params["query"][0]
+                    selectors = []
+                    promql.walk(promql.parse(source_query), pre_visit=lambda node: selectors.append(node)
+                                if isinstance(node, promql.VectorSelector) else None)
+                    self.assertTrue(all(
+                        {matcher.name: matcher.value for matcher in node.matchers.matchers}.get("pod") == pod
+                        for node in selectors
+                    ))
+                    self.assertTrue(all(
+                        not any(matcher.name == "__name__" and "up" in matcher.value
+                                for matcher in node.matchers.matchers)
+                        for node in selectors
+                    ))
+                    self.assertLessEqual(int(source_params["limit"][0]), MAX_ALERT_SOURCE_SERIES + 1)
+                    self.assertEqual(source_params["timeout"], ["4s"])
+
+    def test_unscoped_rule_source_is_skipped_and_source_series_caps_are_disclosed(self):
+        primary = 'orders_checkout_latency_p95_seconds{namespace="shop",service="orders-api"} > 0.25'
+        unsafe = 'secret_internal_metric{namespace="elsewhere",service="orders-api"} > 1'
+        trigger = alert(f"({primary}) and ({unsafe}) and (up{{namespace=\"shop\",service=\"orders-api\"}} == 1)",
+                        labels={"namespace": "shop", "pod": "orders-1", "service": "orders-api"})
+        trigger["rule"]["labels"] = {"service": "orders-api"}
+        self.adapter.transport.request.return_value = {"status": "success", "data": {"resultType": "matrix", "result": [{
+            "metric": {"namespace": "shop", "pod": "orders-1", "service": "orders-api"},
+            "values": [[START.timestamp(), "0.5"]],
+        }]}}
+        captured = self.adapter.collect_alert_metrics(trigger, "shop", "orders-1", START, START + timedelta(minutes=1))
+        self.assertEqual(self.adapter.transport.request.call_count, 1)
+        self.assertEqual(captured["alert_evidence"]["source_metric_capture"]["status"], "not_applicable")
+        self.assertEqual(captured["alert_evidence"]["source_metric_capture"]["rejected_selector_count"], 1)
+
+        guards = " and ".join(f'(related_signal_{index}{{namespace="shop",service="orders-api"}} > 0)' for index in range(9))
+        trigger = alert(f"({primary}) and ({guards})", labels={"namespace": "shop", "pod": "orders-1", "service": "orders-api"})
+        trigger["rule"]["labels"] = {"service": "orders-api"}
+        source_results = [{
+            "metric": {"__name__": f"related_signal_{index}", "namespace": "shop", "pod": "orders-1", "service": "orders-api"},
+            "values": [[START.timestamp(), "1"], [START.timestamp() + 15, "1"]],
+        } for index in range(MAX_ALERT_SOURCE_SERIES + 1)]
+        self.adapter.transport.request.side_effect = [
+            {"status": "success", "data": {"resultType": "matrix", "result": [{
+                "metric": {"namespace": "shop", "pod": "orders-1", "service": "orders-api"},
+                "values": [[START.timestamp(), "0.5"]],
+            }]}},
+            {"status": "success", "data": {"resultType": "matrix", "result": source_results}},
+        ]
+        captured = self.adapter.collect_alert_metrics(trigger, "shop", "orders-1", START, START + timedelta(minutes=1))
+        summary = captured["alert_evidence"]["source_metric_capture"]
+        self.assertEqual(len([series for series in captured["series"] if series["signal_origin"] == "alert_rule_source"]),
+                         MAX_ALERT_SOURCE_SERIES)
+        self.assertEqual(summary["status"], "partial")
+        self.assertTrue(summary["truncated"])
+        self.assertEqual(summary["omitted_selector_count"], 1)
+        self.assertEqual(summary["omitted_series_at_least"], 1)
+
+    def test_alert_source_rejects_oversized_result_labels(self):
+        query = ('orders_checkout_latency_p95_seconds{namespace="shop"} > 0.25 and '
+                 'orders_checkout_sample_count{namespace="shop"} > 0')
+        scope = {"namespace": "shop", "pod": "orders-1"}
+        self.adapter.transport.request.side_effect = [
+            {"status": "success", "data": {"resultType": "matrix", "result": [{
+                "metric": scope,
+                "values": [[START.timestamp(), "0.5"], [START.timestamp() + 15, "0.6"]],
+            }]}},
+            {"status": "success", "data": {"resultType": "matrix", "result": [{
+                "metric": {"__name__": "orders_checkout_sample_count", **scope, "extra": "x" * 2100},
+                "values": [[START.timestamp(), "10"], [START.timestamp() + 15, "12"]],
+            }]}},
+        ]
+        captured = self.adapter.collect_alert_metrics(
+            alert(query, labels=scope), "shop", "orders-1", START, START + timedelta(minutes=1),
+        )
+        summary = captured["alert_evidence"]["source_metric_capture"]
+        self.assertEqual(summary["rejected_label_series_count"], 1)
+        self.assertEqual(summary["status"], "unavailable")
+        self.assertEqual(summary["reason"], "invalid_query_samples")
+        self.assertFalse(any(series["signal_origin"] == "alert_rule_source" for series in captured["series"]))
+
+    def test_alert_source_metric_points_have_a_coarser_hard_cap(self):
+        query = 'sum by (namespace, pod) (rate(worker_failures_total{namespace="shop"}[2m])) > 1'
+        labels = {"namespace": "shop", "pod": "worker-1"}
+        trigger = alert(query, labels=labels)
+        trigger["rule"]["labels"] = {}
+        end = START + timedelta(hours=4)
+        threshold_values = [[START.timestamp() + offset * 60, "2"] for offset in range(MAX_ALERT_POINTS)]
+        source_values = [[START.timestamp() + offset * 120, "2"] for offset in range(MAX_ALERT_SOURCE_POINTS)]
+        self.adapter.transport.request.side_effect = [
+            {"status": "success", "data": {"resultType": "matrix", "result": [{
+                "metric": labels, "values": threshold_values,
+            }]}},
+            {"status": "success", "data": {"resultType": "matrix", "result": [{
+                "metric": {"__name__": "worker_failures_total", **labels}, "values": source_values,
+            }]}},
+        ]
+        captured = self.adapter.collect_alert_metrics(trigger, "shop", "worker-1", START, end)
+        source = next(series for series in captured["series"] if series["signal_origin"] == "alert_rule_source")
+        self.assertEqual(source["step_seconds"], 120)
+        self.assertEqual(len(source["values"]), MAX_ALERT_SOURCE_POINTS)
+        self.assertEqual(captured["alert_evidence"]["source_metric_capture"]["point_limit"], MAX_ALERT_SOURCE_POINTS)
+
 
     def test_non_finite_and_missing_samples_remain_null_not_zero(self):
         captured = self.collect([[START.timestamp(), "1"], [START.timestamp() + 15, "NaN"], [START.timestamp() + 45, "+Inf"]])

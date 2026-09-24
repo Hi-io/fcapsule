@@ -6,9 +6,12 @@ import time
 import math
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
+
+import promql_parser as promql
 
 from fcapsule.adapters.transport import JsonTransport
 from fcapsule.adapters.alert_expression import UnavailableExpression, plan_alert_expression
@@ -16,6 +19,21 @@ from fcapsule.adapters.alert_expression import UnavailableExpression, plan_alert
 MAX_ALERT_SERIES = 12
 MAX_ALERT_POINTS = 241
 MAX_ALERT_WINDOW_SECONDS = 4 * 60 * 60
+MAX_ALERT_SOURCE_SELECTORS = 8
+MAX_ALERT_SOURCE_QUERY_GROUPS = 3
+MAX_ALERT_SOURCE_SERIES = 6
+MAX_ALERT_SOURCE_POINTS = 121
+MAX_ALERT_SOURCE_SELECTOR_CHARS = 1024
+MAX_ALERT_SOURCE_EXPRESSION_CHARS = 4096
+MAX_ALERT_SOURCE_LABELS = 32
+MAX_ALERT_SOURCE_LABEL_CHARS = 2048
+
+_MATCHER_SYMBOLS = {
+    "MatchOp.Equal": "=",
+    "MatchOp.NotEqual": "!=",
+    "MatchOp.Re": "=~",
+    "MatchOp.NotRe": "!~",
+}
 
 
 class PrometheusAdapter:
@@ -256,7 +274,263 @@ class PrometheusAdapter:
         evidence["status"] = "available" if result["series"] else "unavailable"
         evidence["reason"] = None if result["series"] else "no_finite_samples"
         evidence["series_ids"] = [item["series_id"] for item in result["series"]]
+        source_capture = self._collect_alert_source_metrics(alert, namespace, pod, start, end, step, evidence)
+        evidence["source_metric_capture"] = source_capture["evidence"]
+        result["series"].extend(source_capture["series"])
         return result
+
+    def _collect_alert_source_metrics(
+        self, alert: dict[str, Any], namespace: str, pod: str, start: datetime, end: datetime,
+        alert_step_seconds: int, alert_evidence: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Capture bounded raw selector inputs referenced by the configured alert rule.
+
+        This is deliberately not metric discovery: the rule is the source catalog,
+        every query is reduced to one exact namespace/pod selector, and guard values
+        are retained without reapplying the alert's comparison or threshold.
+        """
+        alert_labels = alert.get("labels") if isinstance(alert.get("labels"), dict) else {}
+        service = str(alert_labels.get("service") or "")
+        summary: dict[str, Any] = {
+            "status": "unavailable", "reason": None,
+            "source": {"adapter": "prometheus", "endpoint": "/api/v1/query_range",
+                       "capture_mode": "alert_rule_source_metrics", "captured_at": _timestamp(time.time())},
+            "scope": {"namespace": namespace, **({"pod": pod} if pod else ({"service": service} if service else {}))},
+            "selector_limit": MAX_ALERT_SOURCE_SELECTORS,
+            "query_group_limit": MAX_ALERT_SOURCE_QUERY_GROUPS,
+            "series_limit": MAX_ALERT_SOURCE_SERIES,
+            "point_limit": MAX_ALERT_SOURCE_POINTS,
+            "candidate_selector_count": 0, "selected_selector_count": 0,
+            "candidate_group_count": 0, "selected_group_count": 0, "processed_group_count": 0,
+            "captured_series_count": 0, "omitted_selector_count": 0,
+            "omitted_group_count": 0, "omitted_series_at_least": 0,
+            "omitted_missing_or_non_finite_points": 0,
+            "rejected_selector_count": 0, "rejected_label_series_count": 0, "query_failure_count": 0,
+            "truncated": False,
+            "note": "Raw source selector samples; alert aggregation, comparison, and threshold are not reapplied.",
+        }
+        empty = {"series": [], "evidence": summary}
+        rule = alert.get("rule") if isinstance(alert.get("rule"), dict) else {}
+        query = rule.get("query")
+        if not isinstance(query, str) or not query.strip() or len(query) > 4096:
+            summary["reason"] = "rule_definition_unavailable"
+            return empty
+        try:
+            root = promql.parse(query)
+            nodes: list[Any] = []
+            promql.walk(root, pre_visit=lambda node: nodes.append(node))
+        except ValueError:
+            summary["reason"] = "invalid_or_unsupported_promql"
+            return empty
+
+        direct_threshold_signature = None
+        underlying = alert_evidence.get("underlying_expression")
+        if isinstance(underlying, str):
+            try:
+                threshold_node = promql.parse(underlying)
+                while isinstance(threshold_node, promql.ParenExpr):
+                    threshold_node = threshold_node.expr
+                if isinstance(threshold_node, promql.VectorSelector):
+                    direct_threshold_signature = _selector_signature(threshold_node)
+            except ValueError:
+                pass
+
+        candidates: list[str] = []
+        seen: set[str] = set()
+        rejected = 0
+        for node in nodes:
+            if not isinstance(node, promql.VectorSelector):
+                continue
+            if not node.name or node.name == "up":
+                continue
+            if direct_threshold_signature is not None and _selector_signature(node) == direct_threshold_signature:
+                continue
+            selector = _scoped_source_selector(node, namespace, pod, service)
+            if selector is None or len(selector) > MAX_ALERT_SOURCE_SELECTOR_CHARS:
+                rejected += 1
+                continue
+            if selector not in seen:
+                seen.add(selector)
+                candidates.append(selector)
+
+        summary["candidate_selector_count"] = len(candidates)
+        summary["rejected_selector_count"] = rejected
+        if not candidates:
+            summary["status"] = "not_applicable"
+            summary["reason"] = "no_additional_safe_source_selectors"
+            return empty
+
+        candidate_count = len(candidates)
+        candidates = candidates[:MAX_ALERT_SOURCE_SELECTORS]
+        groups_by_matchers: dict[tuple[Any, ...], dict[str, Any]] = {}
+        groups: list[dict[str, Any]] = []
+        for selector in candidates:
+            parsed_selector = promql.parse(selector)
+            matcher_key = tuple(sorted(
+                (matcher.name, str(matcher.op), matcher.value)
+                for matcher in parsed_selector.matchers.matchers
+            ))
+            group = groups_by_matchers.get(matcher_key)
+            if group is None:
+                group = {"matchers": parsed_selector.matchers.matchers, "selectors": {}}
+                groups_by_matchers[matcher_key] = group
+                groups.append(group)
+            group["selectors"][parsed_selector.name] = selector
+
+        summary["candidate_group_count"] = len(groups)
+        selected_groups: list[dict[str, Any]] = []
+        query_char_budget = MAX_ALERT_SOURCE_EXPRESSION_CHARS
+        for group in groups:
+            if len(selected_groups) >= MAX_ALERT_SOURCE_QUERY_GROUPS:
+                continue
+            expression = _source_metric_family_expression(list(group["selectors"]), group["matchers"])
+            if expression is None or len(expression) > query_char_budget:
+                continue
+            group["expression"] = expression
+            selected_groups.append(group)
+            query_char_budget -= len(expression)
+        selected_selector_count = sum(len(group["selectors"]) for group in selected_groups)
+        summary["selected_group_count"] = len(selected_groups)
+        summary["selected_selector_count"] = selected_selector_count
+        summary["omitted_selector_count"] = candidate_count - selected_selector_count
+        summary["omitted_group_count"] = len(groups) - len(selected_groups)
+        summary["truncated"] = summary["omitted_selector_count"] > 0
+        summary["metric_names"] = sorted({
+            metric_name for group in selected_groups for metric_name in group["selectors"]
+        })
+        summary["query_groups"] = [{
+            "index": index, "metric_names": sorted(group["selectors"]),
+            "selector_count": len(group["selectors"]),
+        } for index, group in enumerate(selected_groups)]
+        if not selected_groups:
+            summary["status"] = "unavailable"
+            summary["reason"] = "source_expression_limit_exceeded"
+            return empty
+
+        duration = (end - start).total_seconds()
+        step = max(alert_step_seconds, math.ceil(duration / (MAX_ALERT_SOURCE_POINTS - 1)))
+        summary["step_seconds"] = step
+        scope = summary["scope"]
+        grid = [start.timestamp() + offset * step for offset in range(math.floor(duration / step) + 1)]
+        captured: list[dict[str, Any]] = []
+        invalid_series = 0
+        seen_series: set[tuple[str, str]] = set()
+        for group_index, group in enumerate(selected_groups):
+            remaining = MAX_ALERT_SOURCE_SERIES - len(captured)
+            if remaining <= 0:
+                summary["truncated"] = True
+                summary["omitted_group_count"] += len(selected_groups) - group_index
+                break
+            try:
+                data = self._api("/api/v1/query_range", {
+                    "query": group["expression"], "start": start.timestamp(), "end": end.timestamp(),
+                    "step": step, "timeout": "4s", "limit": remaining + 1,
+                }) or {}
+            except (RuntimeError, OSError, ValueError):
+                summary["query_failure_count"] += 1
+                continue
+            if not isinstance(data, dict) or data.get("resultType") != "matrix" or not isinstance(data.get("result"), list):
+                summary["query_failure_count"] += 1
+                continue
+            summary["processed_group_count"] += 1
+            results = data["result"]
+            over_limit = len(results) > remaining
+            if over_limit:
+                summary["truncated"] = True
+                summary["omitted_series_at_least"] += len(results) - remaining
+            for item in results[:remaining]:
+                if not isinstance(item, dict) or item.get("histograms"):
+                    invalid_series += 1
+                    continue
+                raw_labels = item.get("metric")
+                if not isinstance(raw_labels, dict):
+                    invalid_series += 1
+                    continue
+                labels = {str(key): str(value) for key, value in raw_labels.items()}
+                if (len(labels) > MAX_ALERT_SOURCE_LABELS
+                        or sum(len(key) + len(value) for key, value in labels.items()) > MAX_ALERT_SOURCE_LABEL_CHARS):
+                    invalid_series += 1
+                    summary["rejected_label_series_count"] += 1
+                    continue
+                if (any(labels.get(key) != expected for key, expected in scope.items())
+                        or (service and labels.get("service") and labels["service"] != service)):
+                    summary["reason"] = "result_outside_incident_scope"
+                    summary["status"] = "unavailable"
+                    return empty
+                metric_name = labels.get("__name__")
+                selector = group["selectors"].get(metric_name)
+                if not metric_name or not selector:
+                    invalid_series += 1
+                    continue
+                result_identity = (metric_name, json.dumps(labels, sort_keys=True, separators=(",", ":")))
+                if result_identity in seen_series:
+                    continue
+                seen_series.add(result_identity)
+                samples = item.get("values", [])
+                if not isinstance(samples, list) or len(samples) > MAX_ALERT_SOURCE_POINTS:
+                    invalid_series += 1
+                    continue
+                by_position: dict[int, list[Any]] = {}
+                try:
+                    for stamp, raw_value in samples:
+                        stamp = float(stamp)
+                        value = float(raw_value)
+                        if not math.isfinite(stamp) or not start.timestamp() - 0.001 <= stamp <= end.timestamp() + 0.001:
+                            raise ValueError("sample outside source window")
+                        position = round((stamp - start.timestamp()) / step)
+                        if position >= len(grid) or abs(grid[position] - stamp) > 0.001 or position in by_position:
+                            raise ValueError("invalid source sample timestamp")
+                        if math.isfinite(value):
+                            by_position[position] = [_timestamp(stamp), value]
+                except (TypeError, ValueError, IndexError):
+                    invalid_series += 1
+                    continue
+                if len(by_position) < 2:
+                    invalid_series += 1
+                    continue
+                values = [by_position[position] for position in sorted(by_position)]
+                omitted_points = len(grid) - len(values)
+                summary["omitted_missing_or_non_finite_points"] += omitted_points
+                identity = json.dumps([
+                    rule.get("name"), rule.get("query"), selector, labels,
+                ], sort_keys=True, separators=(",", ":"))
+                captured.append({
+                    "metric": metric_name,
+                    "signal_origin": "alert_rule_source",
+                    "series_id": "alert_source_" + hashlib.sha256(identity.encode()).hexdigest()[:16],
+                    "alertname": alert.get("alertname"),
+                    "alert_timestamp": alert.get("startsAt"),
+                    "rule_name": rule.get("name"),
+                    "labels": labels,
+                    "scope": scope,
+                    "time_range": {"start": _timestamp(start.timestamp()), "end": _timestamp(end.timestamp())},
+                    "step_seconds": step,
+                    "source": {
+                        **summary["source"],
+                        "selector": selector,
+                        "query_group": group_index,
+                        "omitted_missing_or_non_finite_points": omitted_points,
+                        "note": summary["note"],
+                    },
+                    "values": values,
+                })
+            if over_limit:
+                break
+        summary["captured_series_count"] = len(captured)
+        summary["series_ids"] = [series["series_id"] for series in captured]
+        summary["invalid_series_count"] = invalid_series
+        if captured:
+            summary["status"] = "partial" if summary["truncated"] or invalid_series or summary["query_failure_count"] else "available"
+            if summary["truncated"]:
+                summary["reason"] = "capture_limit_reached"
+            elif invalid_series or summary["query_failure_count"]:
+                summary["reason"] = "some_query_results_unavailable"
+        else:
+            summary["status"] = "unavailable"
+            summary["reason"] = "query_failed" if summary["query_failure_count"] else (
+                "no_finite_samples" if not invalid_series else "invalid_query_samples"
+            )
+        return {"series": captured, "evidence": summary}
 
     def pod_inventory(self, namespaces: set[str] | None = None) -> dict[tuple[str, str], dict[str, str]]:
         inventory: dict[tuple[str, str], dict[str, str]] = {}
@@ -303,6 +577,68 @@ class PrometheusAdapter:
 
 def _timestamp(value: float) -> str:
     return datetime.fromtimestamp(value, timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _selector_signature(selector: Any) -> tuple[Any, ...]:
+    matchers = tuple(sorted((matcher.name, str(matcher.op), matcher.value) for matcher in selector.matchers.matchers))
+    or_matchers = tuple(sorted(
+        tuple(sorted((matcher.name, str(matcher.op), matcher.value) for matcher in group))
+        for group in selector.matchers.or_matchers
+    ))
+    return selector.name, str(selector.offset), str(selector.at), matchers, or_matchers
+
+
+def _source_metric_family_expression(metric_names: list[str], matchers: list[Any]) -> str | None:
+    if not metric_names or any(matcher.name == "__name__" for matcher in matchers):
+        return None
+    metric_pattern = "(" + "|".join(re.escape(name) for name in sorted(set(metric_names))) + ")"
+    all_matchers = [promql.Matcher(promql.MatchOp.Re, "__name__", metric_pattern), *matchers]
+    expression = "{" + ",".join(
+        matcher.name + _MATCHER_SYMBOLS[str(matcher.op)] + json.dumps(matcher.value)
+        for matcher in all_matchers
+    ) + "}"
+    try:
+        parsed = promql.parse(expression)
+    except ValueError:
+        return None
+    return expression if isinstance(parsed, promql.VectorSelector) and not parsed.name else None
+
+
+def _scoped_source_selector(selector: Any, namespace: str, pod: str, service: str) -> str | None:
+    if (not namespace or (not pod and not service) or not selector.name or selector.offset is not None
+            or selector.at is not None or selector.matchers.or_matchers):
+        return None
+    expected = {"namespace": namespace}
+    if pod:
+        expected["pod"] = pod
+    elif service:
+        expected["service"] = service
+    for matcher in selector.matchers.matchers:
+        if matcher.name == "__name__":
+            return None
+        if matcher.name == "namespace":
+            if matcher.op != promql.MatchOp.Equal or matcher.value != namespace:
+                return None
+        elif matcher.name == "pod":
+            if not pod or matcher.op != promql.MatchOp.Equal or matcher.value != pod:
+                return None
+        elif matcher.name == "service" and service:
+            if matcher.op != promql.MatchOp.Equal or matcher.value != service:
+                return None
+    matchers = list(selector.matchers.matchers)
+    for name, value in expected.items():
+        if not any(matcher.name == name and matcher.op == promql.MatchOp.Equal and matcher.value == value
+                   for matcher in matchers):
+            matchers.append(promql.Matcher(promql.MatchOp.Equal, name, value))
+    expression = selector.name + "{" + ",".join(
+        matcher.name + _MATCHER_SYMBOLS[str(matcher.op)] + json.dumps(matcher.value)
+        for matcher in matchers
+    ) + "}"
+    try:
+        parsed = promql.parse(expression)
+    except ValueError:
+        return None
+    return expression if isinstance(parsed, promql.VectorSelector) else None
 
 
 def _promql_escape(value: str) -> str:
