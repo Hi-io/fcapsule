@@ -215,6 +215,63 @@ class AlertMetricCaptureTests(unittest.TestCase):
         self.assertIn("not graphed", captured["series"][0]["source"]["capture_note"])
         self.assertIn("sample_count", captured["alert_evidence"]["rule"]["query"])
 
+    def test_retained_lab_pm_rules_capture_their_threshold_series(self):
+        cases = (
+            (
+                "mysql-connections",
+                '(inventory_mysql_client_sessions_active{namespace="fcapsule-lab",service="inventory-api"} '
+                '/ clamp_min(inventory_mysql_server_max_connections{namespace="fcapsule-lab",service="inventory-api"}, 1)) > 0.8 '
+                'and on (namespace, pod, service) (inventory_mysql_server_max_connections{namespace="fcapsule-lab",service="inventory-api"} > 0) '
+                'and on (namespace, pod, service) (time() - inventory_mysql_sample_timestamp_seconds{namespace="fcapsule-lab",service="inventory-api"} < 45) '
+                'and on (namespace, pod, service) (time() - timestamp(inventory_mysql_client_sessions_active{namespace="fcapsule-lab",service="inventory-api"}) < 30) '
+                'and on (namespace, pod, service) (up{namespace="fcapsule-lab",service="inventory-api"} == 1)',
+                "inventory-api-69c954747-djq6x", "inventory-api", 0.8, "primary_threshold_series",
+                "inventory_mysql_client_sessions_active",
+            ),
+            (
+                "memory-leak",
+                'max by (namespace, pod, service) (lab_worker_allocated_bytes{namespace="fcapsule-lab",service="lab-worker"}) > 83886080',
+                "lab-worker-568d998598-px4xg", "lab-worker", 83886080, "alert_condition",
+                "lab_worker_allocated_bytes",
+            ),
+            (
+                "downstream-latency",
+                '(orders_checkout_latency_p95_seconds{namespace="fcapsule-lab",service="orders-api"} > 0.25) '
+                'and on (namespace, pod, service) (orders_checkout_latency_sample_count{namespace="fcapsule-lab",service="orders-api"} >= 10) '
+                'and on (namespace, pod, service) (time() - orders_checkout_latency_latest_sample_timestamp_seconds{namespace="fcapsule-lab",service="orders-api"} < 30) '
+                'and on (namespace, pod, service) (up{namespace="fcapsule-lab",service="orders-api"} == 1)',
+                "orders-api-8675f7c799-r67km", "orders-api", 0.25, "primary_threshold_series",
+                "orders_checkout_latency_p95_seconds",
+            ),
+        )
+        start = datetime(2026, 9, 24, tzinfo=timezone.utc)
+        for name, query, pod, service, threshold, capture_mode, metric_name in cases:
+            with self.subTest(rule=name):
+                self.adapter.transport.request.reset_mock()
+                self.adapter.transport.request.return_value = {
+                    "status": "success",
+                    "data": {"resultType": "matrix", "result": [{
+                        "metric": {"namespace": "fcapsule-lab", "pod": pod, "service": service},
+                        "values": [[start.timestamp(), "0.85"], [start.timestamp() + 15, "0.9"]],
+                    }]},
+                }
+                trigger = alert(query, labels={"namespace": "fcapsule-lab", "pod": pod, "service": service})
+                trigger["rule"]["labels"] = {"service": service, "severity": "warning", "signal_class": "PM"}
+                captured = self.adapter.collect_alert_metrics(
+                    trigger, "fcapsule-lab", pod, start, start + timedelta(minutes=1),
+                )
+                self.assertEqual(captured["alert_evidence"]["status"], "available")
+                self.assertEqual(captured["alert_evidence"]["capture_mode"], capture_mode)
+                self.assertEqual(captured["alert_evidence"]["threshold"], threshold)
+                self.assertEqual(len(captured["series"]), 1)
+                sent = parse_qs(urlparse(self.adapter.transport.request.call_args.args[0]).query)["query"][0]
+                parsed = promql.parse(sent)
+                names = []
+                promql.walk(parsed, pre_visit=lambda node: names.append(node.name) if isinstance(node, promql.VectorSelector) else None)
+                self.assertIn(metric_name, names)
+                self.assertNotIn("time", names)
+                self.assertNotIn("up", names)
+
     def test_non_finite_and_missing_samples_remain_null_not_zero(self):
         captured = self.collect([[START.timestamp(), "1"], [START.timestamp() + 15, "NaN"], [START.timestamp() + 45, "+Inf"]])
         self.assertEqual([point[1] for point in captured["series"][0]["values"]], [1, None, None, None, None])
