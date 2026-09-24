@@ -9,8 +9,12 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
 
-from fcapsule.adapters.transport import JsonTransport
+from fcapsule.adapters.transport import JsonTransport, ResponseTooLargeError
 from fcapsule.processing.anonymizer import diagnostic_fields
+
+DEFAULT_MAX_MESSAGE_BYTES = 16 * 1024
+DEFAULT_MAX_COLLECTION_BYTES = 2 * 1024 * 1024
+DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 
 class OpenSearchAdapter:
@@ -21,10 +25,16 @@ class OpenSearchAdapter:
         username: str | None = None,
         password: str | None = None,
         timeout: float = 8,
+        max_message_bytes: int = DEFAULT_MAX_MESSAGE_BYTES,
+        max_collection_bytes: int = DEFAULT_MAX_COLLECTION_BYTES,
+        max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.index_pattern = index_pattern.strip() or "k8s-logs-*"
         self.transport = JsonTransport(self.base_url, username, password, timeout)
+        self.max_message_bytes = _bounded_limit(max_message_bytes, 256, 256 * 1024)
+        self.max_collection_bytes = _bounded_limit(max_collection_bytes, 4096, 16 * 1024 * 1024)
+        self.max_response_bytes = _bounded_limit(max_response_bytes, 4096, 64 * 1024 * 1024)
 
     @property
     def search_path(self) -> str:
@@ -76,48 +86,143 @@ class OpenSearchAdapter:
         focus: datetime | None = None,
         terms: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        limit = min(max(1, limit), 10000)
-        if focus and start < focus < end:
-            baseline_size = max(1, limit // 4)
-            hits = self._log_hits(namespace, pod, start, focus, baseline_size, "desc", terms)
-            hits.extend(self._log_hits(namespace, pod, focus, end, limit - baseline_size, "asc", terms))
-        elif terms:
-            hits = self._log_hits(namespace, pod, start, end, limit, "asc", terms)
-        else:
-            hits = self._log_hits(namespace, pod, start, end, limit, "desc")
+        logs, self.last_collection_info = self.collect_logs_with_info(
+            namespace, pod, start, end, limit=limit, focus=focus, terms=terms
+        )
+        return logs
 
-        unique_hits: dict[str, dict[str, Any]] = {}
+    def collect_logs_with_info(
+        self,
+        namespace: str,
+        pod: str,
+        start: datetime,
+        end: datetime,
+        limit: int = 2000,
+        focus: datetime | None = None,
+        terms: list[str] | None = None,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Collect bounded log evidence and return explicit coverage metadata."""
+
+        limit = min(max(1, limit), 10000)
+        response_limited_segments: list[str] = []
+        query_limit_reached = False
+        successful_queries = 0
+
+        def query(segment: str, segment_start: datetime, segment_end: datetime, size: int, order: str) -> list[dict[str, Any]]:
+            nonlocal query_limit_reached, successful_queries
+            try:
+                segment_hits, hit_limit_reached = self._log_hits(
+                    namespace, pod, segment_start, segment_end, size, order, terms
+                )
+            except ResponseTooLargeError:
+                response_limited_segments.append(segment)
+                return []
+            successful_queries += 1
+            query_limit_reached = query_limit_reached or hit_limit_reached
+            return segment_hits
+
+        if focus and start < focus < end:
+            baseline_size = min(max(1, limit // 4), limit - 1) if limit > 1 else 0
+            hits = query("baseline", start, focus, baseline_size, "desc") if baseline_size else []
+            hits.extend(query("incident", focus, end, limit - baseline_size, "asc"))
+        elif terms:
+            hits = query("window", start, end, limit, "asc")
+        else:
+            hits = query("window", start, end, limit, "desc")
+
+        unique_hits: dict[tuple[Any, ...], dict[str, Any]] = {}
         for hit in hits:
             source = hit.get("_source", {})
-            key = str(hit.get("_id") or f"{source.get('@timestamp')}|{source.get('message')}|{source.get('log')}")
+            if hit.get("_id") is not None:
+                key = ("id", str(hit["_id"]))
+            else:
+                message_value = source.get("message")
+                if not isinstance(message_value, str):
+                    message_value = source.get("log")
+                key = ("fallback", source.get("@timestamp"), message_value if isinstance(message_value, str) else id(hit))
             unique_hits.setdefault(key, hit)
 
-        logs = []
+        candidates: list[dict[str, Any]] = []
         for hit in unique_hits.values():
             source = dict(hit.get("_source", {}))
             kubernetes = source.get("kubernetes", {}) if isinstance(source.get("kubernetes"), dict) else {}
             pod_data = kubernetes.get("pod", {}) if isinstance(kubernetes.get("pod"), dict) else {}
             container = kubernetes.get("container", {}) if isinstance(kubernetes.get("container"), dict) else {}
             labels = kubernetes.get("labels", {}) if isinstance(kubernetes.get("labels"), dict) else {}
-            message = _message_text(source)
+            full_message = _message_text(source)
             structured_diagnostics = diagnostic_fields(source)
-            logs.append(
-                {
-                    "@timestamp": source.get("@timestamp"),
-                    "indexed_at": source.get("event", {}).get("ingested") if isinstance(source.get("event"), dict) else None,
-                    "level": _log_level(source, message),
-                    "service": labels.get("app_kubernetes_io/name") or labels.get("app") or pod,
-                    "component": container.get("name") or pod,
-                    "namespace": kubernetes.get("namespace") or namespace,
-                    "pod": pod_data.get("name") or pod,
-                    "message": message,
-                    "diagnostic_fields": structured_diagnostics,
-                }
-            )
-        return sorted(
-            (item for item in logs if item.get("@timestamp") and item["message"]),
-            key=lambda item: str(item["@timestamp"]),
+            message, message_truncated = _truncate_utf8(full_message, self.max_message_bytes)
+            timestamp = source.get("@timestamp")
+            if not timestamp or not message:
+                continue
+            log = {
+                "@timestamp": timestamp,
+                "indexed_at": source.get("event", {}).get("ingested") if isinstance(source.get("event"), dict) else None,
+                "level": _log_level(source, full_message),
+                "service": labels.get("app_kubernetes_io/name") or labels.get("app") or pod,
+                "component": container.get("name") or pod,
+                "namespace": kubernetes.get("namespace") or namespace,
+                "pod": pod_data.get("name") or pod,
+                "message": message,
+                "diagnostic_fields": structured_diagnostics,
+            }
+            if message_truncated:
+                log.update({
+                    "message_truncated": True,
+                    "message_truncation_reasons": ["message_byte_limit"],
+                    "message_limit_bytes": self.max_message_bytes,
+                })
+            candidates.append(log)
+
+        candidates.sort(key=lambda item: str(item["@timestamp"]))
+        logs: list[dict[str, Any]] = []
+        retained_bytes = 2  # Opening and closing brackets of the compact JSON array.
+        collection_omitted = 0
+        for candidate_index, candidate in enumerate(candidates):
+            item_bytes = _compact_json_bytes(candidate)
+            separator_bytes = 1 if logs else 0
+            if retained_bytes + separator_bytes + item_bytes <= self.max_collection_bytes:
+                logs.append(candidate)
+                retained_bytes += separator_bytes + item_bytes
+                continue
+
+            available = self.max_collection_bytes - retained_bytes - separator_bytes
+            partial = _truncate_log_to_fit(candidate, available, self.max_message_bytes)
+            if partial is not None:
+                logs.append(partial)
+                retained_bytes += separator_bytes + _compact_json_bytes(partial)
+            else:
+                collection_omitted += 1
+
+        unavailable_segments = [
+            {"segment": segment, "reason": "response_byte_limit", "limit_bytes": self.max_response_bytes}
+            for segment in response_limited_segments
+        ]
+        message_truncated_hits = sum(bool(item.get("message_truncated")) for item in logs)
+        capture_truncated = bool(
+            message_truncated_hits or collection_omitted or query_limit_reached or response_limited_segments
         )
+        if response_limited_segments and successful_queries == 0:
+            status = "unavailable"
+        elif capture_truncated or response_limited_segments:
+            status = "partial"
+        else:
+            status = "complete"
+        info = {
+            "status": status,
+            "available": successful_queries > 0,
+            "truncated": capture_truncated,
+            "max_message_bytes": self.max_message_bytes,
+            "max_collection_bytes": self.max_collection_bytes,
+            "max_response_bytes": self.max_response_bytes,
+            "retained_hits": len(logs),
+            "retained_compact_bytes": retained_bytes,
+            "message_truncated_hits": message_truncated_hits,
+            "collection_omitted_hits": collection_omitted,
+            "query_limit_reached": query_limit_reached,
+            "unavailable_segments": unavailable_segments,
+        }
+        return logs, info
 
     def _log_hits(
         self,
@@ -128,7 +233,7 @@ class OpenSearchAdapter:
         size: int,
         order: str,
         terms: list[str] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], bool]:
         payload = self.transport.request(
             self.search_path,
             method="POST",
@@ -146,8 +251,63 @@ class OpenSearchAdapter:
                     }
                 },
             },
+            max_response_bytes=self.max_response_bytes,
         )
-        return list(payload.get("hits", {}).get("hits", []))
+        hit_data = payload.get("hits", {})
+        hits = list(hit_data.get("hits", []))
+        total = hit_data.get("total")
+        if isinstance(total, dict):
+            total = total.get("value")
+        hit_limit_reached = len(hits) >= size or (isinstance(total, int) and total >= size)
+        return hits, hit_limit_reached
+
+
+def _bounded_limit(value: int, minimum: int, maximum: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = minimum
+    return min(maximum, max(minimum, number))
+
+
+def _truncate_utf8(value: str, max_bytes: int) -> tuple[str, bool]:
+    if len(value) <= max_bytes:
+        encoded = value.encode("utf-8")
+        if len(encoded) <= max_bytes:
+            return value, False
+    prefix = value[:max_bytes].encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore")
+    return prefix, True
+
+
+def _compact_json_bytes(value: Any) -> int:
+    return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+def _truncate_log_to_fit(log: dict[str, Any], budget: int, message_limit: int) -> dict[str, Any] | None:
+    if budget <= 0:
+        return None
+    text = log["message"]
+    low, high = 0, len(text)
+    best: dict[str, Any] | None = None
+    while low <= high:
+        middle = (low + high) // 2
+        candidate = dict(log)
+        candidate["message"] = text[:middle]
+        reasons = list(candidate.get("message_truncation_reasons", []))
+        if "aggregate_byte_limit" not in reasons:
+            reasons.append("aggregate_byte_limit")
+        candidate.update({
+            "message_truncated": True,
+            "message_truncation_reasons": reasons,
+            "message_limit_bytes": message_limit,
+        })
+        size = _compact_json_bytes(candidate)
+        if size <= budget:
+            best = candidate if middle else None
+            low = middle + 1
+        else:
+            high = middle - 1
+    return best
 
 
 def _log_level(source: dict[str, Any], message: str) -> str:

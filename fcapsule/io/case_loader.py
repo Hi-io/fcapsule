@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -25,11 +27,47 @@ REQUIRED_FILES = (
 )
 
 
-def _read_json(path: Path) -> Any:
+def _environment_limit(name: str, default: int, minimum: int, maximum: int) -> int:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        value = int(os.environ.get(name, str(default)))
+    except ValueError:
+        value = default
+    return min(maximum, max(minimum, value))
+
+
+MAX_CASE_INPUT_BYTES = _environment_limit("FCAPSULE_CASE_MAX_INPUT_BYTES", 16 * 1024 * 1024, 1024 * 1024, 64 * 1024 * 1024)
+MAX_CASE_CACHE_INPUT_BYTES = 2 * 1024 * 1024
+_CASE_CACHE_LOCK = threading.RLock()
+_CASE_CACHE: tuple[Path, tuple[tuple[str, int, int], ...], CaseBundle] | None = None
+
+
+def _read_text(path: Path, remaining_bytes: int) -> tuple[str, int]:
+    with path.open("rb") as handle:
+        content = handle.read(remaining_bytes + 1)
+    if len(content) > remaining_bytes:
+        raise CaseValidationError(
+            f"{path.name} exceeds the remaining case input limit of {remaining_bytes} bytes"
+        )
+    try:
+        return content.decode("utf-8"), len(content)
+    except UnicodeDecodeError as exc:
+        raise CaseValidationError(f"{path.name} is not valid UTF-8: {exc}") from exc
+
+
+def _read_json(path: Path, remaining_bytes: int) -> tuple[Any, int]:
+    text, consumed = _read_text(path, remaining_bytes)
+    try:
+        return json.loads(text), consumed
     except json.JSONDecodeError as exc:
         raise CaseValidationError(f"{path.name} is not valid JSON: {exc}") from exc
+
+
+def read_case_json(path: str | Path, max_bytes: int = MAX_CASE_INPUT_BYTES) -> Any:
+    """Read one JSON case file without exceeding the configured case input cap."""
+
+    limit = min(MAX_CASE_INPUT_BYTES, max(1, int(max_bytes)))
+    parsed, _ = _read_json(Path(path), limit)
+    return parsed
 
 
 def _validate_metadata(raw: Any) -> dict[str, Any]:
@@ -110,6 +148,7 @@ def _validate_configurations(raw: Any) -> list[dict[str, Any]]:
 
 
 def load_case(case_dir: str | Path) -> CaseBundle:
+    global _CASE_CACHE
     path = Path(case_dir).resolve()
     if not path.is_dir():
         raise CaseValidationError(f"Case directory does not exist: {path}")
@@ -117,32 +156,92 @@ def load_case(case_dir: str | Path) -> CaseBundle:
     if missing:
         raise CaseValidationError(f"Missing required case files: {', '.join(missing)}")
 
-    try:
-        metadata_raw = yaml.safe_load((path / "metadata.yaml").read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
-        raise CaseValidationError(f"metadata.yaml is invalid: {exc}") from exc
+    file_names = [*REQUIRED_FILES, "kubernetes_config.json", "expected_notes.md"]
+    fingerprint, input_bytes = _case_fingerprint(path, file_names)
+    if input_bytes > MAX_CASE_INPUT_BYTES:
+        raise CaseValidationError(
+            f"Case input is {input_bytes} bytes; the total limit is {MAX_CASE_INPUT_BYTES} bytes"
+        )
+    with _CASE_CACHE_LOCK:
+        if _CASE_CACHE and _CASE_CACHE[:2] == (path, fingerprint):
+            # CaseBundle is frozen and the application treats nested evidence as read-only.
+            return _CASE_CACHE[2]
 
-    metadata = _validate_metadata(metadata_raw)
-    alerts = _validate_alerts(_read_json(path / "alert.json"))
-    metrics = _validate_metrics(_read_json(path / "prometheus_metrics.json"))
-    logs = _validate_logs(_read_json(path / "opensearch_logs.json"), metadata)
-    notes_path = path / "expected_notes.md"
-    configuration_path = path / "kubernetes_config.json"
-    warnings: list[str] = []
-    configurations = _validate_configurations(_read_json(configuration_path)) if configuration_path.is_file() else []
-    if notes_path.is_file():
-        expected_notes = notes_path.read_text(encoding="utf-8")
-    else:
-        expected_notes = ""
-        warnings.append("expected_notes.md is missing; signal preservation uses automatic criteria only")
+        remaining_bytes = MAX_CASE_INPUT_BYTES
+        metadata_text, consumed = _read_text(path / "metadata.yaml", remaining_bytes)
+        remaining_bytes -= consumed
+        try:
+            metadata_raw = yaml.safe_load(metadata_text)
+        except yaml.YAMLError as exc:
+            raise CaseValidationError(f"metadata.yaml is invalid: {exc}") from exc
+        del metadata_text
+        metadata = _validate_metadata(metadata_raw)
 
-    return CaseBundle(
-        case_dir=path,
-        metadata=metadata,
-        alerts=alerts,
-        metrics=metrics,
-        logs=logs,
-        configurations=configurations,
-        expected_notes=expected_notes,
-        warnings=tuple(warnings),
-    )
+        alerts_raw, consumed = _read_json(path / "alert.json", remaining_bytes)
+        remaining_bytes -= consumed
+        alerts = _validate_alerts(alerts_raw)
+        metrics_raw, consumed = _read_json(path / "prometheus_metrics.json", remaining_bytes)
+        remaining_bytes -= consumed
+        metrics = _validate_metrics(metrics_raw)
+        logs_raw, consumed = _read_json(path / "opensearch_logs.json", remaining_bytes)
+        remaining_bytes -= consumed
+        logs = _validate_logs(logs_raw, metadata)
+        capture = logs_raw.get("capture") if isinstance(logs_raw, dict) else None
+        if capture is not None and not isinstance(capture, dict):
+            raise CaseValidationError("opensearch_logs.capture must be an object")
+        del logs_raw
+        notes_path = path / "expected_notes.md"
+        configuration_path = path / "kubernetes_config.json"
+        warnings: list[str] = []
+        if configuration_path.is_file():
+            configurations_raw, consumed = _read_json(configuration_path, remaining_bytes)
+            remaining_bytes -= consumed
+            configurations = _validate_configurations(configurations_raw)
+        else:
+            configurations = []
+        if notes_path.is_file():
+            expected_notes, consumed = _read_text(notes_path, remaining_bytes)
+            remaining_bytes -= consumed
+        else:
+            expected_notes = ""
+            warnings.append("expected_notes.md is missing; signal preservation uses automatic criteria only")
+
+        truncated_messages = sum(bool(item.get("message_truncated")) for item in logs)
+        if truncated_messages:
+            warnings.append(f"{truncated_messages} captured log message(s) were truncated by configured byte limits")
+        if capture and capture.get("status") in {"partial", "unavailable", "unreported"}:
+            unavailable = capture.get("unavailable_segments", [])
+            segments = sorted({str(item.get("segment", "unknown")) for item in unavailable if isinstance(item, dict)})
+            detail = f"; unavailable segments: {', '.join(segments)}" if segments else ""
+            if capture["status"] == "unreported":
+                warnings.append("OpenSearch log capture coverage metadata was not reported")
+            else:
+                warnings.append(f"OpenSearch log capture is {capture['status']}{detail}")
+
+        bundle = CaseBundle(
+            case_dir=path,
+            metadata=metadata,
+            alerts=alerts,
+            metrics=metrics,
+            logs=logs,
+            configurations=configurations,
+            expected_notes=expected_notes,
+            warnings=tuple(warnings),
+        )
+        current_fingerprint, current_input_bytes = _case_fingerprint(path, file_names)
+        if current_fingerprint == fingerprint and current_input_bytes <= MAX_CASE_CACHE_INPUT_BYTES:
+            _CASE_CACHE = (path, fingerprint, bundle)
+        return bundle
+
+
+def _case_fingerprint(path: Path, file_names: list[str]) -> tuple[tuple[tuple[str, int, int], ...], int]:
+    fingerprint: list[tuple[str, int, int]] = []
+    total_bytes = 0
+    for name in file_names:
+        candidate = path / name
+        if not candidate.is_file():
+            continue
+        stat = candidate.stat()
+        fingerprint.append((name, stat.st_size, stat.st_mtime_ns))
+        total_bytes += stat.st_size
+    return tuple(fingerprint), total_bytes

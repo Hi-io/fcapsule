@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -7,6 +8,7 @@ from unittest.mock import Mock, patch
 from fcapsule.adapters.kubernetes_adapter import KubernetesAdapter
 from fcapsule.adapters.opensearch_adapter import OpenSearchAdapter
 from fcapsule.adapters.prometheus_adapter import PrometheusAdapter
+from fcapsule.adapters.transport import ResponseTooLargeError
 from fcapsule.live_sources import LiveSourceCoordinator, _resolve_alert_pod
 from fcapsule.store import FCAPSuleStore
 
@@ -16,7 +18,7 @@ class FakeTransport:
         self.responses = responses
         self.requests = []
 
-    def request(self, path, method="GET", body=None):
+    def request(self, path, method="GET", body=None, max_response_bytes=None):
         self.requests.append((path, method, body))
         for key, response in self.responses.items():
             if key in path:
@@ -28,7 +30,7 @@ class FocusedLogTransport:
     def __init__(self):
         self.requests = []
 
-    def request(self, path, method="GET", body=None):
+    def request(self, path, method="GET", body=None, max_response_bytes=None):
         self.requests.append((path, method, body))
         order = body["sort"][0]["@timestamp"]
         if order == "desc":
@@ -320,6 +322,75 @@ class LiveSourceTests(unittest.TestCase):
         self.assertNotIn("do-not-keep", repr(logs))
         self.assertNotIn("do-not-retain-arbitrary-body", repr(logs))
 
+    def test_opensearch_adapter_bounds_message_bytes_and_keeps_structured_diagnostics(self):
+        adapter = OpenSearchAdapter("http://opensearch", max_message_bytes=512)
+        adapter.transport = FakeTransport({
+            "/_search": {
+                "hits": {"hits": [{"_source": {
+                    "@timestamp": "2026-09-20T00:00:00Z",
+                    "message": "🙂" * 1000,
+                    "error": {"code": "ECONNREFUSED"},
+                    "kubernetes": {"namespace": "shop", "pod": {"name": "api-1"}},
+                }}]}
+            }
+        })
+        end = datetime(2026, 9, 20, tzinfo=timezone.utc)
+
+        logs = adapter.collect_logs("shop", "api-1", end - timedelta(minutes=5), end)
+
+        self.assertEqual(len(logs[0]["message"].encode("utf-8")), 512)
+        self.assertTrue(logs[0]["message_truncated"])
+        self.assertEqual(logs[0]["message_truncation_reasons"], ["message_byte_limit"])
+        self.assertEqual(logs[0]["diagnostic_fields"]["error_code"], "ECONNREFUSED")
+        self.assertTrue(adapter.last_collection_info["truncated"])
+
+    def test_opensearch_adapter_bounds_aggregate_hits_and_reports_omissions(self):
+        hits = [{"_id": str(index), "_source": {
+            "@timestamp": f"2026-09-20T00:00:{index:02d}Z",
+            "message": "x" * 512,
+            "kubernetes": {"namespace": "shop", "pod": {"name": "api-1"}},
+        }} for index in range(10)]
+        adapter = OpenSearchAdapter("http://opensearch", max_message_bytes=512, max_collection_bytes=4096)
+        adapter.transport = FakeTransport({"/_search": {"hits": {"hits": hits}}})
+        end = datetime(2026, 9, 20, tzinfo=timezone.utc)
+
+        logs, capture = adapter.collect_logs_with_info("shop", "api-1", end - timedelta(minutes=5), end, limit=10)
+
+        self.assertLessEqual(capture["retained_compact_bytes"], 4096)
+        self.assertEqual(capture["retained_hits"], len(logs))
+        self.assertTrue(capture["truncated"])
+        self.assertGreater(capture["collection_omitted_hits"], 0)
+        self.assertTrue(any(item.get("message_truncated") for item in logs))
+
+    def test_oversized_opensearch_segment_is_marked_unavailable_without_losing_other_segment(self):
+        class PartiallyOversizedTransport:
+            def __init__(self):
+                self.requests = []
+
+            def request(self, path, method="GET", body=None, max_response_bytes=None):
+                self.requests.append((path, method, body, max_response_bytes))
+                if body["sort"][0]["@timestamp"] == "desc":
+                    raise ResponseTooLargeError("over byte limit")
+                return {"hits": {"hits": [{"_source": {
+                    "@timestamp": "2026-09-20T00:05:01Z", "message": "incident failure",
+                    "kubernetes": {"namespace": "shop", "pod": {"name": "api-1"}},
+                }}]}}
+
+        adapter = OpenSearchAdapter("http://opensearch")
+        adapter.transport = PartiallyOversizedTransport()
+        start = datetime(2026, 9, 20, tzinfo=timezone.utc)
+
+        logs, capture = adapter.collect_logs_with_info(
+            "shop", "api-1", start, start + timedelta(minutes=10), limit=8, focus=start + timedelta(minutes=5)
+        )
+
+        self.assertEqual([item["message"] for item in logs], ["incident failure"])
+        self.assertEqual(capture["status"], "partial")
+        self.assertEqual(capture["unavailable_segments"], [{
+            "segment": "baseline", "reason": "response_byte_limit", "limit_bytes": adapter.max_response_bytes,
+        }])
+        self.assertEqual(adapter.transport.requests[0][3], adapter.max_response_bytes)
+
     def test_opensearch_adapter_reserves_capacity_for_post_alert_logs(self):
         adapter = OpenSearchAdapter("http://opensearch")
         adapter.transport = FocusedLogTransport()
@@ -347,6 +418,19 @@ class LiveSourceTests(unittest.TestCase):
         self.assertEqual([item[2]["size"] for item in adapter.transport.requests], [2, 6])
         for _, _, body in adapter.transport.requests:
             self.assertEqual(body["query"]["bool"]["should"], [{"match_phrase": {"message": "connection"}}])
+
+    def test_single_hit_focus_budget_keeps_the_incident_window(self):
+        adapter = OpenSearchAdapter("http://opensearch")
+        adapter.transport = FocusedLogTransport()
+        start = datetime(2026, 9, 20, tzinfo=timezone.utc)
+
+        logs = adapter.collect_logs(
+            "shop", "api-1", start, start + timedelta(minutes=10), limit=1, focus=start + timedelta(minutes=5)
+        )
+
+        self.assertEqual([item["message"] for item in logs], ["max_connections reached; checkout rejected"])
+        self.assertEqual(len(adapter.transport.requests), 1)
+        self.assertEqual(adapter.transport.requests[0][2]["size"], 1)
 
     def test_kubernetes_snapshot_masks_sensitive_configmap_keys(self):
         adapter = KubernetesAdapter("http://kubernetes")
@@ -459,14 +543,54 @@ class LiveSourceTests(unittest.TestCase):
                     "namespaces": "shop, platform",
                     "poll_interval_seconds": 20,
                     "incident_window_minutes": 15,
+                    "opensearch_max_message_bytes": 512,
+                    "opensearch_max_collection_bytes": 5000,
+                    "opensearch_max_response_bytes": 8192,
                     "enabled": True,
                     "auto_build_reports": True,
                 }
             )
             self.assertEqual(config["namespaces"], ["platform", "shop"])
+            self.assertEqual(config["opensearch_max_message_bytes"], 512)
+            self.assertEqual(config["opensearch_max_collection_bytes"], 5000)
+            self.assertEqual(config["opensearch_max_response_bytes"], 8192)
+            _, logs, _ = coordinator.adapters(config)
+            self.assertEqual(logs.max_message_bytes, 512)
+            self.assertEqual(logs.max_collection_bytes, 5000)
+            self.assertEqual(logs.max_response_bytes, 8192)
             self.assertTrue((state / "source-settings.json").is_file())
             with self.assertRaises(ValueError):
                 coordinator.update_configuration({"prometheus_url": "prometheus:9090"})
+
+    def test_live_case_persists_opensearch_coverage_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            coordinator = LiveSourceCoordinator(FCAPSuleStore(state / "state.db"), state)
+            config = {
+                "cluster_name": "cluster-a",
+                "incident_window_minutes": 10,
+                "opensearch_index": "logs-*",
+                "prometheus_url": "http://prometheus:9090",
+                "opensearch_url": "http://opensearch:9200",
+            }
+            prometheus, opensearch, kubernetes = Mock(), Mock(), Mock()
+            prometheus.collect_alert_metrics.return_value = {"alert_evidence": [], "series": []}
+            prometheus.collect_pod_metrics.return_value = []
+            opensearch.collect_logs.return_value = []
+            opensearch.last_collection_info = {
+                "status": "partial", "available": True, "truncated": True,
+                "message_truncated_hits": 1, "collection_omitted_hits": 0,
+                "unavailable_segments": [],
+            }
+            kubernetes.configuration_snapshot.return_value = []
+            alert = {"alertname": "PodRestart", "startsAt": "2026-09-20T00:05:00Z", "annotations": {}}
+            pod = {"name": "api-1", "namespace": "shop", "workload": "payments"}
+
+            case_dir = coordinator._capture_case(config, prometheus, opensearch, kubernetes, alert, pod, "incident-1")
+            capture = json.loads((case_dir / "opensearch_logs.json").read_text(encoding="utf-8"))["capture"]
+
+            self.assertEqual(capture["status"], "partial")
+            self.assertTrue(capture["truncated"])
 
     def test_missing_kubernetes_application_is_marked_not_observed(self):
         with tempfile.TemporaryDirectory() as directory:

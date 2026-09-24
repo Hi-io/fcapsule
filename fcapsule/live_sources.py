@@ -15,6 +15,11 @@ from urllib.parse import urlparse
 import yaml
 
 from fcapsule.adapters import KubernetesAdapter, OpenSearchAdapter, PrometheusAdapter
+from fcapsule.adapters.opensearch_adapter import (
+    DEFAULT_MAX_COLLECTION_BYTES,
+    DEFAULT_MAX_MESSAGE_BYTES,
+    DEFAULT_MAX_RESPONSE_BYTES,
+)
 from fcapsule.io.output_writer import write_json
 from fcapsule.models.schemas import parse_timestamp
 from fcapsule.store import FCAPSuleStore, utc_now
@@ -34,6 +39,15 @@ def default_source_configuration() -> dict[str, Any]:
         ),
         "opensearch_url": os.environ.get("FCAPSULE_OPENSEARCH_URL", "http://opensearch.logging.svc.cluster.local:9200"),
         "opensearch_index": os.environ.get("FCAPSULE_OPENSEARCH_INDEX", "k8s-logs-*"),
+        "opensearch_max_message_bytes": _environment_limit(
+            "FCAPSULE_OPENSEARCH_MAX_MESSAGE_BYTES", DEFAULT_MAX_MESSAGE_BYTES, 256, 256 * 1024
+        ),
+        "opensearch_max_collection_bytes": _environment_limit(
+            "FCAPSULE_OPENSEARCH_MAX_COLLECTION_BYTES", DEFAULT_MAX_COLLECTION_BYTES, 4096, 16 * 1024 * 1024
+        ),
+        "opensearch_max_response_bytes": _environment_limit(
+            "FCAPSULE_OPENSEARCH_MAX_RESPONSE_BYTES", DEFAULT_MAX_RESPONSE_BYTES, 4096, 64 * 1024 * 1024
+        ),
         "kubernetes_url": os.environ.get("FCAPSULE_KUBERNETES_URL", ""),
         "namespaces": [value.strip() for value in os.environ.get("FCAPSULE_NAMESPACES", "default").split(",") if value.strip()],
         "poll_interval_seconds": int(os.environ.get("FCAPSULE_POLL_INTERVAL_SECONDS", "30")),
@@ -74,6 +88,15 @@ class LiveSourceCoordinator:
             "prometheus_url": _url(payload.get("prometheus_url", current["prometheus_url"]), "Prometheus URL"),
             "opensearch_url": _url(payload.get("opensearch_url", current["opensearch_url"]), "OpenSearch URL"),
             "opensearch_index": str(payload.get("opensearch_index", current["opensearch_index"])).strip(),
+            "opensearch_max_message_bytes": _bounded_int(
+                payload.get("opensearch_max_message_bytes", current["opensearch_max_message_bytes"]), 256, 256 * 1024
+            ),
+            "opensearch_max_collection_bytes": _bounded_int(
+                payload.get("opensearch_max_collection_bytes", current["opensearch_max_collection_bytes"]), 4096, 16 * 1024 * 1024
+            ),
+            "opensearch_max_response_bytes": _bounded_int(
+                payload.get("opensearch_max_response_bytes", current["opensearch_max_response_bytes"]), 4096, 64 * 1024 * 1024
+            ),
             "kubernetes_url": str(payload.get("kubernetes_url", current["kubernetes_url"])).strip(),
             "namespaces": sorted(set(str(value).strip() for value in namespaces if str(value).strip())),
             "poll_interval_seconds": min(3600, max(10, int(payload.get("poll_interval_seconds", current["poll_interval_seconds"])))),
@@ -97,6 +120,9 @@ class LiveSourceCoordinator:
             config["opensearch_index"],
             os.environ.get("OPENSEARCH_USERNAME"),
             os.environ.get("OPENSEARCH_PASSWORD"),
+            max_message_bytes=config["opensearch_max_message_bytes"],
+            max_collection_bytes=config["opensearch_max_collection_bytes"],
+            max_response_bytes=config["opensearch_max_response_bytes"],
         )
         kubernetes = KubernetesAdapter(config.get("kubernetes_url") or None)
         return prometheus, opensearch, kubernetes
@@ -308,10 +334,16 @@ class LiveSourceCoordinator:
             "window": metadata["window"], "alert_evidence": alert_metrics["alert_evidence"],
             "series": alert_metrics["series"] + prometheus.collect_pod_metrics(pod["namespace"], pod["name"], start, end),
         })
-        write_json(
-            case_dir / "opensearch_logs.json",
-            {"hits": opensearch.collect_logs(pod["namespace"], pod["name"], start, end, focus=alert_time)},
-        )
+        logs = opensearch.collect_logs(pod["namespace"], pod["name"], start, end, focus=alert_time)
+        log_capture = getattr(opensearch, "last_collection_info", None)
+        if not isinstance(log_capture, dict):
+            log_capture = {
+                "status": "unreported",
+                "available": None,
+                "truncated": None,
+                "retained_hits": len(logs),
+            }
+        write_json(case_dir / "opensearch_logs.json", {"hits": logs, "capture": log_capture})
         write_json(case_dir / "kubernetes_config.json", {"items": kubernetes.configuration_snapshot(pod)})
         return case_dir
 
@@ -322,6 +354,22 @@ def _url(value: Any, label: str) -> str:
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError(f"{label} must be an http(s) URL")
     return text
+
+
+def _bounded_int(value: Any, minimum: int, maximum: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Expected an integer between {minimum} and {maximum}") from exc
+    return min(maximum, max(minimum, number))
+
+
+def _environment_limit(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except ValueError:
+        value = default
+    return min(maximum, max(minimum, value))
 
 
 def _app_id(cluster: str, namespace: str, workload: str) -> str:
