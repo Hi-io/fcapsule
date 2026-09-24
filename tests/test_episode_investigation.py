@@ -778,6 +778,42 @@ class InvestigationEngineTests(unittest.TestCase):
 
         self.assertNotIn("historical_comparison", result)
 
+    def test_uncited_historical_abstention_does_not_discard_grounded_current_assessment(self):
+        value = assessment("Q002")
+        value["summary"] = "The worker deadlocked while processing the captured request."
+        value["likely_mechanism"] = "A lock wait blocked progress after the queue handoff."
+        value["basis"] = "Q002 records the blocked handoff and E-current shows no subsequent completion."
+        value["historical_comparison"] = {
+            "episode_id": "prior-episode", "status": "insufficient_evidence",
+            "summary": "The retained prior episode does not establish a shared mechanism.",
+            "evidence_ids": [],
+        }
+
+        result = validate_assessment(value, {"Q002", "E-current"}, {"incident-current"}, {"prior-episode"})
+
+        self.assertEqual(result["summary"], value["summary"])
+        self.assertEqual(result["likely_mechanism"], value["likely_mechanism"])
+        self.assertEqual(result["basis"], value["basis"])
+        self.assertEqual(result["evidence_ids"], ["Q002"])
+        self.assertNotIn("historical_comparison", result)
+        self.assertEqual(result["historical_comparison_review"]["status"], "omitted")
+        self.assertEqual(result["historical_comparison_review"]["provenance"], "grounding_guard")
+        self.assertEqual(result["historical_comparison_review"]["reason"],
+                         "insufficient_evidence_without_valid_citations")
+        self.assertNotIn("prior-episode", result["historical_comparison_review"].get("evidence_ids", []))
+        self.assertIn("No historical mechanism was established", result["uncertainty"])
+
+    def test_uncited_similar_or_different_historical_claim_remains_invalid(self):
+        for status in ("similar_mechanism", "changed_or_different"):
+            with self.subTest(status=status):
+                value = assessment("Q002")
+                value["historical_comparison"] = {
+                    "episode_id": "prior-episode", "status": status,
+                    "summary": "The prior episode supports a historical claim.", "evidence_ids": [],
+                }
+                with self.assertRaisesRegex(ValueError, "one to eight"):
+                    validate_assessment(value, {"Q002"}, {"incident-current"}, {"prior-episode"})
+
     def test_last_investigation_turn_reserves_tokens_for_structured_output(self):
         state, client = self.run_case([{"action": "finish", "assessment": assessment()}], max_checks=0, model_max_tokens=2000)
         self.assertEqual(state["status"], "ready")

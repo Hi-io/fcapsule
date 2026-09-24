@@ -138,6 +138,7 @@ def validate_assessment(
         result["connections"].append({key: item[key] for key in ("from", "to", "relationship", "reason")}
                                     | {"evidence_ids": citations(item), "provenance": "model"})
     comparison = value.get("historical_comparison")
+    history_review_reason = None
     if historical_episode_ids and (comparison is None or (isinstance(comparison, dict) and (
             not isinstance(comparison.get("episode_id"), str) or comparison["episode_id"] not in historical_episode_ids))):
         # A failed optional comparison cannot invalidate separately validated
@@ -153,18 +154,34 @@ def validate_assessment(
             raise ValueError("Invalid historical comparison state")
         if not isinstance(comparison.get("summary"), str) or not 1 <= len(comparison["summary"]) <= 500:
             raise ValueError("Historical comparison needs a concise evidence-based summary")
-        result["historical_comparison"] = {
-            "episode_id": comparison["episode_id"],
-            "status": comparison["status"],
-            "summary": comparison["summary"],
-            "evidence_ids": citations(comparison),
-        }
+        if comparison["status"] == "insufficient_evidence" and comparison.get("evidence_ids") == []:
+            # An uncited abstention about optional history must not erase a
+            # separately grounded current diagnosis. Do not borrow current
+            # evidence IDs: they would falsely imply support for a past claim.
+            history_review_reason = "insufficient_evidence_without_valid_citations"
+        else:
+            historical_refs = citations(comparison)
+            result["historical_comparison"] = {
+                "episode_id": comparison["episode_id"],
+                "status": comparison["status"],
+                "summary": comparison["summary"],
+                "evidence_ids": historical_refs,
+            }
     elif comparison is not None:
         # Historical comparison is optional when the system has no candidate.
         # Discard any unsupported model-generated comparison rather than letting
         # it overturn a grounded assessment of current evidence. Nothing about
         # the omitted field is retained or presented as historical fact.
         pass
+    if history_review_reason:
+        result["historical_comparison_review"] = {
+            "status": "omitted", "provenance": "grounding_guard",
+            "reason": history_review_reason,
+            "message": "No historical comparison was retained because it cited no valid prior evidence.",
+        }
+        note = "No historical mechanism was established from cited prior evidence."
+        if note not in result["uncertainty"]:
+            result["uncertainty"] = _bounded_explanation(f"{result['uncertainty']} {note}", 900)
     result = scrub(result, reference_ids=evidence_ids | incident_ids | (historical_episode_ids or set()))
     if "basis" in result:
         result["basis"] = _bounded_explanation(result["basis"], 500)
