@@ -130,6 +130,105 @@ class HistoricalMemberSelectionTests(unittest.TestCase):
         self.prior["app_id"] = "different-app"
         self.assertEqual(self.service.historical_candidates(self.current), [])
 
+    def test_cross_pod_member_is_tentative_and_preserves_exact_pod_provenance(self):
+        current_key = _recurrence_key("app", "pod", "processor-current", "QueueHigh")
+        prior_key = _recurrence_key("app", "pod", "processor-old", "QueueHigh")
+        self.current["recurrence_key"] = current_key
+        self.current["signals"][0].update({
+            "app_id": "app", "source_kind": "live", "resource_kind": "pod",
+            "resource_name": "processor-current", "recurrence_key": current_key,
+        })
+        prior_member = self.member("prior-other-pod", 0, prior_key, "QueueHigh")
+        prior_member.update({
+            "app_id": "app", "source_kind": "live", "resource_kind": "pod",
+            "resource_name": "processor-old",
+        })
+        self.service.plane.store.recurrence_candidates_for_incident.return_value = [
+            {"episode_id": "prior", "match_type": "same_workload_different_pod"},
+        ]
+
+        result = self.service.historical_candidates(self.current)[0]
+        selection = result["member_selection"]
+        selected = selection["selected_members"][0]
+        observation = historical_episode_result(result)["observations"][0]
+
+        self.assertEqual(selection["candidate_relation"], "same_workload_different_pod")
+        self.assertEqual(selected["target_relation"], "same_workload_different_pod")
+        self.assertTrue(selected["matches_current_alert_identity"])
+        self.assertFalse(selected["matches_current_target"])
+        self.assertEqual(observation["source"]["provenance"][0]["incident_id"], "prior-other-pod")
+        self.assertEqual(observation["source"]["provenance"][0]["target_relation"], "same_workload_different_pod")
+        self.assertFalse(observation["source"]["provenance"][0]["matches_current_target"])
+        self.assertTrue(observation["source"]["matches_current_alert_identity"])
+        self.assertIn("not evidence of the same target or cause", selection["limitation"])
+
+    def test_cross_pod_candidate_does_not_admit_weak_or_ambiguous_members(self):
+        current_key = _recurrence_key("app", "pod", "processor-current", "QueueHigh")
+        self.current["recurrence_key"] = current_key
+        current = self.current["signals"][0]
+        current.update({"app_id": "app", "source_kind": "live", "resource_kind": "pod",
+                        "resource_name": "processor-current", "recurrence_key": current_key})
+        prior_key = _recurrence_key("app", "pod", "processor-old", "QueueHigh")
+        signal = self.member("prior-other-pod", 0, prior_key, "QueueHigh")
+        self.service.plane.store.recurrence_candidates_for_incident.return_value = [
+            {"episode_id": "prior", "match_type": "same_workload_different_pod"},
+        ]
+        rejected = [
+            {"app_id": "app", "source_kind": "external", "resource_kind": "pod", "resource_name": "processor-old",
+             "recurrence_key": prior_key},
+            {"app_id": "other-app", "source_kind": "live", "resource_kind": "pod", "resource_name": "processor-old",
+             "recurrence_key": _recurrence_key("other-app", "pod", "processor-old", "QueueHigh")},
+            {"app_id": "app", "source_kind": "live", "resource_kind": "workload", "resource_name": "processor-old",
+             "recurrence_key": _recurrence_key("app", "workload", "processor-old", "QueueHigh")},
+            {"app_id": "app", "source_kind": "live", "resource_kind": "pod", "resource_name": "processor-old",
+             "recurrence_key": _recurrence_key("app", "pod", "processor-old", "OtherAlert")},
+        ]
+        for index, values in enumerate(rejected):
+            with self.subTest(index=index):
+                signal.update(values)
+                result = self.service.historical_candidates(self.current)[0]
+                self.assertEqual(result["availability"], "unavailable")
+                self.assertEqual(result["observations"], [])
+                self.assertEqual(result["member_selection"]["selected_members"], [])
+
+    def test_real_store_cross_pod_candidate_reaches_retained_historical_observations(self):
+        store = FCAPSuleStore(self.root / "cross-pod-state.db")
+        store.upsert_application("cluster:commerce:processor", "processor", "commerce", "cluster")
+
+        def capture(incident_id, started_at, pod):
+            incident = store.record_incident({
+                "incident_id": incident_id, "app_id": "cluster:commerce:processor", "case_dir": str(self.root / incident_id),
+                "started_at": started_at, "ended_at": started_at, "status": "resolved", "severity": "warning",
+                "source_kind": "live", "resource_kind": "pod", "resource_name": pod,
+                "alert_identity": "QueueHigh",
+            })
+            folder = self.root / incident_id
+            folder.mkdir()
+            (folder / "capsule.json").write_text(json.dumps({"case": {"pod": pod}}), encoding="utf-8")
+            (folder / "incident_report.json").write_text(json.dumps({
+                "incident": {"service": "processor", "namespace": "commerce", "cluster": "cluster"},
+                "fault_alerts": [{"name": "QueueHigh"}],
+                "supporting_evidence": [{"evidence_id": "e-" + incident_id, "type": "log",
+                                         "title": "Queue failure", "summary": "Retained queue failure."}],
+            }), encoding="utf-8")
+            store.record_capsule({"capsule_id": "capsule-" + incident_id, "incident_id": incident_id,
+                                  "app_id": "cluster:commerce:processor", "output_dir": str(folder)})
+            return incident
+
+        prior = capture("prior-live-pod", "2026-09-20T01:00:00Z", "processor-7f9d-old")
+        capture("current-live-pod", "2026-09-20T03:00:00Z", "processor-7f9d-new")
+        current_episode = store.episode_for_incident("current-live-pod")
+        service = InvestigationService(SimpleNamespace(store=store, state_dir=self.root))
+
+        candidate = service.historical_candidates(current_episode)[0]
+
+        self.assertEqual(candidate["episode_id"], store.episode_for_incident(prior["incident_id"])["episode_id"])
+        self.assertEqual(candidate["member_selection"]["candidate_relation"], "same_workload_different_pod")
+        self.assertEqual(candidate["captured_evidence"][0]["incident_id"], "prior-live-pod")
+        self.assertFalse(candidate["captured_evidence"][0]["matches_current_target"])
+        self.assertEqual(candidate["observations"][0]["provenance"][0]["target_relation"],
+                         "same_workload_different_pod")
+
     def test_revision_primary_identity_overrides_episode_primary_without_relabeling(self):
         self.mixed_members()
         other_key = _recurrence_key("app", "pod", "processor", "OtherAlert")

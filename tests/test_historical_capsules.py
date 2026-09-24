@@ -197,9 +197,13 @@ class HistoricalCapsuleTests(unittest.TestCase):
         self.assertNotIn("UnprovenEarlierConclusion", json.dumps(checks))
         self.assertNotIn("RecursiveConclusion", json.dumps(checks))
 
-    def test_recurrence_candidates_are_bounded_and_scope_does_not_expand(self):
+    def test_recurrence_candidates_are_bounded_and_cross_pod_scope_is_explicit(self):
         other = self.capture("other-resource", 2, 99, resource="other-processor")
-        self.assertEqual(self.plane.investigator.historical_candidates(other["episode"]), [])
+        related = self.plane.investigator.historical_candidates(other["episode"])
+        self.assertEqual(len(related), 2)
+        self.assertTrue(all(item["member_selection"]["candidate_relation"] ==
+                            "same_workload_different_pod" for item in related))
+        self.assertTrue(all(item["resource"]["name"] != "other-processor-pod" for item in related))
         for day in (3, 4, 5, 6):
             self.current = self.capture(f"capture-{day}", day, day + 10)
         candidates = self.plane.investigator.historical_candidates(self.current_episode())

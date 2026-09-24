@@ -686,22 +686,25 @@ class FCAPSuleStore:
         return result
 
     def recurrence_candidates_for_incident(self, episode_id: str, incident_id: str) -> list[dict[str, Any]]:
-        """Find earlier episodes containing this member identity, not display titles."""
+        """Find earlier exact-target episodes, then live same-workload pod recurrences."""
 
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT e.episode_id, e.started_at, e.app_id, i.recurrence_key
+                SELECT e.episode_id, e.started_at, e.app_id, i.recurrence_key,
+                       i.source_kind, i.resource_kind, i.resource_name,
+                       a.name AS workload_name, a.namespace, a.cluster
                 FROM incident_episodes e
                 JOIN episode_incidents ei ON ei.episode_id = e.episode_id
                 JOIN incidents i ON i.incident_id = ei.incident_id
+                JOIN applications a ON a.app_id = e.app_id
                 WHERE e.episode_id = ? AND i.incident_id = ? AND i.app_id = e.app_id
                 """,
                 (episode_id, incident_id),
             ).fetchone()
             if not row or not row["recurrence_key"]:
                 return []
-            candidates = connection.execute(
+            exact = connection.execute(
                 """
                 SELECT DISTINCT e.episode_id, e.title, e.started_at, e.ended_at, e.status, e.severity
                 FROM incident_episodes e
@@ -714,7 +717,54 @@ class FCAPSuleStore:
                 """,
                 (row["app_id"], row["recurrence_key"], row["episode_id"], row["started_at"]),
             ).fetchall()
-        return [{**dict(item), "reference": _reference("EP", str(item["episode_id"]))} for item in candidates]
+            candidates = [{**dict(item), "match_type": "same_target"} for item in exact]
+            alert_identity = _alert_family(str(row["recurrence_key"]))
+            # Live app IDs represent the registered workload; require its
+            # captured cluster/namespace/name tuple instead of inferring from pod names.
+            stable_workload = all(str(row[key] or "").strip() for key in ("workload_name", "namespace", "cluster"))
+            if (
+                len(candidates) < 3
+                and alert_identity
+                and stable_workload
+                and row["source_kind"] == "live"
+                and row["resource_kind"] == "pod"
+                and str(row["resource_name"] or "")
+            ):
+                excluded_ids = [str(item["episode_id"]) for item in exact]
+                exclusion_sql = ""
+                exclusion_values: tuple[Any, ...] = ()
+                if excluded_ids:
+                    exclusion_sql = "AND e.episode_id NOT IN (" + ",".join("?" for _ in excluded_ids) + ")"
+                    exclusion_values = tuple(excluded_ids)
+                suffix = "|" + alert_identity
+                related = connection.execute(
+                    f"""
+                    SELECT DISTINCT e.episode_id, e.title, e.started_at, e.ended_at, e.status, e.severity
+                    FROM incident_episodes e
+                    JOIN episode_incidents ei ON ei.episode_id = e.episode_id
+                    JOIN incidents i ON i.incident_id = ei.incident_id
+                    JOIN applications a ON a.app_id = e.app_id
+                    WHERE e.app_id = ? AND i.app_id = e.app_id
+                      AND a.name = ? AND a.namespace = ? AND a.cluster = ?
+                      AND i.source_kind = 'live' AND i.resource_kind = 'pod'
+                      AND i.resource_name != ?
+                      AND substr(i.recurrence_key, -length(?)) = ?
+                      AND e.episode_id != ? AND julianday(e.started_at) < julianday(?)
+                      {exclusion_sql}
+                    ORDER BY julianday(e.started_at) DESC, e.episode_id DESC
+                    LIMIT ?
+                    """,
+                    (
+                        row["app_id"], row["workload_name"], row["namespace"], row["cluster"],
+                        row["resource_name"], suffix, suffix, row["episode_id"], row["started_at"],
+                        *exclusion_values, 3 - len(candidates),
+                    ),
+                ).fetchall()
+                candidates.extend({**dict(item), "match_type": "same_workload_different_pod"} for item in related)
+        return [
+            {**item, "reference": _reference("EP", str(item["episode_id"]))}
+            for item in candidates[:3]
+        ]
 
     def _recurrence_summary(self, connection: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
         key = str(row["recurrence_key"] or "")

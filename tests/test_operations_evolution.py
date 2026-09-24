@@ -69,6 +69,76 @@ class OperationsEvolutionTests(unittest.TestCase):
         self.assertEqual(different["recurrence"]["previous_count"], 0)
         self.assertEqual(len(self.store.list_patterns()), 1)
 
+    def test_history_candidates_rank_exact_target_before_live_same_workload_other_pod(self):
+        def capture(incident_id, started_at, pod, alert="CheckoutFailureRateHigh", app_id="orders",
+                    source_kind="live", resource_kind="pod"):
+            return self.store.record_incident({
+                "incident_id": incident_id, "app_id": app_id, "scenario": "Checkout requests are failing",
+                "summary": "Checkout requests are failing", "status": "resolved", "severity": "warning",
+                "started_at": started_at, "ended_at": started_at, "case_dir": self.directory.name,
+                "resource_kind": resource_kind, "resource_name": pod, "alert_identity": alert,
+                "source_kind": source_kind,
+            })
+
+        capture("older-cross-pod", "2026-09-20T01:00:00Z", "orders-api-old")
+        capture("newer-exact-pod", "2026-09-20T02:00:00Z", "orders-api-current")
+        capture("current-pod", "2026-09-20T03:00:00Z", "orders-api-current")
+        current_episode = self.store.episode_for_incident("current-pod")
+
+        candidates = self.store.recurrence_candidates_for_incident(current_episode["episode_id"], "current-pod")
+
+        self.assertEqual([item["episode_id"] for item in candidates], [
+            self.store.episode_for_incident("newer-exact-pod")["episode_id"],
+            self.store.episode_for_incident("older-cross-pod")["episode_id"],
+        ])
+        self.assertEqual([item["match_type"] for item in candidates], [
+            "same_target", "same_workload_different_pod",
+        ])
+
+    def test_cross_pod_candidates_require_live_pod_scope_and_exact_alert(self):
+        def capture(incident_id, started_at, pod, *, app_id, alert="QueueHigh", source_kind="live",
+                    resource_kind="pod"):
+            return self.store.record_incident({
+                "incident_id": incident_id, "app_id": app_id, "scenario": "Query failures",
+                "summary": "Query failures", "status": "resolved", "severity": "warning",
+                "started_at": started_at, "ended_at": started_at, "case_dir": self.directory.name,
+                "resource_kind": resource_kind, "resource_name": pod, "alert_identity": alert,
+                "source_kind": source_kind,
+            })
+
+        cases = [
+            ("different-app", {"app_id": "outside"}, {"app_id": "orders"}),
+            ("different-alert", {"app_id": "orders", "alert": "QueueLow"}, {"app_id": "orders"}),
+            ("external-source", {"app_id": "orders", "source_kind": "external"}, {"app_id": "orders", "source_kind": "external"}),
+            ("not-pod", {"app_id": "orders", "resource_kind": "workload"}, {"app_id": "orders", "resource_kind": "workload"}),
+            ("missing-stable-scope", {"app_id": "missing-scope"}, {"app_id": "missing-scope"}),
+        ]
+        for offset, (label, old_options, current_options) in enumerate(cases):
+            with self.subTest(case=label):
+                current_app_id = f"app-{label}"
+                self.store.upsert_application(current_app_id, "Processor", "commerce", "cluster-a")
+                old_options = {**old_options}
+                current_options = {**current_options}
+                if old_options["app_id"] == "orders":
+                    old_options["app_id"] = current_app_id
+                if current_options["app_id"] == "orders":
+                    current_options["app_id"] = current_app_id
+                if old_options["app_id"] == "missing-scope":
+                    old_options["app_id"] = current_app_id
+                if current_options["app_id"] == "missing-scope":
+                    current_options["app_id"] = current_app_id
+                if old_options["app_id"] != current_app_id:
+                    self.store.upsert_application(old_options["app_id"], "Other Processor", "commerce", "cluster-a")
+                if label == "missing-stable-scope":
+                    self.store.upsert_application(current_app_id, "", "", "")
+                old_id = f"{label}-old"
+                current_id = f"{label}-current"
+                old = capture(old_id, f"2026-09-20T{offset + 1:02d}:00:00Z", f"processor-old-{label}", **old_options)
+                current = capture(current_id, f"2026-09-20T{offset + 1:02d}:30:00Z", f"processor-new-{label}", **current_options)
+                current_episode = self.store.episode_for_incident(current_id)
+                candidates = self.store.recurrence_candidates_for_incident(current_episode["episode_id"], current_id)
+                self.assertEqual(candidates, [], (old, current))
+
     def test_node_identity_prefers_the_node_over_the_exporter_application(self):
         identity = _resource_identity(
             {"alertname": "NodeMemoryHighUtilization", "labels": {"instance": "go15:9100"}},

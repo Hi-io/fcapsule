@@ -13,6 +13,7 @@ from fcapsule.investigation_tools import InvestigationTools, episode_context, hi
 from fcapsule.io.archive_writer import create_archive
 from fcapsule.reasoning.findings import derive_findings
 from fcapsule.reasoning.source_review import run_source_disconnected_review
+from fcapsule.store import _alert_family
 
 MAX_EPISODE_MEMBERS = 12
 MAX_PRIMARY_CAPSULE_BYTES = 8 * 1024 * 1024
@@ -188,29 +189,48 @@ class InvestigationService:
             prior = self.plane.store.get_episode(str(summary["episode_id"]))
             if not prior or prior.get("app_id") != episode.get("app_id"):
                 continue
+            match_type = str(summary.get("match_type") or "same_target")
             # Select from stored identities before loading bounded artifacts. A
             # matching older member must not disappear behind newer other alerts.
             signals = sorted(prior.get("signals", []),
                              key=lambda item: (item.get("started_at", ""), item["incident_id"]), reverse=True)
-            matches = {item["incident_id"] for item in signals if identity and item.get("recurrence_key") == identity}
-            signals.sort(key=lambda item: item["incident_id"] not in matches)
-            selected = [item for item in signals if item["incident_id"] in matches][:4]
+            member_relations = {}
+            for item in signals:
+                if identity and item.get("recurrence_key") == identity:
+                    member_relations[item["incident_id"]] = "same_target"
+                elif match_type == "same_workload_different_pod" and self._same_live_workload_alert_other_pod(
+                    current, item, episode.get("app_id")
+                ):
+                    member_relations[item["incident_id"]] = "same_workload_different_pod"
+            signals.sort(key=lambda item: item["incident_id"] not in member_relations)
+            selected = [item for item in signals if item["incident_id"] in member_relations][:4]
             prior_entries = self.entries(
                 {**prior, "signals": selected},
                 primary_incident_id=selected[0]["incident_id"] if selected else None,
                 load_primary_capsule=False,
             )
             loaded = {item["incident"]["incident_id"] for item in prior_entries}
-            matching_entries = [item for item in prior_entries if item["incident"]["incident_id"] in matches]
+            matching_entries = [item for item in prior_entries if item["incident"]["incident_id"] in member_relations]
+            cross_pod = match_type == "same_workload_different_pod"
+            limitation = (
+                "Same live app/workload, namespace, cluster and alert identity across different pod names is a retrieval relation only; it is not evidence of the same target or cause. Prior pod provenance remains attached. Missing matching captures cannot be replaced by other members or prior diagnoses."
+                if cross_pod else
+                "Same stored target and alert identity is not a cause match. Missing matching captures cannot be replaced by other members or prior diagnoses."
+            )
             selection = {
-                "policy": "exact_stored_scope_alert_identity_only",
+                "policy": "exact_target_then_same_live_workload_alert_cross_pod",
+                "candidate_relation": match_type,
                 "current_incident_id": current_id, "identity_available": bool(identity),
-                "matching_member_count": len(matches), "retained_matching_member_count": len(matching_entries),
+                "current_target": {"kind": current.get("resource_kind"), "name": current.get("resource_name")},
+                "matching_member_count": len(member_relations), "retained_matching_member_count": len(matching_entries),
                 "omitted_member_count": max(0, len(signals) - len(selected)),
                 "selected_members": [{"incident_id": item["incident_id"],
-                    "matches_current_alert_identity": item["incident_id"] in matches,
+                    "matches_current_alert_identity": item["incident_id"] in member_relations,
+                    "matches_current_target": member_relations.get(item["incident_id"]) == "same_target",
+                    "target_relation": member_relations.get(item["incident_id"]),
+                    "resource": {"kind": item.get("resource_kind"), "name": item.get("resource_name")},
                     "capture_available": item["incident_id"] in loaded} for item in selected],
-                "limitation": "Identity match is not a cause match. Missing matching captures cannot be replaced by other members or prior diagnoses.",
+                "limitation": limitation,
             }
             # Keep the missing selection explicit, not a comparison of unrelated
             # members or episode-level checks presented as a matching capture.
@@ -223,6 +243,8 @@ class InvestigationService:
                     {
                         "incident_id": entry["incident"]["incident_id"],
                         "reference": entry["incident"].get("reference"),
+                        "target_relation": member_relations.get(entry["incident"]["incident_id"]),
+                        "matches_current_target": member_relations.get(entry["incident"]["incident_id"]) == "same_target",
                         "alerts": report.get("fault_alerts", [])[:3],
                         "impact": report.get("impact", [])[:3],
                         "log_patterns": report.get("log_patterns", [])[:3],
@@ -237,6 +259,11 @@ class InvestigationService:
             # display-only impact/configuration summaries omit measured rule values.
             observations = episode_context(prior, prior_entries,
                 matching_entries[0]["incident"]["incident_id"])["evidence"] if matching_entries else []
+            for observation in observations:
+                for provenance in observation.get("provenance", []):
+                    relation = member_relations.get(str(provenance.get("incident_id") or ""))
+                    provenance["target_relation"] = relation
+                    provenance["matches_current_target"] = relation == "same_target"
             retained_checks = [item for item in (prior_run.get("checks", []) if isinstance(prior_run, dict) else [])
                                if isinstance(item, dict) and item.get("status") == "completed"
                                and item.get("tool") in InvestigationTools.CATALOG
@@ -261,7 +288,11 @@ class InvestigationService:
                     "observations": observations,
                     "retained_checks": retained_checks,
                     "availability": "retained" if observations or retained_checks else "unavailable",
-                    "capture_limit": "At most four retained member reports with the exact stored scope/alert identity; unrelated episode members are excluded. Missing matching captures remain unavailable, not substituted by other members.",
+                    "capture_limit": (
+                        "At most four retained live member reports with the exact stable app/workload, cluster, namespace and alert identity from different pod names. This is a tentative related-capture relation, not same-target or same-cause evidence. Unrelated members are excluded; missing matching captures remain unavailable."
+                        if cross_pod else
+                        "At most four retained member reports with the exact stored scope/alert identity; unrelated episode members are excluded. Missing matching captures remain unavailable, not substituted by other members."
+                    ),
                     "prior_hypothesis": (
                         {"provenance": "Earlier model output; not independent evidence and not citable.", **prior_hypothesis}
                         if prior_hypothesis and matching_entries else {}
@@ -270,6 +301,22 @@ class InvestigationService:
                 }
             )
         return candidates
+
+    @staticmethod
+    def _same_live_workload_alert_other_pod(current: dict[str, Any], prior: dict[str, Any], app_id: Any) -> bool:
+        """Allow only live pod records with an exact stable app/workload scope."""
+
+        current_name = str(current.get("resource_name") or "")
+        prior_name = str(prior.get("resource_name") or "")
+        alert_identity = _alert_family(str(current.get("recurrence_key") or ""))
+        return bool(
+            app_id
+            and current.get("app_id") == app_id == prior.get("app_id")
+            and current.get("source_kind") == prior.get("source_kind") == "live"
+            and current.get("resource_kind") == prior.get("resource_kind") == "pod"
+            and current_name and prior_name and current_name != prior_name
+            and alert_identity and _alert_family(str(prior.get("recurrence_key") or "")) == alert_identity
+        )
 
     @staticmethod
     def fingerprint(entries, evidence_manifest: list[dict[str, Any]] | None = None,
