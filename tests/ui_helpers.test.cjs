@@ -98,7 +98,8 @@ test('investigation settings expose the active provider without revealing creden
   assert.match(app.innerHTML, /deepseek\/deepseek-v4-pro-0813/);
   assert.match(app.innerHTML, /API key<\/strong> Configured/);
   assert.match(app.innerHTML, /value="openrouter" selected/);
-  assert.match(app.innerHTML, /Separate from the investigation provider key above/);
+  assert.match(app.innerHTML, /credential is also used by the investigator when its provider is OpenRouter/);
+  assert.match(app.innerHTML, /specialist models require separate validation/);
   assert.doesNotMatch(app.innerHTML, /never-render-this/);
 
   controls.get('#ai-provider').listeners.change({target:{value:'deepseek'}});
