@@ -59,15 +59,19 @@ class StoreTests(unittest.TestCase):
             store.upsert_application("checkout", "Checkout", "shop", "local")
             start = datetime(2026, 9, 20, 10, 0, tzinfo=timezone.utc)
 
-            def record(number: int, minutes: int, severity: str, summary: str, pod: str) -> None:
+            def record(
+                number: int, minutes: int, severity: str, summary: str, pod: str,
+                status: str = "firing", ended_at: str | None = None,
+            ) -> None:
                 store.record_incident(
                     {
                         "incident_id": f"signal-{number}",
                         "app_id": "checkout",
                         "scenario": summary,
-                        "status": "firing",
+                        "status": status,
                         "severity": severity,
                         "started_at": (start + timedelta(minutes=minutes)).isoformat().replace("+00:00", "Z"),
+                        "ended_at": ended_at,
                         "case_dir": f"/tmp/case-{number}",
                         "summary": summary,
                         "resource_kind": "pod",
@@ -78,6 +82,8 @@ class StoreTests(unittest.TestCase):
 
             record(1, 0, "warning", "Pod readiness degraded", "orders-0")
             record(2, 6, "critical", "Pod readiness degraded", "orders-1")
+            record(1, 0, "warning", "Pod readiness degraded", "orders-0", "resolved", "2026-09-20T10:08:00Z")
+            record(2, 6, "critical", "Pod readiness degraded", "orders-1", "resolved", "2026-09-20T10:08:00Z")
             record(3, 30, "warning", "A later degradation", "orders-2")
 
             episodes = store.list_episodes()
@@ -128,6 +134,72 @@ class StoreTests(unittest.TestCase):
             correlated = next(item for item in episodes if item["signal_count"] == 2)
             self.assertEqual({item["incident_id"] for item in correlated["signals"]}, {"latency", "errors"})
 
+    def test_rolling_same_resource_correlations_are_bounded_by_episode_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = FCAPSuleStore(Path(directory) / "state.db")
+            store.upsert_application("checkout", "Checkout", "shop", "local")
+            start = datetime(2026, 9, 20, 10, 0, tzinfo=timezone.utc)
+
+            for minute in range(0, 18, 2):
+                store.record_incident({
+                    "incident_id": f"signal-{minute}", "app_id": "checkout", "status": "firing",
+                    "started_at": (start + timedelta(minutes=minute)).isoformat().replace("+00:00", "Z"),
+                    "case_dir": f"/tmp/signal-{minute}", "summary": f"Alert {minute}",
+                    "resource_kind": "pod", "resource_name": "orders-0",
+                    "alert_identity": f"Alert{minute}",
+                })
+
+            episodes = store.list_episodes()
+            self.assertEqual(len(episodes), 2)
+            self.assertEqual(sorted(item["signal_count"] for item in episodes), [1, 8])
+            later = next(item for item in episodes if item["signal_count"] == 1)
+            self.assertEqual(later["signals"][0]["incident_id"], "signal-16")
+
+    def test_resolved_same_family_recurrence_after_episode_window_starts_new_episode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = FCAPSuleStore(Path(directory) / "state.db")
+            store.upsert_application("checkout", "Checkout", "shop", "local")
+            start = datetime(2026, 9, 20, 10, 0, tzinfo=timezone.utc)
+
+            def record(incident_id: str, minute: int, status: str = "firing", ended_at: str | None = None) -> None:
+                store.record_incident({
+                    "incident_id": incident_id, "app_id": "checkout", "status": status,
+                    "started_at": (start + timedelta(minutes=minute)).isoformat().replace("+00:00", "Z"),
+                    "ended_at": ended_at, "case_dir": f"/tmp/{incident_id}",
+                    "resource_kind": "pod", "resource_name": f"orders-{minute}",
+                    "alert_identity": "PodNotReady", "summary": "Pod readiness degraded",
+                })
+
+            record("signal-0", 0)
+            record("signal-14", 14)
+            record("signal-0", 0, "resolved", "2026-09-20T10:15:00Z")
+            record("signal-14", 14, "resolved", "2026-09-20T10:15:00Z")
+            record("signal-28", 28)
+
+            episodes = store.list_episodes()
+            self.assertEqual(len(episodes), 2)
+            self.assertEqual(sorted(item["signal_count"] for item in episodes), [1, 2])
+            later = next(item for item in episodes if item["signal_count"] == 1)
+            self.assertEqual(later["signals"][0]["incident_id"], "signal-28")
+
+    def test_ongoing_same_family_alert_can_correlate_beyond_join_window(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = FCAPSuleStore(Path(directory) / "state.db")
+            store.upsert_application("checkout", "Checkout", "shop", "local")
+            start = datetime(2026, 9, 20, 10, 0, tzinfo=timezone.utc)
+
+            for incident_id, minute, pod in (("signal-0", 0, "orders-0"), ("signal-30", 30, "orders-1")):
+                store.record_incident({
+                    "incident_id": incident_id, "app_id": "checkout", "status": "firing",
+                    "started_at": (start + timedelta(minutes=minute)).isoformat().replace("+00:00", "Z"),
+                    "case_dir": f"/tmp/{incident_id}", "summary": "Pod readiness degraded",
+                    "resource_kind": "pod", "resource_name": pod, "alert_identity": "PodNotReady",
+                })
+
+            episodes = store.list_episodes()
+            self.assertEqual(len(episodes), 1)
+            self.assertEqual(episodes[0]["signal_count"], 2)
+
     def test_pending_alerts_do_not_create_operator_episodes(self):
         with tempfile.TemporaryDirectory() as directory:
             store = FCAPSuleStore(Path(directory) / "state.db")
@@ -153,22 +225,26 @@ class StoreTests(unittest.TestCase):
             store = FCAPSuleStore(Path(directory) / "state.db")
             store.upsert_application("checkout", "Checkout", "shop", "local")
 
-            def record(incident_id: str, started_at: str, observed_at: str) -> None:
+            def record(
+                incident_id: str, started_at: str, observed_at: str,
+                status: str = "firing", ended_at: str | None = None,
+            ) -> None:
                 with patch("fcapsule.store.utc_now", return_value=observed_at):
                     store.record_incident(
                         {
                             "incident_id": incident_id,
                             "app_id": "checkout",
                             "scenario": "Checkout requests are failing",
-                            "status": "firing",
+                            "status": status,
                             "severity": "warning",
                             "started_at": started_at,
+                            "ended_at": ended_at,
                             "case_dir": f"/tmp/{incident_id}",
                             "summary": "Checkout requests are failing",
                         }
                     )
 
-            record("early", "2026-09-20T10:00:00Z", "2026-09-23T10:00:00Z")
+            record("early", "2026-09-20T10:00:00Z", "2026-09-23T10:00:00Z", "resolved", "2026-09-20T10:02:00Z")
             record("newer-episode", "2026-09-20T10:30:00Z", "2026-09-23T10:01:00Z")
             record("late-arrival", "2026-09-20T10:04:00Z", "2026-09-23T10:02:00Z")
 

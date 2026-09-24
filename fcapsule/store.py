@@ -520,32 +520,64 @@ class FCAPSuleStore:
         started = self._parse_time(started_at)
         lower_bound = (started - timedelta(minutes=EPISODE_JOIN_MINUTES)).isoformat().replace("+00:00", "Z")
         upper_bound = (started + timedelta(minutes=EPISODE_JOIN_MINUTES)).isoformat().replace("+00:00", "Z")
+        lower_started = self._parse_time(lower_bound)
+        upper_started = self._parse_time(upper_bound)
         incident_family = _alert_family(str(incident["recurrence_key"] or ""))
+        # Keep normal joins inside the episode's original window; only an overlapping firing copy of the same alert can extend it.
         candidate_members = connection.execute(
             """
-            SELECT episode.episode_id, episode.last_activity_at, member.started_at,
-                   member.resource_kind, member.resource_name, member.recurrence_key
+            SELECT episode.episode_id, episode.started_at AS episode_started_at,
+                   episode.last_activity_at, member.started_at, member.ended_at,
+                   member.status, member.resource_kind, member.resource_name, member.recurrence_key
             FROM incident_episodes episode
             JOIN episode_incidents membership ON membership.episode_id = episode.episode_id
             JOIN incidents member ON member.incident_id = membership.incident_id
             WHERE episode.app_id = ? AND episode.archived_at IS NULL
-              AND member.started_at >= ? AND member.started_at <= ?
+              AND (
+                  (episode.started_at >= ? AND episode.started_at <= ?
+                   AND member.started_at >= ? AND member.started_at <= ?)
+                  OR (? != '' AND lower(member.status) = 'firing' AND member.ended_at IS NULL
+                      AND substr(member.recurrence_key, -length(?)) = ?)
+              )
             ORDER BY episode.last_activity_at DESC
             """,
-            (incident["app_id"], lower_bound, upper_bound),
+            (
+                incident["app_id"], lower_bound, upper_bound, lower_bound, upper_bound,
+                incident_family, f"|{incident_family}", f"|{incident_family}",
+            ),
         ).fetchall()
         same_family = []
         same_resource = []
         correlation_bound = timedelta(minutes=EPISODE_RESOURCE_CORRELATION_MINUTES)
+        current_end = (
+            self._parse_time(str(incident["ended_at"]))
+            if incident["ended_at"]
+            else None if str(incident["status"]).lower() == "firing" else started
+        )
         for member in candidate_members:
             episode_id = str(member["episode_id"])
+            episode_started = self._parse_time(str(member["episode_started_at"]))
             member_started = self._parse_time(str(member["started_at"]))
             distance = abs(started - member_started)
             member_family = _alert_family(str(member["recurrence_key"] or ""))
-            if incident_family and member_family == incident_family:
+            episode_is_in_window = lower_started <= episode_started <= upper_started
+            member_is_in_window = lower_started <= member_started <= upper_started
+            member_end = (
+                self._parse_time(str(member["ended_at"]))
+                if member["ended_at"]
+                else None if str(member["status"]).lower() == "firing" else member_started
+            )
+            intervals_overlap = (current_end is None or member_started <= current_end) and (
+                member_end is None or started <= member_end
+            ) and member_started <= started
+            if incident_family and member_family == incident_family and (
+                (episode_is_in_window and member_is_in_window) or intervals_overlap
+            ):
                 same_family.append((distance, str(member["last_activity_at"]), episode_id))
             elif (
-                distance <= correlation_bound
+                episode_is_in_window
+                and member_is_in_window
+                and distance <= correlation_bound
                 and str(member["resource_kind"]) == str(incident["resource_kind"])
                 and str(member["resource_name"]) == str(incident["resource_name"])
             ):
