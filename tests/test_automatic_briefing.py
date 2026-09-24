@@ -170,3 +170,42 @@ class AutomaticInvestigationTests(unittest.TestCase):
             with ZipFile(second["archive_path"]) as archive:
                 self.assertNotIn("episode_investigation.json", archive.namelist())
                 self.assertNotIn("investigation_revisions.json", archive.namelist())
+
+    def test_member_arriving_during_investigation_gets_a_focused_follow_up(self):
+        entered, release, follow_up_entered = threading.Event(), threading.Event(), threading.Event()
+        contexts = []
+
+        def provider(context, kit, model, limit, publish):
+            contexts.append(context)
+            if len(contexts) == 1:
+                publish({"status": "running", "checks": [], "assessment": None})
+                entered.set()
+                release.wait(5)
+            else:
+                follow_up_entered.set()
+            publish({"status": "ready", "checks": [], "assessment": {"summary": "Retained"}})
+
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}), patch(
+            "fcapsule.investigation_service.run_investigation", side_effect=provider
+        ) as generate:
+            try:
+                self.control._build_capsule(self.id)
+                self.assertTrue(entered.wait(2))
+                self.control.store.record_incident({**self.incident, "incident_id": "second-signal"})
+                self.control._build_capsule("second-signal")
+                queued = self.control.investigator.read(self.episode_id)
+                self.assertEqual(queued["pending_primary_incident_id"], "second-signal")
+                self.assertEqual(queued["follow_up_status"], "queued")
+            finally:
+                release.set()
+                follow_up_entered.wait(2)
+                self.control.briefing_executor.shutdown(wait=True)
+
+        self.assertEqual(generate.call_count, 2, json.dumps({
+            "targets": [item["primary_incident_id"] for item in contexts],
+            "current_primary": self.control.store.get_episode(self.episode_id)["primary_incident_id"],
+            "final": self.control.investigator.read(self.episode_id),
+        }))
+        self.assertEqual(contexts[0]["primary_incident_id"], self.id)
+        self.assertEqual(contexts[1]["primary_incident_id"], "second-signal")
+        self.assertEqual(self.control.investigator.read(self.episode_id)["primary_incident_id"], "second-signal")

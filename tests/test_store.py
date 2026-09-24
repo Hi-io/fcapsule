@@ -59,7 +59,7 @@ class StoreTests(unittest.TestCase):
             store.upsert_application("checkout", "Checkout", "shop", "local")
             start = datetime(2026, 9, 20, 10, 0, tzinfo=timezone.utc)
 
-            def record(number: int, minutes: int, severity: str, summary: str) -> None:
+            def record(number: int, minutes: int, severity: str, summary: str, pod: str) -> None:
                 store.record_incident(
                     {
                         "incident_id": f"signal-{number}",
@@ -70,12 +70,15 @@ class StoreTests(unittest.TestCase):
                         "started_at": (start + timedelta(minutes=minutes)).isoformat().replace("+00:00", "Z"),
                         "case_dir": f"/tmp/case-{number}",
                         "summary": summary,
+                        "resource_kind": "pod",
+                        "resource_name": pod,
+                        "alert_identity": "PodNotReady",
                     }
                 )
 
-            record(1, 0, "warning", "Elevated checkout latency")
-            record(2, 6, "critical", "Checkout requests are failing")
-            record(3, 30, "warning", "A later degradation")
+            record(1, 0, "warning", "Pod readiness degraded", "orders-0")
+            record(2, 6, "critical", "Pod readiness degraded", "orders-1")
+            record(3, 30, "warning", "A later degradation", "orders-2")
 
             episodes = store.list_episodes()
             self.assertEqual(len(episodes), 2)
@@ -89,6 +92,41 @@ class StoreTests(unittest.TestCase):
             store.set_episode_archived(grouped["episode_id"], True)
             self.assertEqual(len(store.list_episodes()), 1)
             self.assertEqual(store.list_episodes(archived=True)[0]["signal_count"], 2)
+
+    def test_unrelated_alerts_on_different_resources_are_not_time_grouped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = FCAPSuleStore(Path(directory) / "state.db")
+            store.upsert_application("checkout", "Checkout", "shop", "local")
+            for incident_id, resource, alert in (
+                ("database", "mysql-0", "DatabaseConnectionsHigh"),
+                ("worker", "worker-0", "WorkerMemoryHigh"),
+            ):
+                store.record_incident({
+                    "incident_id": incident_id, "app_id": "checkout", "status": "firing",
+                    "started_at": "2026-09-20T10:00:00Z", "case_dir": f"/tmp/{incident_id}",
+                    "summary": alert, "resource_kind": "pod", "resource_name": resource,
+                    "alert_identity": alert,
+                })
+            self.assertEqual(len(store.list_episodes()), 2)
+
+    def test_different_alerts_on_same_resource_correlate_only_within_two_minutes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = FCAPSuleStore(Path(directory) / "state.db")
+            store.upsert_application("checkout", "Checkout", "shop", "local")
+            def record(incident_id: str, minute: int, alert: str) -> None:
+                store.record_incident({
+                    "incident_id": incident_id, "app_id": "checkout", "status": "firing",
+                    "started_at": f"2026-09-20T10:{minute:02d}:00Z", "case_dir": f"/tmp/{incident_id}",
+                    "summary": alert, "resource_kind": "pod", "resource_name": "orders-0",
+                    "alert_identity": alert,
+                })
+            record("latency", 0, "CheckoutLatencyHigh")
+            record("errors", 1, "CheckoutErrorsHigh")
+            record("late", 5, "CheckoutQueueHigh")
+            episodes = store.list_episodes()
+            self.assertEqual(len(episodes), 2)
+            correlated = next(item for item in episodes if item["signal_count"] == 2)
+            self.assertEqual({item["incident_id"] for item in correlated["signals"]}, {"latency", "errors"})
 
     def test_pending_alerts_do_not_create_operator_episodes(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -144,7 +182,7 @@ class StoreTests(unittest.TestCase):
             store = FCAPSuleStore(Path(directory) / "state.db")
             store.upsert_application("app", "App", "shop", "local")
             old = {"incident_id": "old", "app_id": "app", "case_dir": "/tmp/old",
-                   "started_at": "2026-09-20T10:00:00Z", "ended_at": "2026-09-20T10:02:00Z",
+                   "started_at": "2026-09-20T10:04:00Z", "ended_at": "2026-09-20T10:04:30Z",
                    "status": "resolved", "severity": "critical", "summary": "Past schema error"}
             new = {"incident_id": "new", "app_id": "app", "case_dir": "/tmp/new",
                    "started_at": "2026-09-20T10:05:00Z", "status": "firing", "severity": "warning",

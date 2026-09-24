@@ -14,11 +14,15 @@ from fcapsule.io.archive_writer import create_archive
 from fcapsule.reasoning.findings import derive_findings
 from fcapsule.reasoning.source_review import run_source_disconnected_review
 
+MAX_EPISODE_MEMBERS = 12
+MAX_PRIMARY_CAPSULE_BYTES = 8 * 1024 * 1024
+
 
 class InvestigationService:
     def __init__(self, plane):
         self.plane = plane
         self.jobs: set[str] = set()
+        self.pending_targets: dict[str, str] = {}
         self.source_review_jobs: set[str] = set()
         self.stopping = False
 
@@ -125,23 +129,49 @@ class InvestigationService:
         episode = self.plane.store.episode_for_incident(incident_id)
         return self.read(episode["episode_id"]) if episode else None
 
-    def entries(self, episode) -> list[dict[str, Any]]:
+    def entries(
+        self,
+        episode,
+        primary_incident_id: str | None = None,
+        *,
+        load_primary_capsule: bool = True,
+    ) -> list[dict[str, Any]]:
         entries = []
-        for signal in episode["signals"][-12:]:
+        signals = list(episode.get("signals", []))
+        focus_id = str(primary_incident_id or episode.get("primary_incident_id") or "")
+        selected = signals[-MAX_EPISODE_MEMBERS:]
+        if focus_id and not any(item.get("incident_id") == focus_id for item in selected):
+            focus = next((item for item in signals if item.get("incident_id") == focus_id), None)
+            if focus:
+                selected = [focus, *selected[-(MAX_EPISODE_MEMBERS - 1):]]
+        for signal in selected:
             record = self.plane.store.get_capsule_for_incident(signal["incident_id"])
             if not record:
                 continue
             root = Path(record["output_dir"])
-            if not (root / "incident_report.json").is_file() or not (root / "capsule.json").is_file():
+            report_path = root / "incident_report.json"
+            if not report_path.is_file():
                 continue
+            capsule = {}
+            capsule_load_status = "not_loaded"
+            capsule_path = root / "capsule.json"
+            if load_primary_capsule and signal["incident_id"] == focus_id and capsule_path.is_file():
+                try:
+                    if capsule_path.stat().st_size <= MAX_PRIMARY_CAPSULE_BYTES:
+                        capsule = json.loads(capsule_path.read_text(encoding="utf-8"))
+                        capsule_load_status = "loaded"
+                    else:
+                        capsule_load_status = "size_limit"
+                except (OSError, ValueError):
+                    capsule_load_status = "unavailable"
             try:
-                capsule = json.loads((root / "capsule.json").read_text(encoding="utf-8"))
-                report = json.loads((root / "incident_report.json").read_text(encoding="utf-8"))
+                report = json.loads(report_path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
             incident = self.plane.store.get_incident(signal["incident_id"])
             if incident and isinstance(capsule, dict) and isinstance(report, dict):
-                entries.append({"incident": incident, "record": record, "capsule": capsule, "report": report})
+                entries.append({"incident": incident, "record": record, "capsule": capsule, "report": report,
+                                "capsule_load_status": capsule_load_status})
         return entries
 
     def historical_candidates(self, episode: dict[str, Any], primary_incident_id: str | None = None) -> list[dict[str, Any]]:
@@ -164,12 +194,16 @@ class InvestigationService:
                              key=lambda item: (item.get("started_at", ""), item["incident_id"]), reverse=True)
             matches = {item["incident_id"] for item in signals if identity and item.get("recurrence_key") == identity}
             signals.sort(key=lambda item: item["incident_id"] not in matches)
-            selected = signals[:4]
-            prior_entries = self.entries({**prior, "signals": selected})
+            selected = [item for item in signals if item["incident_id"] in matches][:4]
+            prior_entries = self.entries(
+                {**prior, "signals": selected},
+                primary_incident_id=selected[0]["incident_id"] if selected else None,
+                load_primary_capsule=False,
+            )
             loaded = {item["incident"]["incident_id"] for item in prior_entries}
             matching_entries = [item for item in prior_entries if item["incident"]["incident_id"] in matches]
             selection = {
-                "policy": "exact_stored_scope_alert_identity_then_recency",
+                "policy": "exact_stored_scope_alert_identity_only",
                 "current_incident_id": current_id, "identity_available": bool(identity),
                 "matching_member_count": len(matches), "retained_matching_member_count": len(matching_entries),
                 "omitted_member_count": max(0, len(signals) - len(selected)),
@@ -227,7 +261,7 @@ class InvestigationService:
                     "observations": observations,
                     "retained_checks": retained_checks,
                     "availability": "retained" if observations or retained_checks else "unavailable",
-                    "capture_limit": "At most four selected member reports, exact stored scope/alert identity first, then recent other members; 80 observations and four episode-level source checks. Missing matching captures remain unavailable, not substituted by other members.",
+                    "capture_limit": "At most four retained member reports with the exact stored scope/alert identity; unrelated episode members are excluded. Missing matching captures remain unavailable, not substituted by other members.",
                     "prior_hypothesis": (
                         {"provenance": "Earlier model output; not independent evidence and not citable.", **prior_hypothesis}
                         if prior_hypothesis and matching_entries else {}
@@ -381,17 +415,24 @@ class InvestigationService:
             episode = self.plane.store.get_episode(episode_id)
             if not episode:
                 raise KeyError("Episode not found")
-            if episode_id in self.jobs or self.stopping:
+            if primary_incident_id and primary_incident_id not in {
+                item["incident_id"] for item in episode.get("signals", [])
+            }:
+                raise ValueError("Primary incident is not a member of this episode")
+            if self.stopping:
                 return self.read(episode_id)
-            entries = self.entries(episode)
+            if episode_id in self.jobs:
+                state = self.read(episode_id)
+                if primary_incident_id:
+                    self.pending_targets[episode_id] = primary_incident_id
+                    state["pending_primary_incident_id"] = primary_incident_id
+                    state["follow_up_status"] = "queued"
+                    self.plane._write_briefing_state(self.path(episode_id), state)
+                return state
+            primary_incident_id = primary_incident_id or episode.get("primary_incident_id")
+            entries = self.entries(episode, primary_incident_id=primary_incident_id)
             if not entries:
                 raise ValueError("Build at least one report before starting an investigation")
-            if primary_incident_id is None and episode.get("primary_incident_id") in {
-                item["incident"]["incident_id"] for item in entries
-            }:
-                # Manual media updates and startup discovery refer to the same
-                # primary report; do not bill a fresh run solely on restart.
-                primary_incident_id = episode["primary_incident_id"]
             if primary_incident_id and primary_incident_id not in {item["incident"]["incident_id"] for item in entries}:
                 raise ValueError("Primary incident is not a member of this episode")
             evidence_manifest = self.plane.evidence.manifest(episode_id)
@@ -435,18 +476,20 @@ class InvestigationService:
             if any(signal.get("report_ready") for signal in episode["signals"]):
                 previous = self.read(episode["episode_id"])
                 if previous.get("status") in {"ready", "incomplete", "inconclusive"}:
-                    entries = self.entries(episode)
+                    primary_id = previous.get("primary_incident_id")
+                    entries = self.entries(episode, primary_incident_id=primary_id or episode.get("primary_incident_id"))
                     manifest = self.plane.evidence.manifest(episode["episode_id"])
                     # Older manual revisions fingerprinted an implicit primary as
                     # None. Keep completed work when its inputs are unchanged.
                     if previous.get("input_fingerprint") == self.fingerprint(
-                        entries, manifest, previous.get("primary_incident_id")
+                        entries, manifest, primary_id
                     ):
                         continue
                 self.start(episode["episode_id"], primary_incident_id=episode.get("primary_incident_id"))
 
     def invalidate(self, episode_id: str) -> None:
         """Do not retain deleted member evidence in a surviving episode assessment."""
+        self.pending_targets.pop(episode_id, None)
         self.path(episode_id).unlink(missing_ok=True)
         episode = self.plane.store.get_episode(episode_id)
         if episode:
@@ -466,12 +509,21 @@ class InvestigationService:
             episode = self.plane.store.get_episode(episode_id)
             if not episode:
                 return
-            entries = self.entries(episode)
+            primary_incident_id = queued.get("primary_incident_id") or episode.get("primary_incident_id")
+            entries = self.entries(episode, primary_incident_id=primary_incident_id)
             original_ids = {item["incident"]["incident_id"] for item in entries}
             evidence_manifest = self.plane.evidence.manifest(episode_id)
-            primary_incident_id = queued.get("primary_incident_id")
             input_fingerprint = self.fingerprint(entries, evidence_manifest, primary_incident_id)
             context = episode_context(episode, entries, primary_incident_id)
+            oversized_capsules = [
+                item["incident"]["incident_id"] for item in entries
+                if item.get("capsule_load_status") == "size_limit"
+            ]
+            if oversized_capsules:
+                context["retained_artifact_limitations"] = {
+                    "incident_ids": oversized_capsules,
+                    "message": "The full retained capsule remains stored, but the investigation did not load it because it exceeds the per-capsule memory bound. Use the bounded incident report and available source checks instead.",
+                }
             media_evidence = self.plane.evidence.model_evidence(episode_id)
             if queued.get("revision_reason") == "evidence_added":
                 # Revisions must see the operator's addition before older member
@@ -513,6 +565,10 @@ class InvestigationService:
                                  primary_incident_id=primary_incident_id,
                                  revision_reason=queued.get("revision_reason"), source_mode=queued.get("source_mode"),
                                  evidence_manifest=evidence_manifest)
+                    pending_primary = self.pending_targets.get(episode_id)
+                    if pending_primary:
+                        state["pending_primary_incident_id"] = pending_primary
+                        state["follow_up_status"] = "queued"
                     if state.get("status") in {"ready", "incomplete", "inconclusive"}:
                         state["findings"] = derive_findings(state)
                     self.plane._write_briefing_state(self.path(episode_id), state)
@@ -540,7 +596,14 @@ class InvestigationService:
                 self.jobs.discard(episode_id)
                 current = self.plane.store.get_episode(episode_id)
                 if current and not self.stopping and original_ids.issubset({item["incident_id"] for item in current["signals"]}):
-                    fresh = self.entries(current)
+                    pending_primary = self.pending_targets.pop(episode_id, None)
+                    next_primary = pending_primary or queued.get("primary_incident_id") or current.get("primary_incident_id")
+                    fresh = self.entries(current, primary_incident_id=next_primary)
+                    available_ids = {item["incident"]["incident_id"] for item in fresh}
+                    if next_primary and next_primary not in available_ids:
+                        next_primary = current.get("primary_incident_id")
+                        fresh = self.entries(current, primary_incident_id=next_primary)
+                        available_ids = {item["incident"]["incident_id"] for item in fresh}
                     fresh_manifest = self.plane.evidence.manifest(episode_id)
-                    if fresh and self.fingerprint(fresh, fresh_manifest, queued.get("primary_incident_id")) != input_fingerprint:
-                        self.start(episode_id, primary_incident_id=queued.get("primary_incident_id"))
+                    if next_primary in available_ids and self.fingerprint(fresh, fresh_manifest, next_primary) != input_fingerprint:
+                        self.start(episode_id, primary_incident_id=next_primary)

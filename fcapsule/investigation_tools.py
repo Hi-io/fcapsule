@@ -273,7 +273,7 @@ def episode_context(
         "evidence": ordered_evidence[:80], "priority_evidence_ids": priority_evidence_ids,
         "impact": [item for entry in ordered_entries for item in entry["report"].get("impact", [])][:15],
         "source_retention": "Unknown. Do not infer expiry from incident age or FCAPSule's own cleanup policy.",
-        "grouping_basis": "Same application and temporal proximity only. Independent failure phases can share an episode. A resolved alert followed by another alert is not a demonstrated causal chain.",
+        "grouping_basis": "Alerts from the same application are grouped when they share an alert identity across affected resources, or when different alerts affect the same resource within two minutes. Independent failure phases can still share an episode; grouping is not proof of causation.",
         "limits": "Time grouping is not causation. Measurements are sampled. Current state is not historical state."},
         reference_ids={str(episode["episode_id"]), *entry_ids, *evidence,
                        *(str(row["evidence_id"]) for item in evidence.values() for row in item["provenance"])})
@@ -458,6 +458,14 @@ class InvestigationTools:
         if name == "review_omitted":
             candidates = []
             for entry in ([self.primary_entry] if self.primary_entry else []):
+                if entry.get("capsule_load_status") == "size_limit":
+                    return scrub({"source": "retained unselected log templates", "observations": [],
+                                  "matching_candidates": 0,
+                                  "limitation": "The full retained capsule remains stored, but it was not loaded for review because it exceeds the bounded in-memory investigation limit."})
+                if entry.get("capsule_load_status") == "unavailable":
+                    return scrub({"source": "retained unselected log templates", "observations": [],
+                                  "matching_candidates": 0,
+                                  "limitation": "The retained capsule could not be read; other captured evidence and scoped source checks remain available."})
                 selected = {item["source_id"] for item in entry["capsule"].get("selected_evidence", [])}
                 for item in entry["capsule"].get("log_templates", []):
                     if item["template_id"] in selected:

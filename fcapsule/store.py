@@ -22,6 +22,7 @@ DEFAULT_MODEL_PROFILES = (
 )
 
 EPISODE_JOIN_MINUTES = 15
+EPISODE_RESOURCE_CORRELATION_MINUTES = 2
 SEVERITY_RANK = {"info": 0, "warning": 1, "critical": 2}
 
 
@@ -66,6 +67,13 @@ def _identity(value: Any) -> str:
 def _recurrence_key(app_id: str, resource_kind: str, resource_name: str, alert_identity: str) -> str:
     values = (app_id, resource_kind, resource_name, alert_identity)
     return "|".join(_identity(value) for value in values)
+
+
+def _alert_family(recurrence_key: str) -> str:
+    """Return the alert signature independent of the affected pod/resource."""
+
+    parts = recurrence_key.split("|", 3)
+    return parts[3] if len(parts) == 4 else ""
 
 
 class FCAPSuleStore:
@@ -510,25 +518,40 @@ class FCAPSuleStore:
         started = self._parse_time(started_at)
         lower_bound = (started - timedelta(minutes=EPISODE_JOIN_MINUTES)).isoformat().replace("+00:00", "Z")
         upper_bound = (started + timedelta(minutes=EPISODE_JOIN_MINUTES)).isoformat().replace("+00:00", "Z")
-        candidate = connection.execute(
+        incident_family = _alert_family(str(incident["recurrence_key"] or ""))
+        candidate_members = connection.execute(
             """
-            SELECT episode_id
+            SELECT episode.episode_id, episode.last_activity_at, member.started_at,
+                   member.resource_kind, member.resource_name, member.recurrence_key
             FROM incident_episodes episode
-            WHERE app_id = ? AND archived_at IS NULL
-              AND EXISTS (
-                  SELECT 1
-                  FROM episode_incidents membership
-                  JOIN incidents member ON member.incident_id = membership.incident_id
-                  WHERE membership.episode_id = episode.episode_id
-                    AND member.started_at >= ? AND member.started_at <= ?
-              )
-            ORDER BY last_activity_at DESC
-            LIMIT 1
+            JOIN episode_incidents membership ON membership.episode_id = episode.episode_id
+            JOIN incidents member ON member.incident_id = membership.incident_id
+            WHERE episode.app_id = ? AND episode.archived_at IS NULL
+              AND member.started_at >= ? AND member.started_at <= ?
+            ORDER BY episode.last_activity_at DESC
             """,
             (incident["app_id"], lower_bound, upper_bound),
-        ).fetchone()
+        ).fetchall()
+        same_family = []
+        same_resource = []
+        correlation_bound = timedelta(minutes=EPISODE_RESOURCE_CORRELATION_MINUTES)
+        for member in candidate_members:
+            episode_id = str(member["episode_id"])
+            member_started = self._parse_time(str(member["started_at"]))
+            distance = abs(started - member_started)
+            member_family = _alert_family(str(member["recurrence_key"] or ""))
+            if incident_family and member_family == incident_family:
+                same_family.append((distance, str(member["last_activity_at"]), episode_id))
+            elif (
+                distance <= correlation_bound
+                and str(member["resource_kind"]) == str(incident["resource_kind"])
+                and str(member["resource_name"]) == str(incident["resource_name"])
+            ):
+                same_resource.append((distance, str(member["last_activity_at"]), episode_id))
+        candidates = same_family or same_resource
+        candidate = min(candidates, key=lambda item: (item[0], -self._parse_time(item[1]).timestamp())) if candidates else None
         if candidate:
-            episode_id = str(candidate["episode_id"])
+            episode_id = candidate[2]
         else:
             episode_id = f"episode-{incident_id}"
             now = utc_now()

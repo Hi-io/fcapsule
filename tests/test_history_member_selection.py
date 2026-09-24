@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from fcapsule.investigation_service import InvestigationService
+from fcapsule.investigation_service import MAX_PRIMARY_CAPSULE_BYTES
 from fcapsule.investigation_tools import historical_episode_result
 from fcapsule.store import FCAPSuleStore, _recurrence_key
 
@@ -45,6 +46,31 @@ class HistoricalMemberSelectionTests(unittest.TestCase):
         (folder / "incident_report.json").write_text(json.dumps(report), encoding="utf-8")
         return signal
 
+    def test_episode_context_loads_only_the_primary_capsule(self):
+        self.member("older-member", 0)
+        self.member("current-member", 1)
+        self.prior["primary_incident_id"] = "current-member"
+
+        entries = self.service.entries(self.prior, primary_incident_id="current-member")
+
+        self.assertEqual([item["incident"]["incident_id"] for item in entries],
+                         ["older-member", "current-member"])
+        self.assertEqual(entries[0]["capsule"], {})
+        self.assertEqual(entries[0]["capsule_load_status"], "not_loaded")
+        self.assertEqual(entries[1]["capsule"], {"case": {}})
+        self.assertEqual(entries[1]["capsule_load_status"], "loaded")
+
+    def test_oversized_primary_capsule_is_preserved_but_not_loaded(self):
+        self.member("current-member", 0)
+        capsule = self.root / "current-member" / "capsule.json"
+        capsule.write_text('{"case":{},"padding":"' + ("x" * MAX_PRIMARY_CAPSULE_BYTES) + '"}',
+                           encoding="utf-8")
+
+        entries = self.service.entries(self.prior, primary_incident_id="current-member")
+
+        self.assertEqual(entries[0]["capsule"], {})
+        self.assertEqual(entries[0]["capsule_load_status"], "size_limit")
+
     def mixed_members(self):
         self.member("matching-old", 0)
         for minute in range(1, 15):
@@ -56,16 +82,15 @@ class HistoricalMemberSelectionTests(unittest.TestCase):
         result = self.service.historical_candidates(self.current)[0]
         selection = result["member_selection"]
         self.assertEqual([item["incident_id"] for item in selection["selected_members"]],
-                         ["matching-old", "other-14", "other-13", "other-12"])
-        self.assertEqual(selection["omitted_member_count"], 11)
+                         ["matching-old"])
+        self.assertEqual(selection["omitted_member_count"], 14)
         self.assertEqual(selection["retained_matching_member_count"], 1)
-        self.assertEqual(self.service.plane.store.get_capsule_for_incident.call_count, 4)
-        self.assertEqual(len(result["captured_evidence"]), 4)
+        self.assertEqual(self.service.plane.store.get_capsule_for_incident.call_count, 1)
+        self.assertEqual(len(result["captured_evidence"]), 1)
         tool = historical_episode_result(result)
         first = tool["observations"][0]
         self.assertEqual(first["source"]["provenance"][0]["incident_id"], "matching-old")
         self.assertTrue(first["source"]["matches_current_alert_identity"])
-        self.assertFalse(tool["observations"][-1]["source"]["matches_current_alert_identity"])
 
     def test_multiple_matches_use_recency_and_keep_four_member_bound(self):
         for minute in range(6): self.member(f"match-{minute}", minute)
@@ -100,7 +125,8 @@ class HistoricalMemberSelectionTests(unittest.TestCase):
         self.member("other-resource", 1, _recurrence_key("app", "pod", "different", "QueueHigh"))
         result = self.service.historical_candidates(self.current)[0]
         self.assertEqual(result["member_selection"]["matching_member_count"], 1)
-        self.assertFalse(result["member_selection"]["selected_members"][1]["matches_current_alert_identity"])
+        self.assertEqual([item["incident_id"] for item in result["member_selection"]["selected_members"]],
+                         ["matching-old"])
         self.prior["app_id"] = "different-app"
         self.assertEqual(self.service.historical_candidates(self.current), [])
 
