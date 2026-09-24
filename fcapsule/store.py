@@ -712,10 +712,11 @@ class FCAPSuleStore:
                 JOIN incidents i ON i.incident_id = ei.incident_id
                 WHERE e.app_id = ? AND i.app_id = e.app_id AND i.recurrence_key = ?
                   AND e.episode_id != ? AND julianday(e.started_at) < julianday(?)
+                  AND julianday(i.started_at) < julianday(?)
                 ORDER BY julianday(e.started_at) DESC, e.episode_id DESC
                 LIMIT 3
                 """,
-                (row["app_id"], row["recurrence_key"], row["episode_id"], row["started_at"]),
+                (row["app_id"], row["recurrence_key"], row["episode_id"], row["started_at"], row["started_at"]),
             ).fetchall()
             candidates = [{**dict(item), "match_type": "same_target"} for item in exact]
             alert_identity = _alert_family(str(row["recurrence_key"]))
@@ -750,6 +751,7 @@ class FCAPSuleStore:
                       AND i.resource_name != ?
                       AND substr(i.recurrence_key, -length(?)) = ?
                       AND e.episode_id != ? AND julianday(e.started_at) < julianday(?)
+                      AND julianday(i.started_at) < julianday(?)
                       {exclusion_sql}
                     ORDER BY julianday(e.started_at) DESC, e.episode_id DESC
                     LIMIT ?
@@ -757,6 +759,7 @@ class FCAPSuleStore:
                     (
                         row["app_id"], row["workload_name"], row["namespace"], row["cluster"],
                         row["resource_name"], suffix, suffix, row["episode_id"], row["started_at"],
+                        row["started_at"],
                         *exclusion_values, 3 - len(candidates),
                     ),
                 ).fetchall()
