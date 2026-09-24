@@ -288,7 +288,9 @@ allowance; the system also asks for concise fields. The completion limit in Sett
 with reasoning disabled: the evidence contract, bounded dispatch table and final
 review are the safety controls, rather than hidden deliberation that can consume an
 entire response allowance. One schema repair is permitted only after the final review;
-it does not increase the total token budget. These controls follow the [DeepSeek API contract](https://api-docs.deepseek.com/api/create-chat-completion/).
+it does not increase the total token budget. Both supported chat-completion adapters
+apply these bounded controls through the same investigation contract; provider-specific
+request and response details are normalized at the client boundary.
 
 Before each request, FCAPSule reserves its estimated full input plus the allowed
 completion. A missing provider usage field therefore cannot create further unreserved

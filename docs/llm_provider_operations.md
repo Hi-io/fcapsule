@@ -32,9 +32,10 @@ returns the key.
 Keys entered in Settings are held in the local `state_dir/.env`; provider selection,
 model, and budgets are non-secret settings. Credentials are not stored in SQLite or
 included in capsule exports. Protect the state directory and deployment secrets as
-credentials. OpenRouter configuration for optional image/audio evidence is separate:
-its capability status does not prove that the core investigator is ready, or vice
-versa.
+credentials. Core investigations and optional image/audio evidence use the same
+`OPENROUTER_API_KEY` when both are configured through OpenRouter. Their selected
+models and validation states remain independent: media validation does not prove
+that the core investigator is ready, or vice versa.
 
 ## Investigation Behavior and Budgets
 
