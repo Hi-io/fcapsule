@@ -102,6 +102,39 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(state["assessment"]["evidence_ids"], ["E1"])
         self.assertEqual(state["calls"][0]["citation_aliases_normalized"], {"ev_metric_002": "E1"})
 
+    def test_memory_metric_alias_is_grounded_through_finish_and_review(self):
+        canonical = "E5bf5f51a85e7"
+        alias = "ev_metric_002"
+        self.context["evidence"] = [{
+            "id": canonical,
+            "domain": "metric_anomaly",
+            "title": "pod_memory_working_set_bytes",
+            "summary": "Sampled working set rose during the memory-leak alert window.",
+            "provenance": [{"incident_id": "one", "evidence_id": alias}],
+        }]
+        model_output = assessment(alias)
+        model_output["summary"] = "Worker memory increased during the alert window."
+        model_output["likely_mechanism"] = "A memory leak is possible but the sampled rise is not proof of OOM."
+        model_output["hypotheses"][0].update(
+            explanation="Memory leak",
+            reason="The sampled working set rose during the alert window.",
+        )
+
+        state, client = self.run_case([{"action": "finish", "assessment": model_output}], max_checks=0)
+
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["assessment"]["evidence_ids"], [canonical])
+        self.assertEqual(state["assessment"]["hypotheses"][0]["evidence_ids"], [canonical])
+        self.assertEqual(len(client.requests), 2)
+        self.assertEqual(state["calls"][0]["citation_aliases_normalized"], {alias: canonical})
+        self.assertEqual(state["calls"][1]["citation_aliases_normalized"], {alias: canonical})
+        for request in client.requests:
+            payload = json.loads(request.messages[1]["content"])
+            self.assertIn(canonical, payload["available_evidence_ids"])
+            self.assertNotIn(alias, payload["available_evidence_ids"])
+            self.assertIn(canonical, json.dumps(payload["episode"]))
+            self.assertNotIn(alias, json.dumps(payload["episode"]))
+
     def test_hidden_or_ambiguous_source_alias_remains_invalid(self):
         hidden = {"evidence": [{"id": "E-hidden", "provenance": [
             {"incident_id": "one", "evidence_id": "ev_metric_002"},
@@ -110,12 +143,17 @@ class InvestigationEngineTests(unittest.TestCase):
             {"id": "E-one", "provenance": [{"evidence_id": "ev_metric_002"}]},
             {"id": "E-two", "provenance": [{"evidence_id": "ev_metric_002"}]},
         ]}
-        for context in (hidden, ambiguous):
-            normalized, applied = normalize_evidence_citations(assessment("ev_metric_002"), context, set())
+        visible_and_hidden_collision = {"evidence": [
+            {"id": "E-visible", "provenance": [{"evidence_id": "ev_metric_002"}]},
+            {"id": "E-hidden", "provenance": [{"evidence_id": "ev_metric_002"}]},
+        ]}
+        for context, visible_ids in ((hidden, set()), (ambiguous, set()),
+                                     (visible_and_hidden_collision, {"E-visible"})):
+            normalized, applied = normalize_evidence_citations(assessment("ev_metric_002"), context, visible_ids)
             self.assertEqual(normalized["evidence_ids"], ["ev_metric_002"])
             self.assertEqual(applied, {})
             with self.assertRaisesRegex(ValueError, "unavailable evidence"):
-                validate_assessment(normalized, {"E-one", "E-two"}, {"one"})
+                validate_assessment(normalized, visible_ids or {"E-one", "E-two"}, {"one"})
 
     def test_prompt_default_and_explicit_smaller_limits_remain_distinct(self):
         for context_limit, explicit_limit, expected in ((None, None, 3200), (2100, None, 2100), (3200, 2100, 2100)):

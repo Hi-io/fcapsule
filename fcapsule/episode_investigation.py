@@ -182,15 +182,21 @@ def normalize_evidence_citations(
         if not isinstance(item, dict):
             continue
         canonical = item.get("id")
-        if not isinstance(canonical, str) or canonical not in visible_evidence_ids:
+        if not isinstance(canonical, str) or not canonical:
             continue
         for provenance in item.get("provenance", []):
             if not isinstance(provenance, dict):
                 continue
             alias = provenance.get("evidence_id")
-            if isinstance(alias, str) and alias and alias not in visible_evidence_ids and alias != canonical:
+            if (isinstance(alias, str) and alias and alias not in visible_evidence_ids
+                    and alias != canonical):
                 alias_targets.setdefault(alias, set()).add(canonical)
-    aliases = {alias: next(iter(targets)) for alias, targets in alias_targets.items() if len(targets) == 1}
+    aliases = {}
+    for alias, targets in alias_targets.items():
+        if len(targets) == 1:
+            canonical = next(iter(targets))
+            if canonical in visible_evidence_ids:
+                aliases[alias] = canonical
 
     normalized = copy.deepcopy(value)
     applied: dict[str, str] = {}
