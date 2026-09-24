@@ -9,7 +9,7 @@ import json
 import re
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import promql_parser as promql
 
@@ -20,7 +20,10 @@ MAX_PROMETHEUS_DEFAULT_RESPONSE_BYTES = 1024 * 1024
 MAX_PROMETHEUS_QUERY_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_PROMETHEUS_RANGE_RESPONSE_BYTES = 1024 * 1024
 MAX_PROMETHEUS_DISCOVERY_RESPONSE_BYTES = 2 * 1024 * 1024
+MAX_PROMETHEUS_SCOPED_TARGET_RESPONSE_BYTES = 256 * 1024
 MAX_PROMETHEUS_STATUS_RESPONSE_BYTES = 64 * 1024
+MAX_PROMETHEUS_SCRAPE_POOLS = 4
+MAX_PROMETHEUS_TARGETS_PER_STATE = 40
 
 MAX_ALERT_SERIES = 12
 MAX_ALERT_POINTS = 241
@@ -53,11 +56,17 @@ class PrometheusAdapter:
             "retained_series": 0,
         }
 
-    def _api(self, path: str, params: dict[str, Any] | None = None) -> Any:
+    def _api(
+        self, path: str, params: dict[str, Any] | None = None,
+        *, max_response_bytes: int | None = None,
+    ) -> Any:
         suffix = path
         if params:
             suffix += "?" + urlencode(params)
-        payload = self.transport.request(suffix, max_response_bytes=_response_limit(path))
+        payload = self.transport.request(
+            suffix, max_response_bytes=(max_response_bytes if max_response_bytes is not None
+                                       else _response_limit(path)),
+        )
         if payload.get("status") != "success":
             raise RuntimeError(str(payload.get("error") or "Prometheus API request failed"))
         return payload.get("data")
@@ -121,16 +130,91 @@ class PrometheusAdapter:
             )
         return alerts
 
-    def scrape_targets(self, namespace: str, pods: set[str] | None = None) -> dict[str, list[dict[str, Any]]]:
-        """Return a bounded, label-only view of Prometheus target discovery.
+    def scrape_targets(
+        self, namespace: str, pods: set[str] | None = None,
+        scrape_pools: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Return a bounded, scope-aware view of Prometheus target discovery.
 
         `up == 0` describes a contacted target. A dropped target or the absence of
         a discovered target describes a different failure mode, so both remain
-        explicit rather than being collapsed into one health flag.
+        explicit rather than being collapsed into one health flag. Supplying
+        scrape pools uses Prometheus' server-side filter, with a tighter byte
+        budget per pool; it never fetches the federated target list first.
         """
-
-        data = self._api("/api/v1/targets") or {}
         expected = pods or set()
+        pool_names = list(dict.fromkeys(
+            pool.strip() for pool in (scrape_pools or [])
+            if isinstance(pool, str) and pool.strip()
+        ))
+        scoped = scrape_pools is not None
+        selected_pools = pool_names[:MAX_PROMETHEUS_SCRAPE_POOLS]
+        omitted_pools = max(0, len(pool_names) - len(selected_pools))
+        active_items: list[dict[str, Any]] = []
+        dropped_items: list[dict[str, Any]] = []
+        failed_pools = 0
+        successful_pools = 0
+        failure_reasons: set[str] = set()
+
+        if scoped:
+            if not selected_pools:
+                return {
+                    "active": [], "dropped": [],
+                    "inventory": {
+                        "status": "unavailable", "complete": False, "scope_complete": False,
+                        "scope": "scrape_pools", "reason": "no_relevant_scrape_pools",
+                        "requested_scrape_pools": [], "omitted_scrape_pools": omitted_pools,
+                        "response_limited_pools": 0,
+                    },
+                }
+            for pool in selected_pools:
+                try:
+                    data = self._api(
+                        "/api/v1/targets", {"state": "any", "scrapePool": pool},
+                        max_response_bytes=MAX_PROMETHEUS_SCOPED_TARGET_RESPONSE_BYTES,
+                    ) or {}
+                except ResponseTooLargeError:
+                    failed_pools += 1
+                    failure_reasons.add("response_byte_limit")
+                    continue
+                except (RuntimeError, OSError, ValueError):
+                    failed_pools += 1
+                    failure_reasons.add("query_failed")
+                    continue
+                if not isinstance(data, dict) or not isinstance(data.get("activeTargets", []), list) \
+                        or not isinstance(data.get("droppedTargets", []), list):
+                    failed_pools += 1
+                    failure_reasons.add("invalid_response")
+                    continue
+                successful_pools += 1
+                active_items.extend(item for item in data.get("activeTargets", []) if isinstance(item, dict))
+                dropped_items.extend(item for item in data.get("droppedTargets", []) if isinstance(item, dict))
+        else:
+            try:
+                data = self._api("/api/v1/targets") or {}
+            except ResponseTooLargeError:
+                return {
+                    "active": [], "dropped": [],
+                    "inventory": {
+                        "status": "unavailable", "complete": False, "scope_complete": False,
+                        "scope": "namespace", "reason": "response_byte_limit",
+                        "requested_scrape_pools": [], "omitted_scrape_pools": 0,
+                        "response_limited_pools": 1,
+                    },
+                }
+            if not isinstance(data, dict) or not isinstance(data.get("activeTargets", []), list) \
+                    or not isinstance(data.get("droppedTargets", []), list):
+                return {
+                    "active": [], "dropped": [],
+                    "inventory": {
+                        "status": "unavailable", "complete": False, "scope_complete": False,
+                        "scope": "namespace", "reason": "invalid_response",
+                        "requested_scrape_pools": [], "omitted_scrape_pools": 0,
+                        "response_limited_pools": 0,
+                    },
+                }
+            active_items = [item for item in data.get("activeTargets", []) if isinstance(item, dict)]
+            dropped_items = [item for item in data.get("droppedTargets", []) if isinstance(item, dict)]
 
         def normalized(item: dict[str, Any], state: str) -> dict[str, Any] | None:
             labels = item.get("labels") if isinstance(item.get("labels"), dict) else {}
@@ -141,11 +225,27 @@ class PrometheusAdapter:
             service = combined.get("service") or combined.get("__meta_kubernetes_service_name") or ""
             if target_namespace != namespace and pod not in expected:
                 return None
+            scrape_url = item.get("scrapeUrl")
+            scrape_endpoint = str(discovered.get("__address__") or "")[:200]
+            scrape_path = discovered.get("__metrics_path__")
+            if isinstance(scrape_url, str):
+                try:
+                    parsed_url = urlsplit(scrape_url)
+                    scrape_endpoint = parsed_url.netloc.rsplit("@", 1)[-1][:200]
+                    scrape_path = parsed_url.path or scrape_path
+                except ValueError:
+                    pass
+            if isinstance(scrape_path, str):
+                scrape_path = scrape_path.split("?", 1)[0].split("#", 1)[0][:240]
+            else:
+                scrape_path = ""
             return {
                 "state": state,
                 "health": str(item.get("health") or "unknown"),
                 "last_error": str(item.get("lastError") or "")[:400],
                 "scrape_pool": str(item.get("scrapePool") or ""),
+                "scrape_endpoint": scrape_endpoint,
+                "scrape_path": scrape_path,
                 "job": str(labels.get("job") or combined.get("job") or ""),
                 "namespace": target_namespace,
                 "pod": pod,
@@ -156,11 +256,41 @@ class PrometheusAdapter:
                 }},
             }
 
-        active = [value for item in data.get("activeTargets", []) if isinstance(item, dict)
-                  if (value := normalized(item, "active")) is not None][:40]
-        dropped = [value for item in data.get("droppedTargets", []) if isinstance(item, dict)
-                   if (value := normalized(item, "dropped")) is not None][:40]
-        return {"active": active, "dropped": dropped}
+        active_all = [value for item in active_items
+                      if (value := normalized(item, "active")) is not None]
+        dropped_all = [value for item in dropped_items
+                       if (value := normalized(item, "dropped")) is not None]
+        truncated = (len(active_all) > MAX_PROMETHEUS_TARGETS_PER_STATE
+                     or len(dropped_all) > MAX_PROMETHEUS_TARGETS_PER_STATE)
+        active = active_all[:MAX_PROMETHEUS_TARGETS_PER_STATE]
+        dropped = dropped_all[:MAX_PROMETHEUS_TARGETS_PER_STATE]
+        scope_complete = not failed_pools and not omitted_pools and not truncated
+        if scoped:
+            status = "partial" if successful_pools else "unavailable"
+            reason = ("response_byte_limit" if "response_byte_limit" in failure_reasons else
+                      next(iter(sorted(failure_reasons)), None) or
+                      ("scrape_pool_scope" if successful_pools else "query_failed"))
+            if not scope_complete:
+                status = "partial" if successful_pools else "unavailable"
+        else:
+            status = "partial" if truncated else "observed"
+            reason = "target_limit_exceeded" if truncated else None
+        return {
+            "active": active,
+            "dropped": dropped,
+            "inventory": {
+                "status": status,
+                "complete": not scoped and scope_complete,
+                "scope_complete": scope_complete,
+                "scope": "scrape_pools" if scoped else "namespace",
+                "reason": reason,
+                "requested_scrape_pools": selected_pools,
+                "omitted_scrape_pools": omitted_pools,
+                "response_limited_pools": failed_pools,
+                "omitted_active_targets": max(0, len(active_all) - len(active)),
+                "omitted_dropped_targets": max(0, len(dropped_all) - len(dropped)),
+            },
+        }
 
     def alert_rules(self) -> dict[str, dict[str, Any]]:
         """Return Prometheus alert definitions keyed by alert name."""

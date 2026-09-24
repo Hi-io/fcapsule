@@ -7,7 +7,9 @@ from fcapsule.episode_investigation import SYSTEM, RELATIONSHIP_REVIEW_SYSTEM, E
 from fcapsule.investigation_tools import InvestigationTools, episode_context, log_patterns, metric_summary, scrub, stamp
 from fcapsule.processing.anonymizer import anonymize_text, template_for_message
 from fcapsule.adapters.kubernetes_adapter import KubernetesInventory
-from fcapsule.reasoning.context_budget import _check_item, _minimal_check_observation, compact_for_model, estimate_tokens
+from fcapsule.reasoning.context_budget import (
+    _check_item, _minimal_check_observation, _tiny_discovery_observation, compact_for_model, estimate_tokens,
+)
 
 
 def assessment(ref="Q001"):
@@ -1065,6 +1067,7 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertEqual(minimized_service["selector_status"], "not_matched")
 
     def test_scrape_discovery_links_monitor_port_target_readiness_and_exporter_health(self):
+        self.kit.discovery_targets = {"target_service": "mysql-exporter"}
         exporter = {"name": "mysql-exporter-0", "namespace": "ns", "workload": "mysql-exporter",
                     "phase": "Running", "ready": False, "ready_status": "false",
                     "labels": {"app": "mysql-exporter"},
@@ -1076,8 +1079,14 @@ class InvestigationToolTests(unittest.TestCase):
                                                         "message": "private termination message"}}}]}
         self.prom.scrape_targets.return_value = {
             "active": [{"state": "active", "health": "down", "last_error": "connection refused",
+                        "scrape_pool": "serviceMonitor/monitoring/mysql/0",
+                        "scrape_endpoint": "mysql-exporter:9104", "scrape_path": "/custom/metrics",
                         "pod": "mysql-exporter-0", "service": "mysql-exporter", "namespace": "ns"}],
             "dropped": [],
+            "inventory": {"status": "partial", "complete": False, "scope_complete": True,
+                          "scope": "scrape_pools", "reason": "scrape_pool_scope",
+                          "requested_scrape_pools": ["serviceMonitor/monitoring/mysql/0"],
+                          "omitted_scrape_pools": 0, "response_limited_pools": 0},
         }
         self.kube.monitoring_resources.return_value = [
             {"kind": "ServiceMonitor", "name": "mysql", "namespace": "monitoring",
@@ -1110,10 +1119,16 @@ class InvestigationToolTests(unittest.TestCase):
 
         result = self.kit.execute("scrape_discovery", {})
 
+        self.assertEqual(self.prom.scrape_targets.call_args.kwargs["scrape_pools"], [
+            "serviceMonitor/monitoring/mysql/0", "podMonitor/monitoring/mysql-pods/0",
+        ])
+        self.assertEqual(result["target_inventory"]["status"], "partial")
+        self.assertFalse(result["target_inventory"]["complete"])
         service_monitor, pod_monitor = result["monitor_selection"]
         service = service_monitor["evaluated_services"][0]
         self.assertEqual(result["active_targets"][0]["health"], "down")
         self.assertEqual(result["active_targets"][0]["last_error"], "connection refused")
+        self.assertEqual(result["active_targets"][0]["scrape_path"], "/custom/metrics")
         self.assertEqual(service["selector_evaluation"]["status"], "matched")
         self.assertEqual(service["endpoint_port_checks"][0]["status"], "does_not_match_service_port_name")
         self.assertEqual(service["endpoint_slices"][0]["endpoints"][0]["ready"], False)
@@ -1133,10 +1148,17 @@ class InvestigationToolTests(unittest.TestCase):
         compact_check = _check_item({"id": "Q-exporter", "tool": "scrape_discovery", "status": "completed",
                                      "result": result}, False)
         compact = compact_check["observation"]
+        self.assertEqual(compact["target_inventory"]["status"], "partial")
+        self.assertEqual(compact["monitor_selection"][0]["targets"][0]["scrape_path"], "/custom/metrics")
         self.assertEqual(compact["endpoint_slice_inventory"]["status"], "partial")
         self.assertEqual(compact["pod_inventory"]["status"], "partial")
         minimum = _minimal_check_observation(compact_check)
+        self.assertEqual(minimum["target_inventory"]["status"], "partial")
+        self.assertEqual(minimum["monitor_selection"][0]["targets"][0]["scrape_endpoint"], "mysql-exporter:9104")
         self.assertEqual(minimum["pod_inventory"]["status"], "partial")
+        tiny = _tiny_discovery_observation(compact)
+        self.assertEqual(tiny["target_inventory"]["status"], "partial")
+        self.assertEqual(tiny["monitor_selection"][0]["targets"][0]["scrape_path"], "/custom/metrics")
         compact_pod_monitor = next(item for item in compact["monitor_selection"] if item["kind"] == "PodMonitor")
         self.assertEqual(compact_pod_monitor["evaluated_resources"][0]["name"], "mysql-exporter-0")
         self.assertEqual(compact_pod_monitor["evaluated_resources"][0]["target_relevance"], "prometheus_target_pod")

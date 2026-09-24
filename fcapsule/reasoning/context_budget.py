@@ -649,8 +649,9 @@ def _discovery_observation(result: dict[str, Any]) -> dict[str, Any]:
             discovered = target.get("labels") or {}
             observed = {key: discovered[prefix + re.sub(r"[^a-zA-Z0-9_]", "_", key)] for key in selector_keys
                         if prefix + re.sub(r"[^a-zA-Z0-9_]", "_", key) in discovered}
-            matched.append({**{key: _short(anonymize_text(str(target[key])), 120) for key in
-                              ("pod", "service", "state", "health", "last_error") if target.get(key)},
+            matched.append({**{key: _short(anonymize_text(str(target[key])), 180) for key in
+                              ("pod", "service", "state", "health", "last_error", "scrape_pool",
+                               "scrape_endpoint", "scrape_path") if target.get(key)},
                             "selector_labels": labels(observed)})
         matched.sort(key=lambda item: (item.get("pod") not in pods, not bool(item.get("last_error")),
                                        not bool(item["selector_labels"])))
@@ -760,6 +761,12 @@ def _discovery_observation(result: dict[str, Any]) -> dict[str, Any]:
     return {
         "compacted_discovery": True,
         "monitor_selection": selections[:3], "monitor_count": len(selections),
+        **({"target_inventory": {key: result["target_inventory"][key] for key in (
+            "status", "complete", "scope_complete", "scope", "reason", "requested_scrape_pools",
+            "omitted_scrape_pools", "response_limited_pools", "omitted_active_targets",
+            "omitted_dropped_targets",
+        ) if key in result["target_inventory"]}}
+           if isinstance(result.get("target_inventory"), dict) else {}),
         **({"discovery_targets": {key: value for key, value in (
             ("target_service", target_service), ("target_workload", target_workload)) if value}}
            if target_service or target_workload else {}),
@@ -986,6 +993,11 @@ def _tiny_discovery_observation(observation: dict[str, Any]) -> dict[str, Any]:
         "minimal_discovery": True,
         "tiny_discovery": True,
         **pick(observation, ("discovery_targets", "observed_at")),
+        **({"target_inventory": pick(observation.get("target_inventory"), (
+            "status", "complete", "scope_complete", "scope", "reason", "requested_scrape_pools",
+            "omitted_scrape_pools", "response_limited_pools", "omitted_active_targets",
+            "omitted_dropped_targets",
+        ))} if isinstance(observation.get("target_inventory"), dict) else {}),
         **({"pod_inventory": pick(observation.get("pod_inventory"),
                                    ("status", "complete", "has_more", "omitted_pods"))}
            if isinstance(observation.get("pod_inventory"), dict) else {}),

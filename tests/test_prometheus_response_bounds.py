@@ -1,11 +1,13 @@
 import unittest
 from datetime import datetime, timedelta, timezone
+from urllib.parse import parse_qs
 
 from fcapsule.adapters.prometheus_adapter import (
     MAX_PROMETHEUS_DEFAULT_RESPONSE_BYTES,
     MAX_PROMETHEUS_DISCOVERY_RESPONSE_BYTES,
     MAX_PROMETHEUS_QUERY_RESPONSE_BYTES,
     MAX_PROMETHEUS_RANGE_RESPONSE_BYTES,
+    MAX_PROMETHEUS_SCOPED_TARGET_RESPONSE_BYTES,
     MAX_PROMETHEUS_STATUS_RESPONSE_BYTES,
     PrometheusAdapter,
 )
@@ -86,6 +88,61 @@ class PrometheusResponseBoundTests(unittest.TestCase):
         with self.assertRaises(ResponseTooLargeError):
             adapter.active_alerts()
         self.assertEqual(adapter.transport.requests[0][3], MAX_PROMETHEUS_DISCOVERY_RESPONSE_BYTES)
+
+    def test_scoped_target_discovery_uses_server_pool_filter_and_keeps_partial_error_detail(self):
+        first_pool = "serviceMonitor/fcapsule-lab/fcapsule-lab-mysql/0"
+        oversized_pool = "serviceMonitor/fcapsule-lab/other/0"
+
+        def responder(path, method, body, max_bytes):
+            params = {key: values[0] for key, values in
+                      parse_qs(path.split("?", 1)[1]).items()}
+            if params["scrapePool"] == oversized_pool:
+                raise ResponseTooLargeError("over byte limit")
+            return {"status": "success", "data": {"activeTargets": [{
+                "health": "down",
+                "lastError": "server returned HTTP status 404 Not Found",
+                "scrapePool": first_pool,
+                "scrapeUrl": "http://user:password@mysql-exporter:9104/custom/metrics?token=private",
+                "discoveredLabels": {"__metrics_path__": "/metrics"},
+                "labels": {"namespace": "fcapsule-lab", "pod": "mysql-exporter-0",
+                           "service": "mysql-exporter", "job": "mysql-exporter"},
+            }], "droppedTargets": []}}
+
+        adapter = PrometheusAdapter("http://prometheus")
+        transport = RecordingTransport(responder)
+        adapter.transport = transport
+
+        targets = adapter.scrape_targets(
+            "fcapsule-lab", scrape_pools=[first_pool, oversized_pool],
+        )
+
+        self.assertEqual(len(transport.requests), 2)
+        self.assertTrue(all("scrapePool=" in request[0] for request in transport.requests))
+        self.assertTrue(all("state=any" in request[0] for request in transport.requests))
+        self.assertTrue(all(request[3] == MAX_PROMETHEUS_SCOPED_TARGET_RESPONSE_BYTES
+                            for request in transport.requests))
+        target = targets["active"][0]
+        self.assertEqual(target["health"], "down")
+        self.assertEqual(target["last_error"], "server returned HTTP status 404 Not Found")
+        self.assertEqual(target["scrape_pool"], first_pool)
+        self.assertEqual(target["scrape_endpoint"], "mysql-exporter:9104")
+        self.assertEqual(target["scrape_path"], "/custom/metrics")
+        self.assertNotIn("password", repr(target))
+        self.assertNotIn("token", repr(target))
+        self.assertEqual(targets["inventory"]["status"], "partial")
+        self.assertFalse(targets["inventory"]["complete"])
+        self.assertEqual(targets["inventory"]["response_limited_pools"], 1)
+
+    def test_missing_scoped_target_pools_are_unavailable_without_a_global_fetch(self):
+        adapter = PrometheusAdapter("http://prometheus")
+        transport = RecordingTransport(lambda *args: self.fail("must not request the global target list"))
+        adapter.transport = transport
+
+        targets = adapter.scrape_targets("shop", scrape_pools=[])
+
+        self.assertEqual(transport.requests, [])
+        self.assertEqual(targets["inventory"]["status"], "unavailable")
+        self.assertEqual(targets["inventory"]["reason"], "no_relevant_scrape_pools")
 
     def test_oversized_primary_range_is_explicitly_unavailable(self):
         adapter = PrometheusAdapter("http://prometheus")

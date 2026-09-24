@@ -131,6 +131,90 @@ def _selector_observation(labels: dict[str, Any], monitor: dict[str, Any], names
     return evaluated
 
 
+def _scrape_pool_scopes(
+    monitors: list[dict[str, Any]], services: list[dict[str, Any]], pods: list[dict[str, Any]],
+    namespace: str, target_service: str | None, target_workload: str | None,
+    incident_pods: set[str],
+) -> list[str]:
+    """Derive a few incident-relevant Prometheus Operator pool names."""
+    target_pod_names = set(incident_pods)
+    target_pod_names.update(
+        str(pod.get("name")) for pod in pods
+        if pod.get("name") and target_workload and pod.get("workload") == target_workload
+    )
+    target_pods = [pod for pod in pods if str(pod.get("name") or "") in target_pod_names]
+    relevant_services = []
+    for service in services:
+        if str(service.get("namespace") or namespace) != namespace:
+            continue
+        service_name = str(service.get("name") or "")
+        selector = service.get("selector") if isinstance(service.get("selector"), dict) else {}
+        matches_target_workload = bool(selector) and any(
+            isinstance(pod.get("labels"), dict)
+            and all(pod["labels"].get(key) == value for key, value in selector.items())
+            for pod in target_pods
+        )
+        if (target_service and service_name == target_service) or matches_target_workload:
+            relevant_services.append((service, service_name == target_service))
+    relevant_service_selectors = [
+        service.get("selector") for service, _ in relevant_services
+        if isinstance(service.get("selector"), dict) and service.get("selector")
+    ]
+    target_pods_by_name = {str(pod.get("name")): pod for pod in target_pods if pod.get("name")}
+    for pod in pods:
+        labels = pod.get("labels") if isinstance(pod.get("labels"), dict) else {}
+        if str(pod.get("namespace") or namespace) != namespace:
+            continue
+        if any(all(labels.get(key) == value for key, value in selector.items())
+               for selector in relevant_service_selectors):
+            if pod.get("name"):
+                target_pods_by_name[str(pod["name"])] = pod
+    target_pods = list(target_pods_by_name.values())
+
+    candidates: list[tuple[tuple[int, str, str, int], str]] = []
+    for monitor in monitors:
+        kind = monitor.get("kind")
+        monitor_name = str(monitor.get("name") or "")
+        monitor_namespace = str(monitor.get("namespace") or "default")
+        effective_namespaces = monitor.get("effective_namespaces")
+        if not monitor_name or not isinstance(effective_namespaces, list) or namespace not in effective_namespaces:
+            continue
+        namespace_status = (monitor.get("namespace_selector") or {}).get("status", "unknown")
+        endpoints = monitor.get("endpoints") if isinstance(monitor.get("endpoints"), list) else []
+        if not endpoints:
+            continue
+        if kind == "ServiceMonitor":
+            for service, exact_target in relevant_services:
+                evaluation = _selector_observation(
+                    service.get("labels") if isinstance(service.get("labels"), dict) else {},
+                    monitor, namespace_status,
+                )
+                selector_rank = {"matched": 0, "unknown": 1, "not_matched": 2}.get(
+                    evaluation.get("status"), 2,
+                )
+                relevance_rank = 0 if exact_target else 1
+                prefix = f"serviceMonitor/{monitor_namespace}/{monitor_name}/"
+                for index, _ in enumerate(endpoints[:12]):
+                    candidates.append(((relevance_rank, selector_rank, monitor_name, index), prefix + str(index)))
+        elif kind == "PodMonitor":
+            for pod in target_pods:
+                if str(pod.get("namespace") or namespace) != namespace:
+                    continue
+                evaluation = _selector_observation(
+                    pod.get("labels") if isinstance(pod.get("labels"), dict) else {},
+                    monitor, namespace_status,
+                )
+                selector_rank = {"matched": 0, "unknown": 1, "not_matched": 2}.get(
+                    evaluation.get("status"), 2,
+                )
+                workload_rank = 0 if target_workload and pod.get("workload") == target_workload else 1
+                prefix = f"podMonitor/{monitor_namespace}/{monitor_name}/"
+                for index, _ in enumerate(endpoints[:12]):
+                    candidates.append(((2 + workload_rank, selector_rank, monitor_name, index), prefix + str(index)))
+    candidates.sort(key=lambda item: item[0])
+    return list(dict.fromkeys(pool for _, pool in candidates))
+
+
 def _service_monitor_port_checks(monitor: dict[str, Any], service: dict[str, Any]) -> list[dict[str, Any]]:
     """Compare declared ServiceMonitor port names with observed Service ports."""
     endpoints = monitor.get("endpoints") if isinstance(monitor.get("endpoints"), list) else []
@@ -648,11 +732,17 @@ class InvestigationTools:
                 "limitation": "A rule explains when Prometheus detects a condition; it does not establish the underlying cause. Current definitions can differ from incident-time rules.",
             })
         if name == "scrape_discovery":
-            targets = prometheus.scrape_targets(self.namespace, set(self.pods))
             monitors = kubernetes.monitoring_resources({self.namespace})
             services = kubernetes.list_services(self.namespace)
             target_workload = self.discovery_targets.get("target_workload")
             collected_pods = kubernetes.list_pods({self.namespace})
+            scrape_pools = _scrape_pool_scopes(
+                monitors, services, list(collected_pods), self.namespace,
+                self.discovery_targets.get("target_service"), target_workload, set(self.pods),
+            )
+            targets = prometheus.scrape_targets(
+                self.namespace, set(self.pods), scrape_pools=scrape_pools,
+            )
             pod_status = getattr(collected_pods, "status", "observed")
             if pod_status == "observed" and (getattr(collected_pods, "complete", True) is False
                                               or getattr(collected_pods, "has_more", False) is True):
@@ -809,13 +899,18 @@ class InvestigationTools:
                 "discovery_targets": self.discovery_targets,
                 "observed_at": observed_at,
                 "provenance": [
-                    {"source": "Prometheus target API", "observed_at": observed_at},
+                    {"source": "Prometheus target API", "observed_at": observed_at,
+                     "status": targets.get("inventory", {}).get("status", "unknown")},
                     {"source": "Kubernetes monitoring and Service/Pod APIs", "observed_at": observed_at},
                     {"source": "Kubernetes API EndpointSliceList", "observed_at": endpoint_inventory.get("observed_at"),
                      "status": endpoint_inventory["status"]},
                 ],
                 "active_targets": targets["active"],
                 "dropped_targets": targets["dropped"],
+                "target_inventory": targets.get("inventory", {
+                    "status": "unknown", "complete": False, "scope_complete": False,
+                    "scope": "unknown", "reason": "target_inventory_status_unreported",
+                }),
                 "monitor_selection": selections,
                 "pod_inventory": pod_inventory,
                 "endpoint_slice_inventory": {key: endpoint_inventory[key] for key in
@@ -828,7 +923,7 @@ class InvestigationTools:
                     "endpoint_slices": endpoint_slices_by_service.get(str(item.get("name") or ""), [])[:8]}
                     for item in sorted(
                     services, key=lambda item: (item.get("name") != self.discovery_targets.get("target_service"), str(item.get("name") or "")))[:12]],
-                "limitation": "ServiceMonitor selectors apply to Service labels; PodMonitor selectors apply to Pod labels. Supported label expressions are evaluated only for current, bounded candidates in the captured namespace. ServiceMonitor port names are compared with current Service port names; EndpointSlice readiness and Pod health are current snapshots, not incident-time state. EndpointSlice access can be unavailable under RBAC. An unknown selector, Prometheus resource selector, relabeling rule, scrape configuration, or RBAC restriction can prevent a conclusion. A matched selector or ready backend does not prove the target was retained or scraped.",
+                "limitation": "ServiceMonitor selectors apply to Service labels; PodMonitor selectors apply to Pod labels. Supported label expressions are evaluated only for current, bounded candidates in the captured namespace. Prometheus target reads are restricted to a few incident-relevant scrape pools and are not a complete cluster target inventory; a pool read that hits its byte limit remains partial or unavailable, and absence from the scoped view is not proof of absence from Prometheus. Target endpoint host:port and path are retained without URL credentials or query strings. ServiceMonitor port names are compared with current Service port names; EndpointSlice readiness and Pod health are current snapshots, not incident-time state. EndpointSlice access can be unavailable under RBAC. An unknown selector, Prometheus resource selector, relabeling rule, scrape configuration, or RBAC restriction can prevent a conclusion. A matched selector or ready backend does not prove the target was retained or scraped.",
             })
         if name == "workload_state":
             pods = [item for item in kubernetes.list_pods({self.namespace})
