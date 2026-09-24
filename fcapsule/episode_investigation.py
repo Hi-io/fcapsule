@@ -556,12 +556,18 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
         model_checks = state["checks"]
         priority_ids = set(context.get("priority_evidence_ids") or [])
         if preserve_refs is not None:
-            # The consistency reviewer is not allowed to cite a check that the
-            # compactor silently removed. Focus this bounded pass on the facts
-            # the draft actually used, while keeping the incident scope/alerts.
-            cited_source_ids = preserve_refs & source_evidence_ids
+            # The consistency reviewer must see citations from the draft, while
+            # retaining explicitly prioritized additions (including visual/time
+            # anchors) and required completed observations that constrain it.
+            cited_source_ids = (preserve_refs & source_evidence_ids) | (
+                set(context.get("priority_evidence_ids") or []) & source_evidence_ids
+            )
             check_ids = {item.get("id") for item in state["checks"]}
-            cited_check_ids = preserve_refs & check_ids
+            required_check_ids = {
+                item.get("id") for item in state["checks"]
+                if item.get("required_observation") and item.get("status") == "completed"
+            }
+            cited_check_ids = (preserve_refs & check_ids) | required_check_ids
             model_context_source = {
                 **context,
                 "evidence": [item for item in context.get("evidence", [])
