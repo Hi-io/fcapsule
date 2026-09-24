@@ -34,6 +34,101 @@ class ControlPlaneTests(unittest.TestCase):
             self.assertEqual(incident["status"], "firing")
             self.assertIsNone(incident["ended_at"])
 
+    def test_identity_refresh_only_parses_alert_and_optional_configuration(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
+            source = Path(directory) / "source"
+            shutil.copytree(REFERENCE_CASE, source)
+            alert_path = source / "alert.json"
+            alert = json.loads(alert_path.read_text(encoding="utf-8"))
+            if isinstance(alert, list):
+                alert = alert[0]
+            alert["alertname"] = "KubeNodeMemoryPressure"
+            alert.setdefault("labels", {})["pod"] = "worker-0"
+            alert_path.write_text(json.dumps(alert), encoding="utf-8")
+            (source / "kubernetes_config.json").write_text(
+                json.dumps({"items": [{"kind": "PodSpec", "name": "worker-0", "namespace": "default", "node": "node-a"}]}),
+                encoding="utf-8",
+            )
+            plane = ControlPlane(Path(directory) / "state")
+            incident = plane.ingest_case(source, "checkout", "Checkout")
+            plane.store.update_incident_identity(incident["incident_id"], "application", "stale", "stale")
+            (source / "prometheus_metrics.json").write_text("{", encoding="utf-8")
+            (source / "opensearch_logs.json").write_text("{", encoding="utf-8")
+
+            from fcapsule.io.case_loader import read_case_json as bounded_reader
+
+            parsed_paths = []
+
+            def record_identity_read(path, max_bytes=None):
+                parsed_paths.append(Path(path).name)
+                if max_bytes is None:
+                    return bounded_reader(path)
+                return bounded_reader(path, max_bytes)
+
+            with (
+                patch("fcapsule.control_plane.load_case", side_effect=AssertionError("Startup must not reload a case")),
+                patch("fcapsule.control_plane.read_case_json", side_effect=record_identity_read),
+            ):
+                plane._refresh_existing_identities()
+
+            refreshed = plane.store.get_incident(incident["incident_id"])
+            self.assertEqual(parsed_paths, ["alert.json", "kubernetes_config.json"])
+            self.assertEqual((refreshed["resource_kind"], refreshed["resource_name"]), ("node", "node-a"))
+
+    def test_identity_refresh_skips_corrupt_alert_or_configuration(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
+            source = Path(directory) / "source"
+            shutil.copytree(REFERENCE_CASE, source)
+            plane = ControlPlane(Path(directory) / "state")
+            incident = plane.ingest_case(source, "checkout", "Checkout")
+            plane.store.update_incident_identity(incident["incident_id"], "application", "stale", "stale")
+            alert_path = source / "alert.json"
+            original_alert = alert_path.read_text(encoding="utf-8")
+
+            alert_path.write_text("{", encoding="utf-8")
+            plane._refresh_existing_identities()
+            self.assertEqual(plane.store.get_incident(incident["incident_id"])["resource_name"], "stale")
+
+            alert_path.write_text(original_alert, encoding="utf-8")
+            (source / "kubernetes_config.json").write_text('{"items": "invalid"}', encoding="utf-8")
+            plane._refresh_existing_identities()
+            self.assertEqual(plane.store.get_incident(incident["incident_id"])["resource_name"], "stale")
+
+    def test_capsule_report_reads_only_bounded_metrics_after_pipeline(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
+            source = Path(directory) / "source"
+            shutil.copytree(REFERENCE_CASE, source)
+            plane = ControlPlane(Path(directory) / "state")
+            incident = plane.ingest_case(source, "checkout", "Checkout")
+
+            from fcapsule.io.case_loader import read_case_json as bounded_reader
+
+            parsed_paths = []
+
+            def record_metrics_read(path, max_bytes=None):
+                parsed_paths.append(Path(path).name)
+                if max_bytes is None:
+                    return bounded_reader(path)
+                return bounded_reader(path, max_bytes)
+
+            with (
+                patch("fcapsule.control_plane.load_case", side_effect=AssertionError("Report must not reload a case")),
+                patch("fcapsule.control_plane.read_case_json", side_effect=record_metrics_read),
+            ):
+                plane._build_capsule(incident["incident_id"])
+            self.assertEqual(parsed_paths, ["prometheus_metrics.json"])
+
+            parsed_paths.clear()
+            capsule_record = plane.store.get_capsule_for_incident(incident["incident_id"])
+            (Path(capsule_record["output_dir"]) / "incident_report.json").unlink()
+            with (
+                patch("fcapsule.control_plane.load_case", side_effect=AssertionError("Report fallback must not reload a case")),
+                patch("fcapsule.control_plane.read_case_json", side_effect=record_metrics_read),
+            ):
+                rebuilt = plane.incident_report_payload(incident["incident_id"])
+            self.assertEqual(parsed_paths, ["prometheus_metrics.json"])
+            self.assertEqual(rebuilt["report"]["report_version"], "1.3")
+
     def test_retained_report_does_not_reopen_expired_source(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
             source = Path(directory) / "source"

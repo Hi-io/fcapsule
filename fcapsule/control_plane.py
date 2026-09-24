@@ -17,7 +17,14 @@ from fcapsule.env import load_env_file, write_env_value
 from fcapsule.evidence_service import EvidenceService
 from fcapsule.incident_report import build_incident_report
 from fcapsule.io.archive_writer import create_archive
-from fcapsule.io.case_loader import load_case
+from fcapsule.io.case_loader import (
+    REQUIRED_FILES,
+    _validate_alerts,
+    _validate_configurations,
+    _validate_metrics,
+    load_case,
+    read_case_json,
+)
 from fcapsule.io.output_writer import write_json
 from fcapsule.live_sources import LiveSourceCoordinator
 from fcapsule.investigation_service import InvestigationService
@@ -169,9 +176,18 @@ class ControlPlane:
 
         for incident in self.store.list_incidents(limit=10000) + self.store.list_incidents(limit=10000, archived=True):
             try:
-                bundle = load_case(incident["case_dir"])
-                if bundle.alerts:
-                    identity = _resource_identity(bundle.alerts[0], str(incident["app_id"]), bundle.configurations)
+                case_dir = Path(incident["case_dir"])
+                if not case_dir.is_dir() or any(not (case_dir / name).is_file() for name in REQUIRED_FILES):
+                    continue
+                alerts = _validate_alerts(read_case_json(case_dir / "alert.json"))
+                configurations_path = case_dir / "kubernetes_config.json"
+                configurations = (
+                    _validate_configurations(read_case_json(configurations_path))
+                    if configurations_path.is_file()
+                    else []
+                )
+                if alerts:
+                    identity = _resource_identity(alerts[0], str(incident["app_id"]), configurations)
                     self.store.update_incident_identity(
                         str(incident["incident_id"]), identity["kind"], identity["name"], identity["alert_identity"]
                     )
@@ -738,7 +754,7 @@ class ControlPlane:
         capsule_id = f"capsule-{incident_id}"
         capsule_path = output_dir / "capsule.json"
         capsule_data = json.loads(capsule_path.read_text(encoding="utf-8"))
-        source_metrics = load_case(incident["case_dir"]).metrics
+        source_metrics = _validate_metrics(read_case_json(Path(incident["case_dir"]) / "prometheus_metrics.json"))
         write_json(output_dir / "incident_report.json", build_incident_report(capsule_data, incident, source_metrics))
         archive = create_archive(output_dir, incident_id)
         capsule = self.store.record_capsule(
@@ -894,7 +910,11 @@ class ControlPlane:
             # Retained reports must remain readable after source telemetry expires.
             capsule = json.loads(capsule_path.read_text(encoding="utf-8"))
             try:
-                source_metrics = load_case(incident["case_dir"]).metrics if Path(incident["case_dir"]).is_dir() else None
+                source_metrics = (
+                    _validate_metrics(read_case_json(Path(incident["case_dir"]) / "prometheus_metrics.json"))
+                    if Path(incident["case_dir"]).is_dir()
+                    else None
+                )
             except FileNotFoundError:
                 source_metrics = None
             report = build_incident_report(capsule, incident, source_metrics)
