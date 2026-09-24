@@ -18,7 +18,7 @@ The architecture deliberately separates four responsibilities:
 | `fcapsule/io/case_loader.py` | validate normalized cases |
 | `fcapsule/processing/` | entity alignment, anonymization, log templates, PM anomalies, FM timeline |
 | `fcapsule/attention/` | transparent scoring and domain-balanced selection |
-| `fcapsule/reasoning/` | deterministic hypotheses, verification, DeepSeek comparison |
+| `fcapsule/reasoning/` | deterministic hypotheses, verification and offline model comparison |
 | `fcapsule/episode_investigation.py` | bounded model decision loop, citation/schema validation and usage |
 | `fcapsule/investigation_tools.py` | scoped read-only checks and joint evidence context |
 | `fcapsule/investigation_service.py` | episode job coalescing, persistence and deletion lifecycle |

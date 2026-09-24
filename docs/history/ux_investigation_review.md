@@ -1,5 +1,7 @@
 # Investigation Experience Review
 
+> Historical UI review. Use the [current Operations guide](../operations.md) for today's workflow.
+
 Review snapshot: 20 September 2026. Later storage/export fixes and documentation reconciliation are recorded in [product_audit.md](product_audit.md). Historical runs below are not repeated automatically by subsequent visual changes.
 
 ## Goal

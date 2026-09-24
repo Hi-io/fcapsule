@@ -1,5 +1,7 @@
 # Product Audit
 
+> Historical audit snapshot. Test counts and deployment observations below are not current release claims.
+
 Review: 20-21 September 2026. Scope: current deployed Operations, reports, Targets, Settings, artifact lifecycle and repository documentation. This is an implementation audit, not independent user research or a production security certification.
 
 ## Assessment
@@ -34,7 +36,7 @@ The capture mark uses the bundled Lucide scan-line icon, not a commissioned or e
 - Current-format reports remain readable after source capture disappears. Rebuilding without the original metrics cannot recover raw series that were not retained.
 - UI-saved keys exist in plaintext in the ignored state-directory `.env`; they are not in SQLite, settings responses or archives.
 
-These boundaries are documented in [data privacy](data_privacy.md), the [data contract](../DATA_SCHEMA.md) and the [operating guide](operations.md). A shorter staging TTL and production access controls remain explicit roadmap items, not implied features.
+These boundaries are documented in [data privacy](../data_privacy.md), the [data contract](../../DATA_SCHEMA.md) and the [operating guide](../operations.md). A shorter staging TTL and production access controls remain explicit roadmap items, not implied features.
 
 ## Evidence and Validation
 

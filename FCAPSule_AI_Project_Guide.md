@@ -10,7 +10,7 @@
 
 ## Purpose
 
-Preserve useful incident context before source telemetry expires, and help an SRE or application engineer decide what to investigate next. A compact capsule should explain what was observed, why it matters, what could explain it and what remains uncertain.
+Turn an alert into an evidence-backed investigation that can be remembered. FCAPSule should help a monitoring team or application engineer decide what to investigate next, preserve the useful observations before source telemetry expires, and make them available to an eligible future investigation. A compact capsule should explain what was observed, why it matters, what could explain it and what remains uncertain.
 
 FCAPSule complements observability infrastructure. It is not a replacement telemetry warehouse, a guaranteed root-cause detector, an autonomous remediation agent or a model-comparison dashboard.
 
@@ -23,7 +23,7 @@ FCAPSule complements observability infrastructure. It is not a replacement telem
 5. The deterministic pipeline retains evidence and builds an immediately usable report.
 6. With a provider key, one background episode investigator preserves workload state, selects bounded read-only checks and produces a cited assessment with competing explanations and alert relationships.
 7. Open the episode in Operations, inspect Overview, then follow citations into Evidence.
-8. Use Timeline for ordering, Export for handoff, and archive to clear the working queue.
+8. Use Timeline for ordering, Export for handoff, Patterns for recurrence context, and archive to clear the working queue. An eligible earlier capsule may support a later investigation without treating its old assessment as fact.
 9. Retention removes old incidents and their managed files, including archived incidents.
 
 The CLI remains usable independently. External normalized cases may be ingested manually. Simulation belongs to a separate project; the product neither deploys workloads nor injects failures.
@@ -40,6 +40,8 @@ The CLI remains usable independently. External normalized cases may be ingested 
 
 These are operational data domains, not audio/image/text media modalities. A source connection, recently observed data and selected incident evidence are different states. An empty domain must remain explicit rather than be filled with invented values.
 
+The pretrained model roles are distinct: the core LLM investigates selected operational evidence; optional vision and speech models interpret operator-provided screenshots and voice notes. Media capabilities must be validated and enabled separately. Deterministic log grouping or metric analysis is not counted as another pretrained model.
+
 ## Screens and Priorities
 
 ### Operations
@@ -54,9 +56,13 @@ Export makes artifact size, retention eligibility and server-side location inspe
 
 Connection health, discovery counts and namespace-grouped coverage are the primary information. Source configuration is expandable. Background refresh and connection tests must not erase unsaved input. Tests use saved connection settings; save edited values before testing them.
 
+### Patterns
+
+Patterns exposes retained recurrence and potential shared conditions without asserting a common cause. Counts and intervals describe observed history; each episode keeps its own report and evidence. Similarity does not itself prove the same failure mechanism.
+
 ### Settings
 
-Incident retention and automatic AI investigation configuration share one page. Retention defaults to 30 days from capture and includes archived incidents. Model choice, completion budget per call and replacement key are editable. Source-system expiry is not inferred from this policy. No additional screen is required for the current workflow.
+Incident retention and automatic AI investigation configuration share one page. Retention defaults to 30 days from capture and includes archived incidents. Provider/model choice, completion budget per call and replacement key are editable; optional media specialists have separate capability gates. Source-system expiry is not inferred from this policy. No additional screen is required for the current workflow.
 
 ## Evidence and Reasoning Contract
 

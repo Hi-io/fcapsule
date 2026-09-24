@@ -1,5 +1,7 @@
 # Product Review: Operator-First FCAPSule
 
+> Historical product review. Its manual briefing and early Lab workflow are superseded by the [current product overview](../../README.md).
+
 ## Decision
 
 FCAPSule is an incident-evidence product, not an AI benchmark dashboard. Its primary

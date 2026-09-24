@@ -61,7 +61,7 @@ described in [AI techniques](docs/ai_investigation_techniques.md). Remaining wor
 
 ## 6. Evaluation
 
-- multiple complex synthetic scenarios;
+- qualification of the remaining complex Lab scenarios beyond the three current demo cases;
 - anonymized real incident windows where approval exists;
 - method and model ablations;
 - domain-expert usefulness review;

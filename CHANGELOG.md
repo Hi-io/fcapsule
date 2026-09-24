@@ -4,6 +4,9 @@
 
 ### Changed
 
+- Reframed the public documentation around AI investigation and retained incident
+  memory, separated current guides from dated design/evaluation records, and
+  corrected current model, retention and demo-status boundaries.
 - Presented cited image/audio observations with observation time and an original-file
   link; full extraction stays expandable. Removed empty provenance labels and
   distinguished metric and media citations visually.

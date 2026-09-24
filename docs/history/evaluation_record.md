@@ -1,5 +1,7 @@
 # Evaluation Record and Review Form
 
+> Historical experiment record. These measurements do not establish current model accuracy or production performance.
+
 > **Historical record:** These are previously recorded checkout/inventory experiment measurements, retained for research continuity. They were not rerun or independently revalidated during the September 2026 UI/documentation audit. They are not current-cluster throughput measurements, a production accuracy guarantee or a general model ranking. Use the evaluation plan for new controlled runs; record ties and regressions as well as improvements.
 
 ## Verified Complex Reference Run

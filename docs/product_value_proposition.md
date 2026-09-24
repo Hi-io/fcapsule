@@ -1,16 +1,16 @@
-# Observability With Memory.
+# Observability With Memory
 
-**FCAPSule brings AI investigation and incident memory to your observability stack. It connects alerts, logs, metrics and workload configuration so your engineers can investigate with context, follow the evidence and draw on what happened before.**
+**FCAPSule gives an existing observability stack an AI investigator with incident memory.** It connects alerts, logs, metrics and workload configuration so engineers can follow evidence across systems and draw on what happened before.
 
 When an incident starts, the questions arrive together: What is affected? What could explain it? What should we check next? Have we seen this before? FCAPSule gives an AI investigator access to selected telemetry and bounded diagnostic tools to help answer those questions. It preserves the evidence and the investigation in a capsule that the model can remember and consult when a related incident returns.
 
-Your existing tools supply the signals. FCAPSule gives the investigation continuity: across data sources, across responders and across recurring incidents.
+Your existing tools supply the signals. FCAPSule gives the investigation continuity: across data sources, across responders and across recurring incidents. That is the product shift: an alert is no longer just an entry point into several dashboards; it becomes a reviewable, retained body of operational knowledge.
 
 **Investigate with context. Respond with evidence. Remember what happened.**
 
-## Give your SRE an investigator that remembers
+## Give your monitoring team an investigator that remembers
 
-An engineer responding to an alert needs to make decisions while the environment is changing. A workload may restart, a configuration may change, and the observation that explains the problem may be spread across several tools.
+An engineer responding to an alert needs to make decisions while the environment is changing. A workload may restart, a configuration may change, and the observation that explains the problem may be spread across several tools. This is especially consequential for monitoring teams that can access observability systems but do not own the applications they watch.
 
 FCAPSule connects Prometheus alerts and metrics, OpenSearch logs and supported Kubernetes workload configuration in an incident workspace. Its AI can select a diagnostic check, inspect the returned observations, compare possible explanations and recommend a next step. The engineer can see what it checked and open the evidence behind the assessment.
 
@@ -132,41 +132,13 @@ FCAPSule brings AI orchestration, observations from several telemetry sources, o
 
 The product's value is especially clear in environments with recurring failures, changing workloads and high telemetry volume. Engineers can consult an investigation that already contains selected context, inspect its supporting evidence and contribute what the automated sources missed.
 
-**FCAPSule strengthens observability by giving the investigation a memory.** As an open-source project, it also lets teams inspect how evidence is selected, how diagnostic access is bounded and how retained observations reach the model. The investigation workflow itself is open to review.
+**FCAPSule strengthens observability by giving the investigation a memory.** As an open-source project, it also lets teams inspect how evidence is selected, how diagnostic access is bounded and how retained observations reach the model. This is a distinctive combination, not a claim that no other product has related capabilities.
 
 ## The product pitch
 
-**FCAPSule gives your observability stack an AI investigator that remembers. It connects alerts, logs, metrics and configuration, investigates possible causes, and preserves the evidence in incident capsules. When a related problem returns, the model can draw on what happened before, even after the original telemetry expires. Your engineers get context they can inspect, a next step they can evaluate and an investigation that carries forward.**
+**FCAPSule turns alerts into investigations that can be revisited. Its AI follows selected evidence across logs, metrics and configuration, asks bounded diagnostic questions and saves what it learned in an incident capsule. When a related problem returns, the investigator can remember the earlier observations, even if the original source window has expired. The engineer gets an explanation to test, a next step to take and a record that remains inspectable.**
 
 ---
-
-## Recommended next step: close the incident's learning loop
-
-The following are product proposals, not claims about features already delivered. Together, they would strengthen the promise that experience improves the next investigation. They can build on the existing capsules, checks, assessments and historical retrieval without introducing another telemetry platform.
-
-### 1. Remember the confirmed outcome
-
-Add a small resolution action where an engineer can record the confirmed cause, the action taken and whether recovery was observed. Allow an explicit unresolved outcome and link the confirmation to supporting evidence where available.
-
-Future investigations could then distinguish an old hypothesis from an operator-confirmed result. This would make the model's memory more useful: it could recall which explanation was validated and what restored service, while checking whether the new evidence supports the same conclusion.
-
-Keep this interaction brief and optional. A closed alert is not proof that the diagnosis or remediation was correct. Confirmations need an author, timestamp, provenance and a way to correct them.
-
-### 2. Explain what is different this time
-
-Use comparable facts from the current and earlier capsules to produce a compact comparison: what matches, what changed and why the difference might matter. Useful examples include changed resource limits, a different termination reason, a new configuration value or a changed log failure signature.
-
-Show the most relevant supported difference beside the assessment and make the full comparison expandable. Missing observations must remain unknown; a value captured after an incident cannot establish what was configured before it. A difference identifies a diagnostic lead, not a proven cause.
-
-This builds directly on existing historical retrieval. Broader recurrence matching across replacement pods would require a separate, validated workload-identity improvement.
-
-### 3. Learn which checks help the engineer
-
-Associate completed checks with verified outcomes and lightweight operator feedback. Use that history to help prioritize available diagnostic checks in comparable future incidents, with the model still evaluating the current evidence.
-
-The benefit to demonstrate would be earlier discovery of useful evidence with fewer unnecessary checks and lower model usage. Success should be measured on held-out incidents using diagnostic usefulness, unsupported-claim rate, source queries, tokens and time to an actionable finding. Frequently selected checks should not automatically count as successful checks.
-
-These capabilities would support a stronger future claim: **FCAPSule remembers what was confirmed, shows what changed and uses that experience to guide the next investigation.** That claim should follow implementation and evaluation. The current product already supplies the retained evidence and investigation records needed to begin testing it.
 
 ## Further reading
 

@@ -1,5 +1,7 @@
 # Live Integration Validation
 
+> Historical controlled run. Use the [current operating guide](../operations.md) for live procedures.
+
 ## Scope
 
 This record describes one controlled validation against the local Kubernetes
@@ -105,6 +107,6 @@ from FCAPSule. Always restore the Service label after the run. Validate recovery
 the alert state and an `up` query rather than assuming that one particular Prometheus
 target-list representation is complete.
 
-See [AI investigation techniques](ai_investigation_techniques.md) for the bounded
-agent design and [multimodal evidence](multimodal_evidence.md) for the optional
+See [AI investigation techniques](../ai_investigation_techniques.md) for the bounded
+agent design and [multimodal evidence](../multimodal_evidence.md) for the optional
 operator-supplied evidence workflow.

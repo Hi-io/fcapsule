@@ -17,7 +17,7 @@ data shapes:
 
 | Role | Default model | Data it receives | Operator value |
 |---|---|---|---|
-| Episode investigator | configured DeepSeek-compatible model | selected text, structured alerts, configuration, and bounded metric/log summaries | asks a discriminating read-only check and returns a cited incident assessment |
+| Episode investigator | configured DeepSeek or OpenRouter core model | selected text, structured alerts, configuration, and bounded metric/log summaries | asks a discriminating read-only check and returns a cited incident assessment |
 | Visual specialist | `qwen/qwen3-vl-30b-a3b-instruct` through OpenRouter | a manually supplied PNG, JPEG, or WebP image | extracts visible operational observations, labels, values, and uncertainty from a screenshot |
 | Audio specialist | `qwen/qwen3-asr-0.6b` through OpenRouter | a manually supplied short audio recording | produces a transcript that can be considered with retained episode evidence |
 
@@ -73,7 +73,7 @@ discriminating observation first; saving a long excerpt does not send it wholesa
 
 Media upload is unavailable unless all of the following are true:
 
-- the core DeepSeek-compatible investigator has accepted a bounded JSON canary;
+- the selected core investigator has accepted a bounded JSON canary;
 - the selected vision or audio specialist has accepted its own minimal canary;
 - the relevant local API key is present; and
 - the type matches a supported MIME type and size limit.

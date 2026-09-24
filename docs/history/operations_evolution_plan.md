@@ -1,9 +1,11 @@
 # Operations Evolution Plan
 
+> Historical design snapshot. Use the [current Operations guide](../operations.md) for the live interface.
+
 This is a historical design record. Its proposed triage strip was later removed
 from the operator interface after usability review; the queue now leads
 Operations, and potential shared conditions live in Patterns. See
-[Operations Guide](operations.md) for current behavior.
+[Operations Guide](../operations.md) for current behavior.
 
 ## Goal
 

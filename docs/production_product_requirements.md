@@ -57,9 +57,9 @@ An alert is a signal, not automatically a separate operator task. Pending rules 
 The following information must be accessible without a wall of text. The implementation uses Overview (scope, assessment and material impact), Investigation (checks, alternative explanations and history), Evidence (domain disclosures) and Timeline, rather than displaying every section simultaneously:
 
 1. **Incident status and impact:** severity, service, environment, start time, user-facing symptom, and material impact metrics.
-2. **Likely failure path:** evidence-grounded, probabilistic hypothesis with explicit confidence and uncertainty.
+2. **Likely failure path:** evidence-grounded hypothesis with explicit uncertainty; do not show a numerical confidence unless it has been calibrated.
 3. **What changed:** ordered FM alerts, key PM anomalies, and relevant dependency/topology context.
-4. **Do next:** concrete checks and mitigations. Trace or source-data actions must be marked urgent when their source retention window is short.
+4. **Do next:** concrete checks and conditional mitigations. Mark source-data access as urgent only when an actual retention window is known; the live trace backend is not connected today.
 5. **Evidence available:** domain coverage, source references, and the boundary between retained derived evidence and source-only raw telemetry.
 6. **Supporting evidence:** representative logs, metric anomalies, and evidence identifiers for auditability.
 7. **Engineering diagnostics:** collapsed by default; contains compression, preservation, grounding, runtime, and optional model-evaluation metadata.

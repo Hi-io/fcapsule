@@ -2,21 +2,15 @@
 
 ## Evaluation Question
 
-This is an offline research/regression protocol, not the operator UI contract. Historical numbers live in `docs/evaluation_record.md`; current UI checks live in `docs/product_audit.md`.
+This is an offline research/regression protocol, not the operator UI contract. Historical numbers and dated UI checks live in `docs/history/`; current product behavior is described in `docs/operations.md`.
 
-Can FCAPSule reduce a large cross-domain incident window while preserving representative diagnostic signal, grounding every investigation claim, and lowering retained size and model context?
+Can FCAPSule turn noisy cross-domain telemetry into a useful, evidence-backed investigation, retain enough context for a later recurrence, and keep source queries, storage and model usage bounded? Reduction is valuable only when the responder still gets a better diagnostic decision.
 
-## Reference Scenario
+## Current Demonstration Set
 
-The checkout/inventory scenario is the primary reproducible regression case. It must preserve:
+The separate [FCAPSule Lab](https://github.com/Hi-io/fcapsule-lab) currently qualifies one case per core evidence domain: `poison-job` for logs, `cpu-saturation` for performance, and `response-schema-skew` for configuration. Each has a fault/recovery record and a reviewed investigation that goes beyond restating the alert. The configuration case needed an explicitly incident-pinned reassessment after a later related alert changed episode primacy. See the Lab's [scenario validation](https://github.com/Hi-io/fcapsule-lab/blob/main/docs/SCENARIO_VALIDATION.md) for the exact caveats.
 
-- retry-amplification, pool-saturation, and error-budget FM events;
-- retry/breaker, pool exhaustion, and lock/deadline log patterns;
-- error, latency, retry, pool, and telemetry-health PM groups;
-- topology/configuration context;
-- verified on-demand trace availability and zero retained raw spans.
-
-The expected chain is an investigation path, not a root-cause label.
+The remaining catalog is a development and regression backlog, not a set of claimed AI successes. The older checkout/inventory and discovery runs remain in [historical records](docs/history/README.md). Do not mix their source revisions, budgets or scores with the current demo set.
 
 ## Objective Metrics
 
@@ -27,14 +21,14 @@ The expected chain is an investigation path, not a root-cause label.
 | Token reduction | `1 - estimated capsule tokens / estimated raw tokens` |
 | Signal preservation | retained representative signal groups / identified groups |
 | PM preservation | retained important PM groups / identified PM groups |
-| Grounding | valid cited evidence IDs / all cited IDs |
+| Reference validity | valid cited evidence IDs / all cited IDs |
 | Retention completeness | required capsule sections present / required sections |
 | Runtime | wall-clock pipeline duration |
 | Storage reduction | retained capsule bytes compared with observed raw bytes |
 
 Important signals are representative groups, not every correlated series. Counting every derivative metric as independently important would reward redundancy and conflict with the attention objective.
 
-The metric named grounding measures valid references, not factual entailment or causal accuracy. Reduction measures capsule content, not the total disk footprint of staged live inputs. Model comparisons must retain the same preserved input and fixed rubric, report ties/regressions, and avoid tuning a scenario after observing a desired winner. A sequential live investigation can still collect different current source observations; evaluation records must store whether bounded tool-observation fingerprints match and describe a mismatch as environmental context, not model superiority. Human usefulness review is separate from citation validity.
+Reference validity is not factual entailment or causal accuracy. Reduction measures capsule content, not the total disk footprint of staged live inputs. Model comparisons must retain the same preserved input and fixed rubric, report ties/regressions, and avoid tuning a scenario after observing a desired winner. A sequential live investigation can still collect different current source observations; evaluation records must store whether bounded tool-observation fingerprints match and describe a mismatch as environmental context, not model superiority. Human usefulness review is separate from citation validity.
 
 ## Baselines
 
@@ -69,22 +63,18 @@ A model result is not a product acceptance gate. Differences between Flash and P
 
 Stored responses can be evaluated again after a rubric revision with `fcapsule rescore-llms`. Re-scoring does not call the provider and records the rubric version.
 
-## Acceptance Thresholds
+## Qualification Gates
 
-For the reference scenario:
+For each scenario proposed as a demo, record the workload/source revision and require:
 
-- all three FM alerts fire;
-- at least 100 logs and 18 PM series are collected in the reduced test configuration;
-- raw spans retained equals zero;
-- log reduction is at least 90%;
-- representative signal preservation is at least 90%;
-- citation grounding is 100%;
-- retention completeness is 100%;
-- the archive contains no raw telemetry;
-- the Operations and AI settings HTTP routes respond;
-- an externally exported normalized case can be ingested and processed;
-- application, incident, and capsule records persist in SQLite;
-- the automated suite passes.
+- a healthy baseline, one owned intervention, the expected firing alert and verified recovery;
+- the matching incident in the assessment context, with no unacknowledged episode contamination;
+- a completed investigation that identifies a mechanism or a justified uncertainty beyond the alert's wording;
+- cited observations that actually support the key claims, plus a non-redundant next check and a named evidence gap;
+- retained report and capsule access after capture, with the available domains and source failures shown honestly;
+- measured prompt/response tokens, latency, source volume and capsule size, without interpreting reduction alone as diagnostic success.
+
+The independent scenario oracle stays in the Lab. A `ready` response, valid citations or a high automatic rubric score cannot replace operator review. The ZIP must exclude staged raw input files and raw trace spans; selected evidence can still include sensitive log examples or metric values.
 
 ## Human Review
 

@@ -8,16 +8,16 @@ The reference implementation uses `argparse`, the standard library HTTP server, 
 
 SQLite is sufficient for one process and makes multi-application metadata durable. Observability sources remain authoritative. Bounded live inputs are currently staged on the state volume until incident cleanup; derived-only ZIP exports must not be confused with a raw-free volume. A shorter staging TTL is future work.
 
-## Three Views, One Control Plane
+## Four Views, One Control Plane
 
 Operations is the product surface. The source/test harness is now the separate FCAPSule
 Lab project, which exports the same normalized incident contract used by live-source
-adapters. Targets configures production data sources and shows current workload coverage; Settings combines retention policy with optional cited reasoning. Keeping the contract shared while keeping runtime ownership
+adapters. Targets configures data sources and shows current workload coverage; Patterns exposes retained recurrence without merging incidents; Settings combines retention policy with model configuration. Keeping the contract shared while keeping runtime ownership
 separate prevents the product from becoming a simulator or container controller.
 
-## Deterministic Core
+## Deterministic Capture, AI Investigation
 
-External model availability and privacy approval cannot be assumed. Evidence selection, baseline hypotheses, and citation verification therefore work without credentials. Pretrained models are an optional reasoning layer over the same selected evidence.
+External model availability and privacy approval cannot be assumed. Evidence selection, the report and structural citation verification therefore work without credentials. A configured pretrained model adds bounded, read-only investigation and a cited assessment; optional vision and speech specialists process only operator-supplied media. The AI is central to the product's investigative value, but its absence must not erase captured evidence.
 
 ## Episodes Above Alert Signals
 

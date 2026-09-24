@@ -1,5 +1,7 @@
 # Visual Design Review
 
+> Historical visual review. Screenshots and test counts below describe an earlier iteration.
+
 Review snapshot: 20 September 2026. The follow-up brand, export and documentation audit is recorded in [product_audit.md](product_audit.md). Test counts below describe that earlier pass.
 
 ## Scope

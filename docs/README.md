@@ -1,36 +1,32 @@
-# Documentation
+# FCAPSule Documentation
 
-## Operate the Current Product
+Start with the [product overview](../README.md) or [Observability With Memory](product_value_proposition.md). The first explains what is running today; the second explains why the AI investigator, retained capsules and recurrence memory matter.
 
-- [Quickstart and scope](../README.md)
-- [Operations, Targets, Patterns and Settings](operations.md)
-- [Kubernetes installation and development workflow](kubernetes_deployment.md)
-- [HTTPS and microphone access](https_access.md)
-- [Privacy, credentials, capture storage and retention](data_privacy.md)
-- [Current product requirements](../FCAPSule_AI_Project_Guide.md)
+## Operate
 
-## Understand the Implementation
+| Need | Guide |
+| --- | --- |
+| Use the incident queue, reports, Patterns, Targets and Settings | [Operations](operations.md) |
+| Install and iterate on the single-replica Kubernetes service | [Kubernetes deployment](kubernetes_deployment.md) |
+| Configure providers and understand model-call limits | [LLM provider operations](llm_provider_operations.md) |
+| Use a microphone from a trusted browser context | [HTTPS and microphone access](https_access.md) |
+| Understand capture storage, masking, credentials and deletion | [Privacy and retention](data_privacy.md) |
 
-- [Architecture](architecture.md) and [engineering design](../PROJECT_DESIGN.md)
-- [AI investigation techniques and limits](ai_investigation_techniques.md)
-- [Historical capsule retrieval and retained-only reasoning](historical_capsule_retrieval.md)
-- [Implemented Operations evolution](operations_evolution_plan.md)
-- [Data and artifact contracts](../DATA_SCHEMA.md)
-- [Design decisions](design_decisions.md)
-- [External workload boundary](external_workload_boundary.md)
-- [Implementation direction and remaining changes](../FCAPSule_AI_Implementation_Proposal.md)
-- [Roadmap](../ROADMAP.md) and [changelog](../CHANGELOG.md)
+The [separate FCAPSule Lab](https://github.com/Hi-io/fcapsule-lab) generates test workloads. It is not installed or required by FCAPSule.
 
-## Product and Evaluation Context
+## Understand the System
 
-- [Product capabilities and value proposition](product_value_proposition.md): user-facing explanation of the current product's distinctive value and boundaries.
-- [Stable concept and original research ambitions](../FCAPSule_AI_Concept.md): not a list of shipped model integrations.
-- [Operator-first acceptance principles](production_product_requirements.md)
-- [Current product audit](product_audit.md)
-- [Investigation UX review](ux_investigation_review.md) and [visual design review](visual_design_review.md): dated implementation reviews, not perpetual test certifications.
-- [Product evolution review](product_review.md): includes explicitly historical scenarios.
-- [Evaluation protocol](../EVALUATION_PLAN.md), [model comparison](llm_comparison.md) and [reasoning contracts](../PROMPTS.md)
-- [Historical evaluation record](evaluation_record.md): previously recorded measurements, not current production performance or a general model ranking.
-- [Live integration validation](live_validation.md): one controlled Kubernetes discovery-failure run with bounded-token results and recovery checks.
+- [Architecture](architecture.md) and [engineering design](../PROJECT_DESIGN.md): runtime components, source ownership and deployment shape.
+- [AI investigation techniques](ai_investigation_techniques.md): the actual read-only tools, evidence selection, model calls, grounding checks and limitations.
+- [Historical capsule retrieval](historical_capsule_retrieval.md): how retained evidence can inform a later incident without treating an old model answer as fact.
+- [Optional image and audio evidence](multimodal_evidence.md): capability gates, provenance and reviewed reassessment.
+- [Data and artifact schema](../DATA_SCHEMA.md), [design decisions](design_decisions.md) and [external workload boundary](external_workload_boundary.md).
+- [Current product guide](../FCAPSule_AI_Project_Guide.md) and [roadmap](../ROADMAP.md).
 
-For current behavior, use operating guides and source/tests first. Historical results and aspirational research requirements do not override the implemented product contract.
+## Research and History
+
+The [concept](../FCAPSule_AI_Concept.md) describes the durable problem and academic framing. The [implementation proposal](../FCAPSule_AI_Implementation_Proposal.md) separates shipped choices from future hardening. The [evaluation plan](../EVALUATION_PLAN.md), [model comparison protocol](llm_comparison.md) and [prompt contract](../PROMPTS.md) explain how to test the approach without presenting benchmark scores as operator facts.
+
+Dated design reviews, early experiments and validation snapshots live in the [history archive](history/README.md). They document how the product changed; they are not instructions for the current UI or guarantees about current cluster performance.
+
+**Documentation rule:** a live capability is described by the operating guides and code/tests. A proposed capability belongs in the roadmap. A dated result stays labeled with its source revision and conditions.

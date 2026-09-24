@@ -1,109 +1,36 @@
-# FCAPSule Implementation Proposal
+# FCAPSule: Implementation and Next Decisions
 
-**Status:** Implemented reference architecture and proposed hardening, September 2026.
-**Stable concept:** `FCAPSule_AI_Concept.md`  
-**Implemented design:** `PROJECT_DESIGN.md`
+**Status:** current reference design plus explicitly proposed changes. The [concept](FCAPSule_AI_Concept.md) describes the stable goal; [PROJECT_DESIGN](PROJECT_DESIGN.md), [architecture](docs/architecture.md) and [AI techniques](docs/ai_investigation_techniques.md) are the detailed implementation references. The [earlier proposal](docs/history/initial_implementation_proposal.md) is preserved for the project history.
 
-## Objective
+## Implemented Reference Path
 
-Implement FCAPSule as a source-neutral telemetry attention service with:
+1. A firing Prometheus alert or an imported normalized case defines a bounded incident window. Kubernetes discovery aligns the workload identity with Prometheus labels and OpenSearch log documents.
+2. Source adapters collect bounded fault, performance, log and supported Kubernetes configuration observations. Live normalized inputs are staged under managed state until incident cleanup; the source systems remain authoritative.
+3. A deterministic pipeline groups log patterns, analyzes metric changes, selects evidence across domains and writes an incident report and capsule. This path does not require a model key.
+4. With a core provider configured, a background episode investigator selects from read-only diagnostic tools, records observations, compares plausible explanations and publishes a cited assessment. A review pass checks the draft against visible evidence. Valid IDs and schema are enforced, but semantic correctness still needs human review.
+5. Retained recurrence candidates can supply one bounded earlier capsule for comparison. The previous model answer is a hypothesis, while captured observations remain evidence.
+6. Optional vision and speech specialists process operator-supplied evidence after capability checks. The engineer can request a reviewed reassessment; media is never collected automatically.
+7. Operations presents the queue and report; Targets owns connections and coverage; Patterns exposes recurrence; Settings owns retention and model configuration. CLI and HTTP interfaces remain available without the UI.
 
-- application registration;
-- bounded incident collection;
-- FM, PM, log, topology, and trace-access normalization;
-- compact evidence selection;
-- grounded deterministic and optional pretrained-model reasoning;
-- durable capsule metadata;
-- CLI, API, Operations, Targets, Patterns, and Settings surfaces.
+SQLite, a local artifact directory/PVC, a standard-library HTTP server and background threads implement the single-replica reference. Derived ZIP exports exclude staged raw inputs, but selected examples and metric values can still be sensitive. See [privacy and retention](docs/data_privacy.md).
 
-## Implemented Local Stack
+## Important Design Contracts
 
-- Python 3.11+;
-- PyYAML for case metadata;
-- SQLite for control-plane metadata;
-- standard library HTTP server for local UI/API;
-- background threads for local jobs;
-- filesystem artifacts under `.fcapsule/`;
-- optional DeepSeek API client.
-- live Prometheus, OpenSearch and Kubernetes API adapters;
-- a single-replica Kubernetes deployment with persistent state.
+- Keep original alerts and incident-specific reports even when episodes correlate signals.
+- Show the actual affected resource and evidence time; distinguish incident-time facts from a later live check.
+- Bound queries, prompt input, completed checks and optional media calls. Preserve a usable deterministic report when an AI request fails.
+- Treat citations as navigation to retained observations, not as proof of a diagnosis.
+- Keep the simulator and scenario oracle in the [separate Lab](https://github.com/Hi-io/fcapsule-lab). The product must not receive injected causes as an answer key.
+- Preserve capsule access after source expiry, but never claim to recover data that was not captured.
 
-This stack is intentionally small. The component boundaries support migration to a production HTTP framework, PostgreSQL, object storage, and queue-backed workers.
+## Proposed Work, Not Shipped Capability
 
-## Main Commands
+| Decision area | Direction and required proof |
+| --- | --- |
+| Production access controls | Add authentication, authorization, TLS integration and auditability before exposing the reference service outside a trusted boundary. |
+| Capture lifecycle | Consider an independently configurable short TTL for staged raw inputs; verify that later report reading and retained-only review still work. |
+| Reliability and scale | Replace in-process jobs and single-replica SQLite/file ownership only when durability, load and recovery tests justify a queue and shared stores. |
+| Source breadth | Add a trace backend or new observability source only with bounded queries, provenance, access controls and evidence of operator value. |
+| Diagnosis quality | Evaluate retrieval, cross-workload matching and model/tool changes on held-out incidents. Keep failures and inconclusive results in the record. |
 
-```bash
-python3 -m fcapsule.cli serve
-python3 -m fcapsule.cli ingest-case --case <case> --app-id <id>
-python3 -m fcapsule.cli investigate --case <case> --out <output>
-python3 -m fcapsule.cli compare-llms --capsule <capsule.json> --out <output>
-python3 -m fcapsule.cli register --app-id <id> --name <name> --namespace <ns> --cluster <cluster>
-python3 -m fcapsule.cli status
-```
-
-## Source Adapter Contract
-
-Every source adapter normalizes its bounded response into:
-
-- `metadata.yaml`;
-- `alert.json`;
-- `prometheus_metrics.json`;
-- `opensearch_logs.json`;
-- optional `kubernetes_config.json`;
-- optional expected regression notes.
-
-Implemented live adapters query source APIs and stage bounded normalized inputs under `state_dir/live-cases/`. They remain until incident retention/deletion. In-memory processing or a shorter staging TTL would be a future privacy/storage improvement, not current behavior.
-
-## Attention Pipeline
-
-1. Validate the case.
-2. Resolve entity identity.
-3. Reduce logs into templates.
-4. analyze PM changes against a baseline.
-5. Build the FM timeline.
-6. Score every evidence candidate.
-7. Select domain-balanced evidence.
-8. Generate and verify hypotheses.
-9. calculate objective metrics.
-10. Write derived artifacts and archive.
-
-## Control Plane
-
-The control plane stores applications, incidents, capsules, and non-secret model preferences. It provides external-case ingestion and background capsule jobs to the web API.
-
-Operations groups incidents and opens a shared episode investigation with individual capture reports, stable short references, URL-persisted filters and a compact actionable triage strip. Targets owns source configuration and namespace-grouped coverage; Patterns exposes retained recurrence context without merging individual incidents; Settings owns retention and the investigation model. The model selects bounded read-only checks, inspects reference windows and omitted log candidates, and can compare one deterministic prior recurrence candidate using cited retained observations. [AI techniques](docs/ai_investigation_techniques.md) describes the implemented bounds and remaining limitations. Lab workloads remain separate; the investigator does not replicate applications or run experiments.
-
-## Trace Approach
-
-A trace adapter should support:
-
-- availability probe;
-- source retention discovery;
-- bounded request query;
-- optional derived facts;
-- explicit confirmation that raw spans are not retained.
-
-Trace evidence may inform a capsule during active investigation, but complete spans remain in the source backend.
-
-## Production Evolution
-
-Replace local implementation details without changing the normalized contracts:
-
-| Local | Production direction |
-|---|---|
-| standard library HTTP | FastAPI or equivalent |
-| background thread | durable job queue |
-| SQLite | PostgreSQL |
-| local artifact directory | object storage |
-| current API adapters and file import | broader authentication, pagination and backoff |
-| local configuration | mounted config and secret references |
-| single-process Kubernetes pod | multi-replica coordination after storage/job redesign |
-
-## Engineering Priorities
-
-1. Preserve evidence provenance and cautious causal language.
-2. Keep telemetry source-owned and document the bounded local staging lifetime explicitly.
-3. Make source availability and selection state visually distinct.
-4. Keep deterministic behavior available without external credentials.
-5. Evaluate model changes on identical evidence.
-6. Scale through adapters and workers rather than coupling the pipeline to infrastructure.
+The [roadmap](ROADMAP.md) tracks the broader sequence. A production-looking UI or a strong synthetic demo does not itself establish telecom readiness, diagnosis accuracy or a measured retention-cost reduction.
