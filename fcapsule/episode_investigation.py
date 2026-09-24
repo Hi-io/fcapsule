@@ -26,6 +26,19 @@ def parse_object(content: str) -> dict[str, Any]:
     return value
 
 
+def _bounded_explanation(value: str, maximum: int) -> str:
+    """Keep optional prose within its display limit without splitting a word."""
+    text = value.strip()
+    if len(text) <= maximum:
+        return text
+    marker = "..."
+    prefix = text[:maximum - len(marker)]
+    boundary = prefix.rfind(" ")
+    if boundary >= len(prefix) // 2:
+        prefix = prefix[:boundary]
+    return prefix.rstrip() + marker
+
+
 def validate_assessment(
     value: Any,
     evidence_ids: set[str],
@@ -43,8 +56,8 @@ def validate_assessment(
         result[key] = text.strip()
     if "basis" in value:
         basis = value["basis"]
-        if not isinstance(basis, str) or not basis.strip() or len(basis) > 500:
-            raise ValueError("Assessment basis must be a non-empty string of at most 500 characters")
+        if not isinstance(basis, str) or not basis.strip():
+            raise ValueError("Assessment basis must be a non-empty string")
         # Uses the assessment's validated citations, never a second source list.
         result["basis"] = basis.strip()
 
@@ -152,7 +165,7 @@ def validate_assessment(
         pass
     result = scrub(result, reference_ids=evidence_ids | incident_ids | (historical_episode_ids or set()))
     if "basis" in result:
-        result["basis"] = result["basis"][:500]
+        result["basis"] = _bounded_explanation(result["basis"], 500)
     return result
 
 

@@ -100,7 +100,13 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(result["evidence_ids"], ["E1"])
         self.assertNotIn("basis_evidence_ids", result)
         self.assertEqual(len(validate_assessment({**original, "basis": "x" * 500}, {"E1"}, {"one"})["basis"]), 500)
-        for invalid in (None, "", "  ", "x" * 501, [], {}, 1, True):
+        long_basis = "The observed response shape differs from the configured contract. " * 12
+        bounded = validate_assessment({**original, "basis": long_basis}, {"E1"}, {"one"})["basis"]
+        self.assertLessEqual(len(bounded), 500)
+        self.assertTrue(bounded.endswith("..."))
+        self.assertFalse(bounded[:-3].endswith(" "))
+        self.assertLessEqual(len(validate_assessment({**original, "basis": "x" * 501}, {"E1"}, {"one"})["basis"]), 500)
+        for invalid in (None, "", "  ", [], {}, 1, True):
             with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "basis"):
                 validate_assessment({**original, "basis": invalid}, {"E1"}, {"one"})
         with self.assertRaisesRegex(ValueError, "unavailable evidence"):
