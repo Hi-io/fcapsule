@@ -13,8 +13,14 @@ from urllib.parse import urlencode
 
 import promql_parser as promql
 
-from fcapsule.adapters.transport import JsonTransport
+from fcapsule.adapters.transport import JsonTransport, ResponseTooLargeError
 from fcapsule.adapters.alert_expression import UnavailableExpression, plan_alert_expression
+
+MAX_PROMETHEUS_DEFAULT_RESPONSE_BYTES = 1024 * 1024
+MAX_PROMETHEUS_QUERY_RESPONSE_BYTES = 2 * 1024 * 1024
+MAX_PROMETHEUS_RANGE_RESPONSE_BYTES = 1024 * 1024
+MAX_PROMETHEUS_DISCOVERY_RESPONSE_BYTES = 2 * 1024 * 1024
+MAX_PROMETHEUS_STATUS_RESPONSE_BYTES = 64 * 1024
 
 MAX_ALERT_SERIES = 12
 MAX_ALERT_POINTS = 241
@@ -42,12 +48,16 @@ class PrometheusAdapter:
     def __init__(self, base_url: str, timeout: float = 8) -> None:
         self.base_url = base_url.rstrip("/")
         self.transport = JsonTransport(self.base_url, timeout=timeout)
+        self.last_pod_metric_capture_info: dict[str, Any] = {
+            "status": "unreported", "available": None, "truncated": None,
+            "retained_series": 0,
+        }
 
     def _api(self, path: str, params: dict[str, Any] | None = None) -> Any:
         suffix = path
         if params:
             suffix += "?" + urlencode(params)
-        payload = self.transport.request(suffix)
+        payload = self.transport.request(suffix, max_response_bytes=_response_limit(path))
         if payload.get("status") != "success":
             raise RuntimeError(str(payload.get("error") or "Prometheus API request failed"))
         return payload.get("data")
@@ -76,7 +86,9 @@ class PrometheusAdapter:
 
     def test_connection(self) -> dict[str, Any]:
         started = time.perf_counter()
-        build = self.transport.request("/api/v1/status/buildinfo")
+        build = self.transport.request(
+            "/api/v1/status/buildinfo", max_response_bytes=MAX_PROMETHEUS_STATUS_RESPONSE_BYTES,
+        )
         targets = self._api("/api/v1/targets", {"state": "active"}) or {}
         active = list(targets.get("activeTargets", []))
         return {
@@ -220,6 +232,18 @@ class PrometheusAdapter:
                 "query": evidence["expression"], "start": start.timestamp(), "end": end.timestamp(),
                 "step": step, "timeout": "4s", "limit": MAX_ALERT_SERIES + 1,
             }) or {}
+        except ResponseTooLargeError:
+            evidence["reason"] = "response_byte_limit"
+            evidence["source"]["response_limit_bytes"] = MAX_PROMETHEUS_RANGE_RESPONSE_BYTES
+            source_evidence = {
+                key: value for key, value in evidence.items() if key != "underlying_expression"
+            }
+            source_capture = self._collect_alert_source_metrics(
+                alert, namespace, pod, start, end, step, source_evidence,
+            )
+            evidence["source_metric_capture"] = source_capture["evidence"]
+            result["series"].extend(source_capture["series"])
+            return result
         except (RuntimeError, OSError, ValueError):
             evidence["reason"] = "query_failed"
             return result
@@ -306,6 +330,8 @@ class PrometheusAdapter:
             "omitted_group_count": 0, "omitted_series_at_least": 0,
             "omitted_missing_or_non_finite_points": 0,
             "rejected_selector_count": 0, "rejected_label_series_count": 0, "query_failure_count": 0,
+            "response_byte_limit_count": 0,
+            "response_limit_bytes": MAX_PROMETHEUS_RANGE_RESPONSE_BYTES,
             "truncated": False,
             "note": "Raw source selector samples; alert aggregation, comparison, and threshold are not reapplied.",
         }
@@ -426,6 +452,9 @@ class PrometheusAdapter:
                     "query": group["expression"], "start": start.timestamp(), "end": end.timestamp(),
                     "step": step, "timeout": "4s", "limit": remaining + 1,
                 }) or {}
+            except ResponseTooLargeError:
+                summary["response_byte_limit_count"] += 1
+                continue
             except (RuntimeError, OSError, ValueError):
                 summary["query_failure_count"] += 1
                 continue
@@ -520,14 +549,20 @@ class PrometheusAdapter:
         summary["series_ids"] = [series["series_id"] for series in captured]
         summary["invalid_series_count"] = invalid_series
         if captured:
-            summary["status"] = "partial" if summary["truncated"] or invalid_series or summary["query_failure_count"] else "available"
+            summary["status"] = "partial" if (
+                summary["truncated"] or invalid_series or summary["query_failure_count"]
+                or summary["response_byte_limit_count"]
+            ) else "available"
             if summary["truncated"]:
                 summary["reason"] = "capture_limit_reached"
+            elif summary["response_byte_limit_count"]:
+                summary["reason"] = "response_byte_limit"
             elif invalid_series or summary["query_failure_count"]:
                 summary["reason"] = "some_query_results_unavailable"
         else:
             summary["status"] = "unavailable"
-            summary["reason"] = "query_failed" if summary["query_failure_count"] else (
+            summary["reason"] = "response_byte_limit" if summary["response_byte_limit_count"] else (
+                "query_failed" if summary["query_failure_count"] else
                 "no_finite_samples" if not invalid_series else "invalid_query_samples"
             )
         return {"series": captured, "evidence": summary}
@@ -564,19 +599,55 @@ class PrometheusAdapter:
         duration = max(1, int((end - start).total_seconds()))
         step = max(15, min(60, duration // 30 or 15))
         series: list[dict[str, Any]] = []
+        response_limited_metrics: list[str] = []
+        successful_queries = 0
         for metric_name, expression in expressions.items():
-            for result in self.query_range(expression, start, end, step):
+            try:
+                results = self.query_range(expression, start, end, step)
+            except ResponseTooLargeError:
+                response_limited_metrics.append(metric_name)
+                continue
+            successful_queries += 1
+            for result in results:
                 points = [[_timestamp(float(timestamp)), float(value)] for timestamp, value in result.get("values", []) if math.isfinite(float(value))]
                 if len(points) < 2:
                     continue
                 labels = {str(key): str(value) for key, value in result.get("metric", {}).items()}
                 labels.update({"namespace": namespace, "pod": pod})
                 series.append({"metric": metric_name, "labels": labels, "values": points})
+        response_limited = bool(response_limited_metrics)
+        self.last_pod_metric_capture_info = {
+            "status": "unavailable" if response_limited and not successful_queries else (
+                "partial" if response_limited else "complete"
+            ),
+            "available": bool(successful_queries),
+            "truncated": response_limited,
+            "query_count": len(expressions),
+            "successful_query_count": successful_queries,
+            "response_byte_limit_count": len(response_limited_metrics),
+            "response_limited_metrics": response_limited_metrics,
+            "response_limit_bytes": MAX_PROMETHEUS_RANGE_RESPONSE_BYTES,
+            "retained_series": len(series),
+            "reason": "response_byte_limit" if response_limited else None,
+        }
         return series
 
 
 def _timestamp(value: float) -> str:
     return datetime.fromtimestamp(value, timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _response_limit(path: str) -> int:
+    endpoint = path.split("?", 1)[0]
+    if endpoint == "/api/v1/query_range":
+        return MAX_PROMETHEUS_RANGE_RESPONSE_BYTES
+    if endpoint == "/api/v1/query":
+        return MAX_PROMETHEUS_QUERY_RESPONSE_BYTES
+    if endpoint in {"/api/v1/alerts", "/api/v1/targets", "/api/v1/rules"}:
+        return MAX_PROMETHEUS_DISCOVERY_RESPONSE_BYTES
+    if endpoint.startswith("/api/v1/status/"):
+        return MAX_PROMETHEUS_STATUS_RESPONSE_BYTES
+    return MAX_PROMETHEUS_DEFAULT_RESPONSE_BYTES
 
 
 def _selector_signature(selector: Any) -> tuple[Any, ...]:

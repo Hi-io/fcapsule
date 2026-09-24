@@ -654,6 +654,11 @@ class LiveSourceTests(unittest.TestCase):
             prometheus, opensearch, kubernetes = Mock(), Mock(), Mock()
             prometheus.collect_alert_metrics.return_value = {"alert_evidence": [], "series": []}
             prometheus.collect_pod_metrics.return_value = []
+            prometheus.last_pod_metric_capture_info = {
+                "status": "partial", "available": True, "truncated": True,
+                "response_byte_limit_count": 1, "response_limited_metrics": ["pod_cpu_cores"],
+                "response_limit_bytes": 1024 * 1024, "retained_series": 0,
+            }
             opensearch.collect_logs.return_value = []
             opensearch.last_collection_info = {
                 "status": "partial", "available": True, "truncated": True,
@@ -666,9 +671,12 @@ class LiveSourceTests(unittest.TestCase):
 
             case_dir = coordinator._capture_case(config, prometheus, opensearch, kubernetes, alert, pod, "incident-1")
             capture = json.loads((case_dir / "opensearch_logs.json").read_text(encoding="utf-8"))["capture"]
+            metric_capture = json.loads((case_dir / "prometheus_metrics.json").read_text(encoding="utf-8"))["pod_metric_capture"]
 
             self.assertEqual(capture["status"], "partial")
             self.assertTrue(capture["truncated"])
+            self.assertEqual(metric_capture["status"], "partial")
+            self.assertEqual(metric_capture["response_limited_metrics"], ["pod_cpu_cores"])
 
     def test_missing_kubernetes_application_is_marked_not_observed(self):
         with tempfile.TemporaryDirectory() as directory:

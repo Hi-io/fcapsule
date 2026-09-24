@@ -322,7 +322,7 @@ class AlertMetricCaptureTests(unittest.TestCase):
 
                 request_index = [0]
 
-                def query_response(path):
+                def query_response(path, **kwargs):
                     if request_index[0] == 0:
                         request_index[0] += 1
                         return main_response

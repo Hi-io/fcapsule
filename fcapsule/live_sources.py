@@ -330,9 +330,17 @@ class LiveSourceCoordinator:
         alert_metrics = prometheus.collect_alert_metrics(alert, pod["namespace"], pod["name"], start, end)
         alert = {**alert, "metric_evidence": alert_metrics["alert_evidence"]}
         write_json(case_dir / "alert.json", alert)
+        pod_metrics = prometheus.collect_pod_metrics(pod["namespace"], pod["name"], start, end)
+        pod_metric_capture = getattr(prometheus, "last_pod_metric_capture_info", None)
+        if not isinstance(pod_metric_capture, dict):
+            pod_metric_capture = {
+                "status": "unreported", "available": None, "truncated": None,
+                "retained_series": len(pod_metrics),
+            }
         write_json(case_dir / "prometheus_metrics.json", {
             "window": metadata["window"], "alert_evidence": alert_metrics["alert_evidence"],
-            "series": alert_metrics["series"] + prometheus.collect_pod_metrics(pod["namespace"], pod["name"], start, end),
+            "pod_metric_capture": pod_metric_capture,
+            "series": alert_metrics["series"] + pod_metrics,
         })
         logs = opensearch.collect_logs(pod["namespace"], pod["name"], start, end, focus=alert_time)
         log_capture = getattr(opensearch, "last_collection_info", None)
