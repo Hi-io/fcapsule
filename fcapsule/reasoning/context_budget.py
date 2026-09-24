@@ -365,16 +365,57 @@ def _log_observation(result: dict[str, Any]) -> dict[str, Any]:
     patterns = [item for item in result.get("patterns", []) if isinstance(item, dict)]
     patterns.sort(key=_pattern_priority, reverse=True)
     primary = patterns[0] if patterns else {}
+    other_patterns = [item for item in patterns[1:]
+                      if item.get("fields") or item.get("diagnostic_ranges")][:2]
+
+    def pattern_summary(item: dict[str, Any]) -> dict[str, Any]:
+        values = {
+            "top_signal": _log_example(item),
+            "fields": diagnostic_fields(None, item.get("fields")) if item.get("fields") else None,
+            "diagnostic_ranges": _diagnostic_ranges(item.get("diagnostic_ranges")),
+            "first_seen": item.get("first_seen"),
+            "last_seen": item.get("last_seen"),
+            "occurrences": item.get("count"),
+        }
+        return {key: value for key, value in values.items() if value not in (None, "", [], {})}
+
     values = {
         "matching_patterns": result.get("matching_patterns"),
         "top_signal": _log_example(primary) if primary else None,
         "fields": diagnostic_fields(None, primary.get("fields")) if primary.get("fields") else None,
+        "diagnostic_ranges": _diagnostic_ranges(primary.get("diagnostic_ranges")),
+        "other_diagnostic_patterns": [pattern_summary(item) for item in other_patterns],
         "first_seen": primary.get("first_seen"),
         "last_seen": primary.get("last_seen"),
         "occurrences": primary.get("count") if primary else None,
         "sampled": True,
     }
     return {key: value for key, value in values.items() if value not in (None, "", [], {})}
+
+
+def _diagnostic_ranges(value: Any) -> dict[str, dict[str, str]]:
+    """Keep bounded numeric ranges only for fields accepted by the diagnostic allowlist."""
+
+    if not isinstance(value, dict):
+        return {}
+    ranges = {}
+    for key, bounds in list(value.items())[:8]:
+        if not isinstance(bounds, dict):
+            continue
+        lower = diagnostic_fields(None, {str(key): bounds.get("min")})
+        upper = diagnostic_fields(None, {str(key): bounds.get("max")})
+        if not lower or not upper or next(iter(lower)) != next(iter(upper)):
+            continue
+        field = next(iter(lower))
+        row = {"min": lower[field], "max": upper[field]}
+        try:
+            samples = int(bounds.get("samples"))
+        except (TypeError, ValueError):
+            samples = 0
+        if 0 < samples <= 1_000_000:
+            row["samples"] = str(samples)
+        ranges[field] = row
+    return ranges
 
 
 def _workload_observation(result: dict[str, Any]) -> dict[str, Any]:
@@ -1022,7 +1063,8 @@ def _minimal_check_observation(check: dict[str, Any]) -> Any:
         return observation
     if check.get("tool") == "search_logs" and isinstance(observation, dict):
         return {key: observation[key] for key in
-                ("top_signal", "fields", "first_seen", "last_seen", "occurrences", "sampled") if key in observation}
+                ("top_signal", "fields", "diagnostic_ranges", "other_diagnostic_patterns",
+                 "first_seen", "last_seen", "occurrences", "sampled") if key in observation}
     if check.get("tool") == "resource_history" and isinstance(observation, dict):
         if observation.get("minimal_resource_history"):
             return observation

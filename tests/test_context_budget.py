@@ -2,7 +2,10 @@ import copy
 import json
 import unittest
 
-from fcapsule.reasoning.context_budget import _log_observation, _workload_observation, compact_for_model, compact_metric_observation, estimate_tokens
+from fcapsule.reasoning.context_budget import (
+    _log_observation, _minimal_check_observation, _workload_observation, compact_for_model,
+    compact_metric_observation, estimate_tokens,
+)
 
 
 class ContextBudgetTests(unittest.TestCase):
@@ -274,6 +277,51 @@ class ContextBudgetTests(unittest.TestCase):
         self.assertEqual(observation["top_signal"]["message"], "Export page encoded")
         self.assertEqual(observation["top_signal"]["delivery"], "buffered")
         self.assertEqual(observation["top_signal"]["buffered_bytes"], "141432000")
+
+    def test_log_check_compaction_preserves_numeric_range_and_secondary_bound_signal(self):
+        result = {"matching_patterns": 3, "patterns": [
+            {"pattern": "Retained export page", "count": 36,
+             "fields": {"buffered_bytes": "100504940", "page_bytes": "2184890",
+                        "delivery": "buffered", "rows": "24000"},
+             "diagnostic_ranges": {"buffered_bytes": {
+                 "min": "24033790", "max": "100504940", "samples": "36"}},
+             "examples": [{"timestamp": "2026-09-24T17:22:47Z", "level": "INFO",
+                           "message": "Export page retained past its delivery boundary",
+                           "diagnostic_fields": {"buffered_bytes": "100504940", "page_bytes": "2184890",
+                                                 "delivery": "buffered", "rows": "24000"}}]},
+            {"pattern": "Export buffer reached configured safety bound", "count": 1,
+             "fields": {"buffered_pages": "46", "buffered_bytes": "100504940",
+                        "maximum_buffered_bytes": "100663296"},
+             "examples": [{"timestamp": "2026-09-24T17:22:48Z", "level": "WARN",
+                           "message": "Export buffer reached its configured safety bound",
+                           "diagnostic_fields": {"buffered_pages": "46", "buffered_bytes": "100504940",
+                                                 "maximum_buffered_bytes": "100663296"}}]},
+            {"pattern": "Worker scheduler heartbeat", "count": 81,
+             "examples": [{"level": "INFO", "message": "Worker scheduler heartbeat"}]},
+        ]}
+        checks = [{"id": "Q001", "tool": "search_logs", "status": "completed",
+                   "required_observation": True, "result": result}]
+
+        compact, visible = compact_for_model(
+            {"episode_id": "memory-pressure", "live_capture": True,
+             "scope": {"namespace": "production", "pod": "worker-1"},
+             "alerts": [{"incident_id": "incident-1", "alertname": "WorkerBufferPressure"}],
+             "evidence": [{"id": "E-alert", "summary": "Buffer allocation exceeded alert threshold."}]},
+            checks, max_prompt_tokens=700,
+        )
+        observation = compact["prior_checks"][0]["observation"]
+
+        self.assertLessEqual(estimate_tokens(compact), 700)
+        self.assertIn("Q001", visible)
+        self.assertEqual(observation["diagnostic_ranges"]["buffered_bytes"],
+                         {"min": "24033790", "max": "100504940", "samples": "36"})
+        bound = observation["other_diagnostic_patterns"][0]
+        self.assertEqual(bound["top_signal"]["level"], "WARN")
+        self.assertEqual(bound["fields"]["buffered_pages"], "46")
+        self.assertEqual(bound["fields"]["maximum_buffered_bytes"], "100663296")
+        minimum = _minimal_check_observation(compact["prior_checks"][0])
+        self.assertEqual(minimum["diagnostic_ranges"], observation["diagnostic_ranges"])
+        self.assertEqual(minimum["other_diagnostic_patterns"], observation["other_diagnostic_patterns"])
 
     def test_structured_log_fields_and_relation_tokens_survive_prompt_compaction(self):
         fields = {
