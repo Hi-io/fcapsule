@@ -3,12 +3,49 @@ import json
 import unittest
 
 from fcapsule.reasoning.context_budget import (
-    _log_observation, _minimal_check_observation, _workload_observation, compact_for_model,
+    _discovery_observation, _log_observation, _minimal_check_observation, _workload_observation, compact_for_model,
     compact_metric_observation, estimate_tokens,
 )
 
 
 class ContextBudgetTests(unittest.TestCase):
+    def test_discovery_compaction_prioritizes_the_exact_down_target_pool(self):
+        down_target = {
+            "state": "active", "health": "down", "last_error": "HTTP 404 Not Found",
+            "scrape_pool": "serviceMonitor/observability/exporter/0", "scrape_path": "/metrics-v2",
+            "service": "metrics-exporter", "pod": "exporter-1",
+        }
+        result = {
+            "scope": {"namespace": "lab", "pods": ["exporter-1"], "workload": "metrics-exporter"},
+            "discovery_targets": {"target_service": "metrics-exporter", "target_workload": "metrics-exporter"},
+            "active_targets": [down_target],
+            "dropped_targets": [{
+                "state": "dropped", "scrape_pool": "serviceMonitor/observability/applications/0",
+                "service": "inventory-api", "pod": "inventory-1",
+            }],
+            "monitor_selection": [
+                {
+                    "monitor": {"kind": "ServiceMonitor", "namespace": "observability", "name": "applications",
+                                "match_labels": {"metrics": "enabled"}},
+                    "matched_services": ["app-metrics"], "matched_pods": [],
+                    "evaluated_services": [{"name": "metrics-exporter", "target_relevance": "alert_target_service",
+                                            "selector_evaluation": {"status": "not_matched"}}],
+                },
+                {
+                    "monitor": {"kind": "ServiceMonitor", "namespace": "observability", "name": "exporter",
+                                "match_labels": {"metrics": "exporter"}},
+                    "matched_services": ["metrics-exporter"], "matched_pods": [],
+                    "evaluated_services": [{"name": "metrics-exporter", "target_relevance": "alert_target_service",
+                                            "selector_evaluation": {"status": "matched"}}],
+                },
+            ],
+        }
+
+        observation = _discovery_observation(result)
+
+        self.assertEqual(observation["monitor_selection"][0]["name"], "exporter")
+        self.assertEqual(observation["monitor_selection"][0]["targets"][0]["scrape_path"], "/metrics-v2")
+
     def test_log_diagnostics_stay_paired_with_representative_events_in_model_context(self):
         context = {"episode_id": "diag-pair", "live_capture": True, "evidence": [{
             "id": "E-log", "domain": "log_template", "title": "reservation failed",

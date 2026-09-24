@@ -35,6 +35,19 @@ def _finding(
     }
 
 
+def _alert_target_identity(discovery: dict[str, Any]) -> tuple[str, set[str]]:
+    targets = discovery.get("discovery_targets") if isinstance(discovery.get("discovery_targets"), dict) else {}
+    scope = discovery.get("scope") if isinstance(discovery.get("scope"), dict) else {}
+    service = str(targets.get("target_service") or scope.get("service") or "")
+    pods = {str(item) for item in scope.get("pods", []) if item}
+    return service, pods
+
+
+def _matches_alert_target(target: dict[str, Any], service: str, pods: set[str]) -> bool:
+    return bool((service and str(target.get("service") or "") == service)
+                or (target.get("pod") and str(target.get("pod")) in pods))
+
+
 def _selector_mismatches(discovery: dict[str, Any]) -> list[dict[str, Any]]:
     scope = discovery.get("scope") if isinstance(discovery.get("scope"), dict) else {}
     affected = {str(item) for item in scope.get("pods", []) if item}
@@ -90,7 +103,14 @@ def derive_findings(state: dict[str, Any]) -> list[dict[str, Any]]:
         result = check.get("result") if isinstance(check.get("result"), dict) else {}
         if check.get("tool") == "scrape_discovery":
             scope = result.get("scope") if isinstance(result.get("scope"), dict) else {}
-            mismatches = _selector_mismatches(result)
+            target_service, target_pods = _alert_target_identity(result)
+            active_targets = [item for item in result.get("active_targets", []) if isinstance(item, dict)]
+            scoped_active = [item for item in active_targets
+                             if (target_service or target_pods)
+                             and _matches_alert_target(item, target_service, target_pods)]
+            scoped_down = [item for item in scoped_active if str(item.get("health")) == "down"]
+            # A selected active target rules out a selector mismatch as the cause of this target's scrape failure.
+            mismatches = [] if scoped_down else _selector_mismatches(result)
             if mismatches:
                 first = mismatches[0]
                 detail = "; ".join(
@@ -105,6 +125,11 @@ def derive_findings(state: dict[str, Any]) -> list[dict[str, Any]]:
                     next_check="Verify the intended monitoring policy and the Service or Pod label at the object named above.",
                 ))
             dropped = [item for item in result.get("dropped_targets", []) if isinstance(item, dict)]
+            if target_service or target_pods:
+                dropped = [item for item in dropped if _matches_alert_target(item, target_service, target_pods)]
+            if scoped_down:
+                active_pools = {str(item.get("scrape_pool") or "") for item in scoped_down if item.get("scrape_pool")}
+                dropped = [item for item in dropped if str(item.get("scrape_pool") or "") in active_pools]
             if dropped:
                 target = dropped[0]
                 name = target.get("pod") or target.get("service") or "the affected endpoint"
@@ -115,7 +140,9 @@ def derive_findings(state: dict[str, Any]) -> list[dict[str, Any]]:
                     evidence_ids=[evidence_id], scope=scope, observations=dropped[:3],
                     next_check="Inspect the retained selection chain and any relabeling or target filters for this target.",
                 ))
-            down = [item for item in result.get("active_targets", []) if isinstance(item, dict) and str(item.get("health")) == "down"]
+            down = [item for item in active_targets if str(item.get("health")) == "down"]
+            if target_service or target_pods:
+                down = [item for item in down if _matches_alert_target(item, target_service, target_pods)]
             if down:
                 target = down[0]
                 name = target.get("pod") or target.get("service") or "the affected endpoint"
@@ -149,7 +176,12 @@ def derive_findings(state: dict[str, Any]) -> list[dict[str, Any]]:
             next_check=str(assessment.get("next_action") or "Review cited evidence before acting."),
         ))
 
-    priority = {"monitoring_selection": 0, "target_discovery": 1, "scrape_health": 2,
-                "alert_logic": 3, "investigator_assessment": 4}
+    priority = ({"scrape_health": 0, "monitoring_selection": 1, "target_discovery": 2,
+                 "alert_logic": 3, "investigator_assessment": 4} if any(
+                     item.get("category") == "scrape_health" and item.get("state") == "observed"
+                     and any(target.get("health") == "down" for target in item.get("observations", []))
+                     for item in findings
+                 ) else {"monitoring_selection": 0, "target_discovery": 1, "scrape_health": 2,
+                         "alert_logic": 3, "investigator_assessment": 4})
     findings.sort(key=lambda item: priority.get(str(item.get("category")), 9))
     return findings[:3]

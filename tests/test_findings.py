@@ -44,6 +44,38 @@ class FindingTests(unittest.TestCase):
         self.assertIn("connection refused", findings[0]["summary"])
         self.assertIn("not the underlying cause", findings[1]["summary"])
 
+    def test_exact_active_target_outweighs_an_unrelated_dropped_target(self):
+        state = {"checks": [{
+            "id": "Q002", "tool": "scrape_discovery", "status": "completed", "result": {
+                "scope": {"namespace": "lab", "pods": ["exporter-1"], "workload": "metrics-exporter"},
+                "discovery_targets": {"target_service": "metrics-exporter", "target_workload": "metrics-exporter"},
+                "active_targets": [{
+                    "state": "active", "health": "down", "last_error": "HTTP 404 Not Found",
+                    "scrape_pool": "serviceMonitor/observability/exporter/0", "scrape_path": "/metrics-v2",
+                    "service": "metrics-exporter", "pod": "exporter-1",
+                }],
+                "dropped_targets": [
+                    {"state": "dropped", "scrape_pool": "serviceMonitor/observability/applications/0",
+                     "service": "metrics-exporter", "pod": "exporter-1"},
+                    {"state": "dropped", "scrape_pool": "serviceMonitor/observability/applications/0",
+                     "service": "inventory-api", "pod": "inventory-1"},
+                ],
+                "current_pod_labels": [],
+                "monitor_selection": [{
+                    "monitor": {"kind": "ServiceMonitor", "namespace": "observability", "name": "applications",
+                                "match_labels": {"metrics": "enabled"}},
+                    "matched_services": ["app-metrics"], "matched_pods": [],
+                }],
+            },
+        }]}
+
+        findings = derive_findings(state)
+
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["category"], "scrape_health")
+        self.assertIn("HTTP 404", findings[0]["summary"])
+        self.assertEqual(findings[0]["observations"][0]["scrape_path"], "/metrics-v2")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -517,6 +517,15 @@ def _discovery_observation(result: dict[str, Any]) -> dict[str, Any]:
     discovery_targets = result.get("discovery_targets") if isinstance(result.get("discovery_targets"), dict) else {}
     target_service = _short(anonymize_text(str(discovery_targets.get("target_service") or "")), 120)
     target_workload = _short(anonymize_text(str(discovery_targets.get("target_workload") or "")), 120)
+    alert_target_pools = {
+        str(target.get("scrape_pool") or "")
+        for target in result.get("active_targets", [])
+        if isinstance(target, dict)
+        and str(target.get("health") or "") == "down"
+        and ((target_service and str(target.get("service") or "") == target_service)
+             or (pods and str(target.get("pod") or "") in pods))
+        and target.get("scrape_pool")
+    }
 
     def pod_health(value):
         if not isinstance(value, dict):
@@ -797,6 +806,7 @@ def _discovery_observation(result: dict[str, Any]) -> dict[str, Any]:
                  "labels": labels({key: value for key, value in (item.get("labels") or {}).items() if key in selector_keys})}
                 for item in pod_labels[:2]]
     selections.sort(key=lambda item: (
+        not any(target.get("scrape_pool") in alert_target_pools for target in item["targets"]),
         not any(row.get("target_relevance") == "alert_target_service" or
                 (target_service and row.get("name") == target_service) for row in item["evaluated_resources"]),
         not any(row.get("target_relevance") in {"alert_target_workload", "prometheus_target_pod"} or
