@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,18 @@ from fcapsule.store import _alert_family
 
 MAX_EPISODE_MEMBERS = 12
 MAX_PRIMARY_CAPSULE_BYTES = 8 * 1024 * 1024
+
+
+def _capture_time(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 class InvestigationService:
@@ -182,12 +195,17 @@ class InvestigationService:
         current = next((item for item in episode.get("signals", []) if item["incident_id"] == current_id), {})
         if not current:
             return []
+        current_time = _capture_time(current.get("started_at"))
+        if current_time is None:
+            return []
         identity = current.get("recurrence_key")
         summaries = self.plane.store.recurrence_candidates_for_incident(episode["episode_id"], current_id)
         candidates = []
         for summary in summaries[:3]:
             prior = self.plane.store.get_episode(str(summary["episode_id"]))
-            if not prior or prior.get("app_id") != episode.get("app_id"):
+            prior_time = _capture_time(prior.get("started_at")) if prior else None
+            if (not prior or prior.get("app_id") != episode.get("app_id")
+                    or prior_time is None or prior_time >= current_time):
                 continue
             match_type = str(summary.get("match_type") or "same_target")
             # Select from stored identities before loading bounded artifacts. A
@@ -195,13 +213,23 @@ class InvestigationService:
             signals = sorted(prior.get("signals", []),
                              key=lambda item: (item.get("started_at", ""), item["incident_id"]), reverse=True)
             member_relations = {}
+            future_matching_member = False
             for item in signals:
                 if identity and item.get("recurrence_key") == identity:
-                    member_relations[item["incident_id"]] = "same_target"
+                    relation = "same_target"
                 elif match_type == "same_workload_different_pod" and self._same_live_workload_alert_other_pod(
                     current, item, episode.get("app_id")
                 ):
-                    member_relations[item["incident_id"]] = "same_workload_different_pod"
+                    relation = "same_workload_different_pod"
+                else:
+                    continue
+                member_time = _capture_time(item.get("started_at"))
+                if member_time is None or member_time >= current_time:
+                    future_matching_member = True
+                    continue
+                member_relations[item["incident_id"]] = relation
+            if future_matching_member and not member_relations:
+                continue
             signals.sort(key=lambda item: item["incident_id"] not in member_relations)
             selected = [item for item in signals if item["incident_id"] in member_relations][:4]
             prior_entries = self.entries(
