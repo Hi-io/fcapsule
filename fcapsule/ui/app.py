@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import tempfile
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -44,6 +45,8 @@ ASSET_ROOT = Path(__file__).with_name("assets")
 CSS = (ASSET_ROOT / "app.css").read_text(encoding="utf-8") + "\n" + (ASSET_ROOT / "visual.css").read_text(encoding="utf-8")
 JS = (ASSET_ROOT / "app.js").read_text(encoding="utf-8")
 ICONS = {path.name: path.read_text(encoding="utf-8") for path in (ASSET_ROOT / "icons").glob("*.svg")}
+STREAM_CHUNK_BYTES = 128 * 1024
+JSON_SPOOL_MEMORY_BYTES = 1024 * 1024
 
 
 class FCAPSuleHTTPServer(ThreadingHTTPServer):
@@ -66,13 +69,60 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
         return
 
     def _json(self, payload: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
-        body = json.dumps(payload, ensure_ascii=True).encode("utf-8")
-        self.send_response(status)
+        with tempfile.SpooledTemporaryFile(max_size=JSON_SPOOL_MEMORY_BYTES, mode="w+b") as body:
+            encoder = json.JSONEncoder(ensure_ascii=True)
+            for chunk in encoder.iterencode(payload):
+                body.write(chunk.encode("utf-8"))
+            length = body.tell()
+            body.seek(0)
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(length))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self._copy_stream(body)
+
+    def _copy_stream(self, source: Any) -> None:
+        while chunk := source.read(STREAM_CHUNK_BYTES):
+            self.wfile.write(chunk)
+
+    def _capsule_json(self, payload: dict[str, Any]) -> None:
+        capsule_path = Path(payload["capsule_path"])
+        prefix = ("{\"record\": " + json.dumps(payload["record"], ensure_ascii=True)
+                  + ", \"capsule\": ").encode("utf-8")
+        suffix = (", \"comparison\": " + json.dumps(payload["comparison"], ensure_ascii=True) + "}").encode("utf-8")
+        length = len(prefix) + capsule_path.stat().st_size + len(suffix)
+        self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Length", str(length))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(body)
+        self.wfile.write(prefix)
+        with capsule_path.open("rb") as capsule:
+            self._copy_stream(capsule)
+        self.wfile.write(suffix)
+
+    def _file_response(
+        self,
+        file_path: Path,
+        content_type: str,
+        *,
+        no_store: bool = False,
+        nosniff: bool = False,
+        attachment_filename: str | None = None,
+    ) -> None:
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(file_path.stat().st_size))
+        if no_store:
+            self.send_header("Cache-Control", "no-store")
+        if nosniff:
+            self.send_header("X-Content-Type-Options", "nosniff")
+        if attachment_filename:
+            self.send_header("Content-Disposition", f'attachment; filename="{attachment_filename}"')
+        self.end_headers()
+        with file_path.open("rb") as source:
+            self._copy_stream(source)
 
     def _text(self, body: str, content_type: str) -> None:
         encoded = body.encode("utf-8")
@@ -151,16 +201,10 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
                 self._json({"error": "Evidence file not found"}, HTTPStatus.NOT_FOUND)
             else:
                 file_path, mime_type = asset
-                body = file_path.read_bytes()
-                self.send_response(HTTPStatus.OK)
-                self.send_header("Content-Type", mime_type)
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("X-Content-Type-Options", "nosniff")
-                if mime_type.startswith("text/plain"):
-                    self.send_header("Content-Disposition", f'attachment; filename="{file_path.name}"')
-                self.end_headers()
-                self.wfile.write(body)
+                self._file_response(
+                    file_path, mime_type, no_store=True, nosniff=True,
+                    attachment_filename=file_path.name if mime_type.startswith("text/plain") else None,
+                )
             return
         if path.startswith("/api/incidents/") and path.endswith("/report"):
             incident_id = unquote(path.removeprefix("/api/incidents/").removesuffix("/report").rstrip("/"))
@@ -172,11 +216,11 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             return
         if path.startswith("/api/capsules/"):
             capsule_id = unquote(path.removeprefix("/api/capsules/"))
-            payload = self.server.control_plane.capsule_payload(capsule_id)
+            payload = self.server.control_plane.capsule_artifact_payload(capsule_id)
             if payload is None:
                 self._json({"error": "Capsule not found"}, HTTPStatus.NOT_FOUND)
             else:
-                self._json(payload)
+                self._capsule_json(payload)
             return
         if path.startswith("/artifacts/"):
             self._artifact(path)
@@ -197,12 +241,7 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
         if not artifact.is_file():
             self._json({"error": "Artifact not found"}, HTTPStatus.NOT_FOUND)
             return
-        body = artifact.read_bytes()
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", mimetypes.guess_type(name)[0] or "application/octet-stream")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        self._file_response(artifact, mimetypes.guess_type(name)[0] or "application/octet-stream")
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path

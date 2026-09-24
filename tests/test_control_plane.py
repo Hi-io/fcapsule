@@ -43,7 +43,17 @@ class ControlPlaneTests(unittest.TestCase):
             plane._build_capsule(incident["incident_id"])
             before = plane.incident_report_payload(incident["incident_id"])
             shutil.rmtree(source)
-            with patch("fcapsule.control_plane.load_case", side_effect=AssertionError("Source must not be reopened")):
+            original_read_text = Path.read_text
+
+            def reject_capsule_read(path, *args, **kwargs):
+                if path.name == "capsule.json":
+                    raise AssertionError("Cached report must not load the capsule")
+                return original_read_text(path, *args, **kwargs)
+
+            with (
+                patch("fcapsule.control_plane.load_case", side_effect=AssertionError("Source must not be reopened")),
+                patch.object(Path, "read_text", new=reject_capsule_read),
+            ):
                 after = plane.incident_report_payload(incident["incident_id"])
             self.assertEqual(before["report"], after["report"])
             storage = after["storage"]
@@ -56,6 +66,57 @@ class ControlPlaneTests(unittest.TestCase):
             rebuilt = plane.incident_report_payload(incident["incident_id"])
             self.assertEqual(rebuilt["report"]["report_version"], "1.3")
             self.assertTrue(rebuilt["report"]["log_patterns"])
+
+    def test_http_streams_large_capsule_and_keeps_cached_report_readable(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
+            server = create_app_server("127.0.0.1", 0, Path(directory) / "state")
+            incident = server.control_plane.ingest_case(REFERENCE_CASE, "checkout")
+            server.control_plane._build_capsule(incident["incident_id"])
+            capsule_record = server.control_plane.store.get_capsule_for_incident(incident["incident_id"])
+            capsule_path = Path(capsule_record["output_dir"]) / "capsule.json"
+            capsule = {"retained_blob": "x" * (2 * 1024 * 1024)}
+            capsule_path.write_text(json.dumps(capsule), encoding="utf-8")
+            capsule_id = capsule_record["capsule_id"]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            original_read_text = Path.read_text
+
+            def reject_capsule_read(path, *args, **kwargs):
+                if path.name == "capsule.json":
+                    raise AssertionError("HTTP serving must stream the capsule file")
+                return original_read_text(path, *args, **kwargs)
+
+            try:
+                base = f"http://127.0.0.1:{server.server_port}"
+                with patch.object(Path, "read_text", new=reject_capsule_read):
+                    with urlopen(f"{base}/api/incidents/{incident['incident_id']}/report", timeout=10) as response:
+                        report_body = response.read()
+                        self.assertEqual(int(response.headers["Content-Length"]), len(report_body))
+                    with urlopen(f"{base}/api/capsules/{capsule_id}", timeout=10) as response:
+                        capsule_body = response.read()
+                        self.assertEqual(int(response.headers["Content-Length"]), len(capsule_body))
+                report_payload = json.loads(report_body)
+                capsule_payload = json.loads(capsule_body)
+                self.assertEqual(report_payload["report"]["report_version"], "1.3")
+                self.assertEqual(set(capsule_payload), {"record", "capsule", "comparison"})
+                self.assertEqual(capsule_payload["capsule"], capsule)
+
+                original_read_bytes = Path.read_bytes
+
+                def reject_read_bytes(path):
+                    if path.name == "capsule.json":
+                        raise AssertionError("Raw artifacts must be streamed")
+                    return original_read_bytes(path)
+
+                with patch.object(Path, "read_bytes", new=reject_read_bytes):
+                    with urlopen(f"{base}/artifacts/{capsule_id}/capsule.json", timeout=10) as response:
+                        artifact_body = response.read()
+                        self.assertEqual(int(response.headers["Content-Length"]), len(artifact_body))
+                self.assertEqual(json.loads(artifact_body), capsule)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
 
     def test_source_sync_builds_every_new_incident_report(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
