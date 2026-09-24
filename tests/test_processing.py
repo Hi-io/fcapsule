@@ -77,6 +77,8 @@ class ProcessingTests(unittest.TestCase):
             "validation_failure": "missing_required_field",
             "outcome": "contract_shape",
             "observed_status": "missing",
+            "expected_schema": "v2",
+            "observed_schema": "v1",
             "missing_fields": ["status", "customer_name", "api_key", "observed_fields"],
             "observed_fields": ["id", "amount", "password"],
         })
@@ -88,6 +90,9 @@ class ProcessingTests(unittest.TestCase):
         self.assertEqual(fields["validation_failure"], "missing_required_field")
         self.assertEqual(fields["outcome"], "contract_shape")
         self.assertEqual(fields["observed_status"], "missing")
+        self.assertEqual(fields["expected_schema"], "v2")
+        self.assertEqual(fields["observed_schema"], "v1")
+        self.assertIn('"observed_schema": "v1"', template_for_message("contract mismatch", fields))
         self.assertEqual(fields["missing_fields"], "status,customer_name,observed_fields")
         self.assertEqual(fields["observed_fields"], "id,amount")
         self.assertLessEqual(len(fields), 12)
