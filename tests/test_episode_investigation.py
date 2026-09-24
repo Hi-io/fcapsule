@@ -1006,9 +1006,87 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertLessEqual(estimate_tokens(bounded), 600)
         self.assertIn("Q-target", visible)
         self.assertTrue(bounded["prior_checks"][0]["observation"].get("minimal_discovery"))
+        self.assertTrue(bounded["prior_checks"][0]["observation"].get("tiny_discovery"))
         minimized_service = bounded["prior_checks"][0]["observation"]["monitor_selection"][0]["evaluated_resources"][0]
         self.assertEqual(minimized_service["name"], "z-orders-metrics")
         self.assertEqual(minimized_service["service_selector"], {"app": "orders"})
+        self.assertEqual(minimized_service["selector_status"], "not_matched")
+
+    def test_scrape_discovery_links_monitor_port_target_readiness_and_exporter_health(self):
+        exporter = {"name": "mysql-exporter-0", "namespace": "ns", "workload": "mysql-exporter",
+                    "phase": "Running", "ready": False, "ready_status": "false",
+                    "labels": {"app": "mysql-exporter"},
+                    "raw_spec": {"containers": [{"name": "exporter", "ports": [
+                        {"name": "mysql", "containerPort": 9104}]}]},
+                    "container_statuses": [{"name": "exporter", "ready": False, "restartCount": 2,
+                        "state": {"waiting": {"reason": "CrashLoopBackOff", "message": "private text"}},
+                        "lastState": {"terminated": {"reason": "Error", "exitCode": 1,
+                                                        "message": "private termination message"}}}]}
+        self.prom.scrape_targets.return_value = {
+            "active": [{"state": "active", "health": "down", "last_error": "connection refused",
+                        "pod": "mysql-exporter-0", "service": "mysql-exporter", "namespace": "ns"}],
+            "dropped": [],
+        }
+        self.kube.monitoring_resources.return_value = [
+            {"kind": "ServiceMonitor", "name": "mysql", "namespace": "monitoring",
+             "effective_namespaces": ["ns"], "namespace_selector": {"status": "resolved"},
+             "match_labels": {"metrics": "enabled"}, "match_expressions": [],
+             "endpoints": [{"port": "metrics", "path": "/metrics", "interval": "30s"}]},
+            {"kind": "PodMonitor", "name": "mysql-pods", "namespace": "monitoring",
+             "effective_namespaces": ["ns"], "namespace_selector": {"status": "resolved"},
+             "match_labels": {"app": "mysql-exporter"}, "match_expressions": [],
+             "endpoints": [{"port": "exporter"}]},
+        ]
+        self.kube.list_services.return_value = [{
+            "name": "mysql-exporter", "namespace": "ns", "labels": {"metrics": "enabled"},
+            "selector": {"app": "mysql-exporter"},
+            "ports": [{"name": "mysql", "port": 9104, "target_port": 9104}], "omitted_ports": 0,
+        }]
+        self.kube.list_pods.return_value = [
+            {"name": "worker-1", "namespace": "ns", "workload": "worker", "ready": True,
+             "ready_status": "true", "labels": {"app": "worker"}},
+            exporter,
+        ]
+        self.kube.list_endpoint_slices.return_value = {
+            "slices": [{"name": "mysql-exporter-a", "namespace": "ns", "service": "mysql-exporter",
+                        "ports": [{"name": "mysql", "port": 9104, "protocol": "TCP"}],
+                        "endpoints": [{"target_ref": {"kind": "Pod", "name": "mysql-exporter-0", "namespace": "ns"},
+                                       "ready": False, "serving": False, "terminating": False, "address_count": 1}]}],
+            "omitted_slices": 0, "observed_at": "2026-09-20T12:11:00Z",
+        }
+
+        result = self.kit.execute("scrape_discovery", {})
+
+        service_monitor, pod_monitor = result["monitor_selection"]
+        service = service_monitor["evaluated_services"][0]
+        self.assertEqual(result["active_targets"][0]["health"], "down")
+        self.assertEqual(result["active_targets"][0]["last_error"], "connection refused")
+        self.assertEqual(service["selector_evaluation"]["status"], "matched")
+        self.assertEqual(service["endpoint_port_checks"][0]["status"], "does_not_match_service_port_name")
+        self.assertEqual(service["endpoint_slices"][0]["endpoints"][0]["ready"], False)
+        self.assertEqual(service["endpoint_pod_health"][0]["ready_status"], "false")
+        self.assertEqual(service["endpoint_pod_health"][0]["container_health"][0]["restart_count"], 2)
+        self.assertEqual(pod_monitor["matched_pods"], ["mysql-exporter-0"])
+        exporter_evidence = next(item for item in pod_monitor["evaluated_pods"] if item["name"] == "mysql-exporter-0")
+        self.assertEqual(exporter_evidence["target_relevance"], "prometheus_target_pod")
+        self.assertEqual(exporter_evidence["health"]["ready_status"], "false")
+        self.assertEqual(exporter_evidence["endpoint_port_checks"][0]["status"],
+                         "does_not_match_pod_container_port")
+        self.assertNotIn("private", json.dumps(result))
+        compact = _check_item({"id": "Q-exporter", "tool": "scrape_discovery", "status": "completed",
+                               "result": result}, False)["observation"]
+        compact_pod_monitor = next(item for item in compact["monitor_selection"] if item["kind"] == "PodMonitor")
+        self.assertEqual(compact_pod_monitor["evaluated_resources"][0]["name"], "mysql-exporter-0")
+        self.assertEqual(compact_pod_monitor["evaluated_resources"][0]["target_relevance"], "prometheus_target_pod")
+
+        self.kube.list_services.return_value[0]["ports"] = []
+        self.kube.list_services.return_value[0]["omitted_ports"] = 1
+        self.kube.list_endpoint_slices.side_effect = RuntimeError("EndpointSlice API is forbidden")
+        incomplete = self.kit.execute("scrape_discovery", {})
+        self.assertEqual(incomplete["monitor_selection"][0]["evaluated_services"][0]
+                         ["endpoint_port_checks"][0]["status"], "unknown")
+        self.assertEqual(incomplete["endpoint_slice_inventory"]["status"], "unavailable")
+        self.assertNotIn("forbidden", json.dumps(incomplete))
 
     def test_alert_rule_logic_keeps_detection_separate_from_root_cause(self):
         self.entries[0]["report"]["fault_alerts"] = [{

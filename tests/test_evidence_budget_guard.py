@@ -79,6 +79,72 @@ class EvidenceBudgetGuardTests(unittest.TestCase):
         self.assertEqual(observation["observed_at"], raw["observed_at"])
         self.assertTrue(observation["compacted_discovery"])
 
+    def test_discovery_compaction_preserves_endpoint_ports_readiness_and_pod_health(self):
+        raw = discovery(observed="enabled", health="down", error="connection refused")
+        raw["monitor_selection"][0]["monitor"]["endpoints"] = [
+            {"port": "metrics", "path": "/metrics", "interval": "30s"}]
+        raw["monitor_selection"][0]["configured_endpoints"] = raw["monitor_selection"][0]["monitor"]["endpoints"]
+        raw["monitor_selection"][0]["evaluated_services"] = [{
+            "name": "metrics-endpoint", "namespace": "production", "labels": {"monitoring.example/enabled": "enabled"},
+            "selector": {"app": "mysql-exporter"}, "ports": [{"name": "mysql", "port": 9104, "target_port": 9104}],
+            "omitted_ports": 0,
+            "endpoint_port_checks": [{"configured_port_name": "metrics", "service_port_names": ["mysql"],
+                "status": "does_not_match_service_port_name", "comparison_basis": "Compared ServiceMonitor port with Service port name."}],
+            "endpoint_slices": [{"name": "metrics-a", "namespace": "production", "service": "metrics-endpoint",
+                "ports": [{"name": "mysql", "port": 9104, "protocol": "TCP"}],
+                "endpoints": [{"target_ref": {"kind": "Pod", "name": "mysql-exporter-0", "namespace": "production"},
+                    "ready": False, "serving": False, "terminating": False, "address_count": 1}]}],
+            "endpoint_pod_health": [{"pod": "mysql-exporter-0", "namespace": "production", "workload": "mysql-exporter",
+                "phase": "Running", "ready": False, "ready_status": "false", "container_health": [
+                    {"name": "exporter", "ready": False, "restart_count": 2,
+                     "state": {"kind": "waiting", "reason": "CrashLoopBackOff"}}]}],
+            "selector_evaluation": {"status": "matched", "requirements": [
+                {"key": "monitoring.example/enabled", "operator": "Equals", "expected": "enabled",
+                 "observed": "enabled", "matches": True}]},
+        }]
+        raw["endpoint_slice_inventory"] = {"status": "observed", "omitted_slices": 0}
+        raw["current_service_labels"] = [{"service": "metrics-endpoint", "namespace": "production",
+            "labels": {"monitoring.example/enabled": "enabled"}, "selector": {"app": "mysql-exporter"},
+            "ports": [{"name": "mysql", "port": 9104, "target_port": 9104}],
+            "endpoint_slices": raw["monitor_selection"][0]["evaluated_services"][0]["endpoint_slices"]}]
+        raw["current_pod_health"] = raw["monitor_selection"][0]["evaluated_services"][0]["endpoint_pod_health"]
+
+        compact = _check_item({"id": "Q2", "tool": "scrape_discovery", "status": "completed", "result": raw}, False)
+        observation = _minimal_check_observation(compact)
+        selection = observation["monitor_selection"][0]
+        service = selection["evaluated_resources"][0]
+
+        self.assertEqual(selection["configured_endpoints"][0]["port"], "metrics")
+        self.assertEqual(service["service_ports"][0]["name"], "mysql")
+        self.assertEqual(service["endpoint_port_checks"][0]["status"], "does_not_match_service_port_name")
+        self.assertFalse(service["endpoint_slices"][0]["endpoints"][0]["ready"])
+        self.assertEqual(service["endpoint_pod_health"][0]["ready_status"], "false")
+        self.assertEqual(service["endpoint_pod_health"][0]["container_health"][0]["restart_count"], 2)
+        self.assertEqual(observation["endpoint_slice_inventory"]["status"], "observed")
+
+        pod_raw = discovery(kind="PodMonitor", observed="enabled")
+        pod_raw["monitor_selection"][0]["monitor"]["endpoints"] = [{"port": "metrics"}]
+        pod_raw["monitor_selection"][0]["evaluated_pods"] = [{
+            "name": "mysql-exporter-0", "namespace": "production", "labels": {"monitoring.example/enabled": "enabled"},
+            "health": {"pod": "mysql-exporter-0", "namespace": "production", "phase": "Running",
+                       "ready": False, "ready_status": "false", "container_health": []},
+            "container_ports": [{"name": "mysql", "port": 9104, "protocol": "TCP"}],
+            "container_ports_complete": True,
+            "endpoint_port_checks": [{"configured_port_name": "metrics", "container_ports": [
+                {"name": "mysql", "port": 9104, "protocol": "TCP"}], "container_ports_complete": True,
+                "status": "does_not_match_pod_container_port", "comparison_basis": "Compared PodMonitor port with declared container ports."}],
+            "selector_evaluation": {"status": "matched", "requirements": [
+                {"key": "monitoring.example/enabled", "operator": "Equals", "expected": "enabled",
+                 "observed": "enabled", "matches": True}]},
+        }]
+        pod_compact = _check_item({"id": "Q3", "tool": "scrape_discovery", "status": "completed", "result": pod_raw}, False)
+        pod_observation = _minimal_check_observation(pod_compact)
+        pod_selection = pod_observation["monitor_selection"][0]
+        pod = pod_selection["evaluated_resources"][0]
+        self.assertEqual(pod_selection["configured_endpoints"][0]["port"], "metrics")
+        self.assertEqual(pod["endpoint_port_checks"][0]["status"], "does_not_match_pod_container_port")
+        self.assertEqual(pod["health"]["ready_status"], "false")
+
     def test_dependency_compaction_keeps_declared_port_comparison_and_provenance(self):
         raw = {
             "service": "inventory", "pod": "inventory-1", "matching_pods": 1,

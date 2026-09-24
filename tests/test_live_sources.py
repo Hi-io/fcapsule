@@ -481,7 +481,7 @@ class LiveSourceTests(unittest.TestCase):
                             "selector": {"matchLabels": {"metrics": "pod-enabled"}, "matchExpressions": [
                                 {"key": "deprecated", "operator": "DoesNotExist", "values": []},
                             ]},
-                            "podMetricsEndpoints": [{"port": "metrics"}],
+                            "podMetricsEndpoints": [{"port": "metrics", "portNumber": 9104}],
                         },
                     }]
                 },
@@ -499,9 +499,51 @@ class LiveSourceTests(unittest.TestCase):
         self.assertEqual(monitors[1]["match_expressions"], [
             {"key": "deprecated", "operator": "DoesNotExist", "values": []},
         ])
+        self.assertEqual(monitors[1]["endpoints"], [{"port": "metrics", "portNumber": 9104}])
         self.assertEqual(monitors[0]["effective_namespaces"], ["shop"])
         self.assertEqual(monitors[0]["namespace_selector"]["status"], "resolved")
         self.assertTrue(monitors[0]["observed_at"].endswith("Z"))
+
+    def test_endpoint_slice_inventory_is_namespace_and_service_scoped_without_addresses(self):
+        adapter = KubernetesAdapter("http://kubernetes")
+        adapter.transport = FakeTransport({
+            "/apis/discovery.k8s.io/v1/namespaces/shop/endpointslices": {"items": [
+                {"metadata": {"name": "mysql-a", "labels": {"kubernetes.io/service-name": "mysql-exporter"}},
+                 "addressType": "IPv4", "ports": [{"name": "metrics", "port": 9104, "protocol": "TCP"}],
+                 "endpoints": [{"addresses": ["10.10.0.7"], "conditions": {"ready": False, "serving": False},
+                                "targetRef": {"kind": "Pod", "name": "mysql-exporter-0", "namespace": "shop"}}]},
+                {"metadata": {"name": "unrelated", "labels": {"kubernetes.io/service-name": "other"}},
+                 "endpoints": []},
+            ]}
+        })
+
+        inventory = adapter.list_endpoint_slices("shop", {"mysql-exporter"})
+
+        self.assertEqual(len(inventory["slices"]), 1)
+        endpoint_slice = inventory["slices"][0]
+        self.assertEqual(endpoint_slice["service"], "mysql-exporter")
+        self.assertEqual(endpoint_slice["ports"], [{"name": "metrics", "port": 9104, "protocol": "TCP"}])
+        self.assertEqual(endpoint_slice["endpoints"][0]["target_ref"], {
+            "kind": "Pod", "name": "mysql-exporter-0", "namespace": "shop"})
+        self.assertFalse(endpoint_slice["endpoints"][0]["ready"])
+        self.assertNotIn("addresses", endpoint_slice["endpoints"][0])
+        self.assertTrue(inventory["observed_at"].endswith("Z"))
+        self.assertIn("/namespaces/shop/endpointslices", adapter.transport.requests[0][0])
+
+    def test_pod_inventory_distinguishes_not_ready_from_unreported_readiness(self):
+        adapter = KubernetesAdapter("http://kubernetes")
+        adapter.transport = FakeTransport({"/api/v1/pods": {"items": [
+            {"metadata": {"name": "starting", "namespace": "shop"}, "status": {"phase": "Running", "conditions": [
+                {"type": "Ready", "status": "False"}]}},
+            {"metadata": {"name": "missing-condition", "namespace": "shop"}, "status": {"phase": "Pending", "conditions": []}},
+        ]}})
+
+        pods = {item["name"]: item for item in adapter.list_pods({"shop"})}
+
+        self.assertFalse(pods["starting"]["ready"])
+        self.assertEqual(pods["starting"]["ready_status"], "false")
+        self.assertFalse(pods["missing-condition"]["ready"])
+        self.assertEqual(pods["missing-condition"]["ready_status"], "unknown")
 
     def test_monitor_namespace_any_is_scoped_to_requested_namespaces(self):
         adapter = KubernetesAdapter("http://kubernetes")

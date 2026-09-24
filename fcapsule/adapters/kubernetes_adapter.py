@@ -191,7 +191,10 @@ class KubernetesAdapter:
             labels = metadata.get("labels", {})
             owners = metadata.get("ownerReferences", [])
             owner = owners[0] if owners else {}
-            ready = any(condition.get("type") == "Ready" and condition.get("status") == "True" for condition in status.get("conditions", []))
+            ready_condition = next((condition for condition in status.get("conditions", [])
+                                    if condition.get("type") == "Ready"), {})
+            ready_status = str(ready_condition.get("status") or "unknown").lower()
+            ready = ready_status == "true"
             pod_name = str(metadata.get("name", "unknown"))
             workload = labels.get("app.kubernetes.io/name") or labels.get("app") or labels.get("k8s-app") or owner.get("name") or pod_name
             pods.append(
@@ -205,6 +208,7 @@ class KubernetesAdapter:
                     "node": spec.get("nodeName"),
                     "phase": status.get("phase", "Unknown"),
                     "ready": ready,
+                    "ready_status": ready_status if ready_status in {"true", "false", "unknown"} else "unknown",
                     "labels": labels,
                     "containers": [container.get("name") for container in spec.get("containers", [])],
                     "images": [container.get("image") for container in spec.get("containers", [])],
@@ -357,6 +361,7 @@ class KubernetesAdapter:
             name = str(metadata.get("name") or "")
             if not name:
                 continue
+            raw_ports = spec.get("ports")
             result.append(
                 {
                     "name": name,
@@ -367,13 +372,77 @@ class KubernetesAdapter:
                         {"name": str(port.get("name") or "")[:63] or None,
                          "port": port.get("port") if type(port.get("port")) is int and 1 <= port.get("port") <= 65535 else None,
                          "target_port": port.get("targetPort") if type(port.get("targetPort")) is int else str(port.get("targetPort"))[:63] if port.get("targetPort") is not None else None}
-                        for port in spec.get("ports", [])[:12] if isinstance(port, dict)
+                         for port in (raw_ports[:12] if isinstance(raw_ports, list) else []) if isinstance(port, dict)
                     ],
+                    "omitted_ports": max(0, len(raw_ports) - 12) if isinstance(raw_ports, list) else 0,
+                    "ports_complete": isinstance(raw_ports, list) and len(raw_ports) <= 12
+                        and all(isinstance(port, dict) for port in raw_ports),
                     "source": "Kubernetes API ServiceList",
                     "observed_at": observed_at,
                 }
             )
         return result
+
+    def list_endpoint_slices(self, namespace: str, service_names: set[str] | None = None) -> dict[str, Any]:
+        """Return bounded EndpointSlice readiness facts for Services in one namespace."""
+        payload = self.transport.request(f"/apis/discovery.k8s.io/v1/namespaces/{namespace}/endpointslices")
+        observed_at = _observed_at()
+        slices = []
+        omitted_slices = 0
+        raw_items = payload.get("items") if isinstance(payload, dict) else None
+        if not isinstance(raw_items, list):
+            raise RuntimeError("EndpointSlice API returned an unsupported response")
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            metadata = item.get("metadata", {}) if isinstance(item.get("metadata"), dict) else {}
+            labels = metadata.get("labels", {}) if isinstance(metadata.get("labels"), dict) else {}
+            service = str(labels.get("kubernetes.io/service-name") or "")
+            if not service or (service_names is not None and service not in service_names):
+                continue
+            raw_endpoints = item.get("endpoints", []) if isinstance(item.get("endpoints"), list) else []
+            endpoint_rows = []
+            for endpoint in raw_endpoints[:24]:
+                if not isinstance(endpoint, dict):
+                    continue
+                target = endpoint.get("targetRef") if isinstance(endpoint.get("targetRef"), dict) else {}
+                conditions = endpoint.get("conditions") if isinstance(endpoint.get("conditions"), dict) else {}
+                target_ref = {key: str(target[key])[:253] for key in ("kind", "name", "namespace")
+                              if isinstance(target.get(key), str) and target[key]}
+                endpoint_rows.append({
+                    "target_ref": target_ref,
+                    "ready": conditions.get("ready") if type(conditions.get("ready")) is bool else None,
+                    "serving": conditions.get("serving") if type(conditions.get("serving")) is bool else None,
+                    "terminating": conditions.get("terminating") if type(conditions.get("terminating")) is bool else None,
+                    "address_count": len(endpoint.get("addresses", [])) if isinstance(endpoint.get("addresses"), list) else None,
+                })
+            raw_ports = item.get("ports", []) if isinstance(item.get("ports"), list) else []
+            ports = []
+            for port in raw_ports[:12]:
+                if not isinstance(port, dict):
+                    continue
+                number = port.get("port")
+                ports.append({
+                    "name": str(port.get("name"))[:63] if isinstance(port.get("name"), str) and port.get("name") else None,
+                    "port": number if type(number) is int and 1 <= number <= 65535 else None,
+                    "protocol": str(port.get("protocol") or "TCP")[:16],
+                })
+            row = {
+                "name": str(metadata.get("name") or "")[:253],
+                "namespace": namespace,
+                "service": service[:253],
+                "address_type": str(item.get("addressType") or "")[:32] or None,
+                "ports": ports,
+                "endpoints": endpoint_rows,
+                "omitted_endpoints": max(0, len(raw_endpoints) - len(endpoint_rows)),
+                "source": "Kubernetes API EndpointSliceList",
+                "observed_at": observed_at,
+            }
+            if len(slices) < 200:
+                slices.append(row)
+            else:
+                omitted_slices += 1
+        return {"slices": slices, "omitted_slices": omitted_slices, "observed_at": observed_at}
 
     def monitoring_resources(self, namespaces: set[str]) -> list[dict[str, Any]]:
         """Read bounded Prometheus-operator selectors relevant to captured namespaces."""
@@ -426,7 +495,7 @@ class KubernetesAdapter:
                     if not isinstance(endpoint, dict):
                         continue
                     record = {}
-                    for key in ("port", "targetPort", "path", "interval", "scheme"):
+                    for key in ("port", "portNumber", "targetPort", "path", "interval", "scheme"):
                         value = endpoint.get(key)
                         if value is None:
                             continue
@@ -456,6 +525,8 @@ class KubernetesAdapter:
                         "match_expressions": match_expressions,
                         "selector_complete": selector_complete,
                         "endpoints": endpoints,
+                        "endpoints_complete": isinstance(raw_endpoints, list) and len(raw_endpoints) <= 12,
+                        "omitted_endpoints": max(0, len(raw_endpoints) - len(endpoints)) if isinstance(raw_endpoints, list) else 0,
                         "resource_version": str(metadata.get("resourceVersion") or "")[:80] or None,
                         "source": f"Kubernetes API {kind}",
                         "observed_at": observed_at,

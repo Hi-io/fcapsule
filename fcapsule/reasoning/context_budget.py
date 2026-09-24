@@ -453,11 +453,12 @@ def _safe_configuration_values(values: dict[str, Any]) -> dict[str, str]:
 
 
 def _discovery_observation(result: dict[str, Any]) -> dict[str, Any]:
-    """Keep bounded selector requirements beside target and Service/Pod label observations."""
+    """Keep bounded target, selector, endpoint, Service-port and pod-health facts together."""
 
     pods = set((result.get("scope") or {}).get("pods") or [])
     targets = [item for key in ("active_targets", "dropped_targets") for item in result.get(key, [])
                if isinstance(item, dict)]
+    target_pods = {str(item.get("pod")) for item in targets if item.get("pod")}
     sensitive = ("password", "secret", "token", "credential", "private", "certificate", "apikey", "api_key", "authorization")
 
     def labels(value):
@@ -467,6 +468,152 @@ def _discovery_observation(result: dict[str, Any]) -> dict[str, Any]:
     discovery_targets = result.get("discovery_targets") if isinstance(result.get("discovery_targets"), dict) else {}
     target_service = _short(anonymize_text(str(discovery_targets.get("target_service") or "")), 120)
     target_workload = _short(anonymize_text(str(discovery_targets.get("target_workload") or "")), 120)
+
+    def pod_health(value):
+        if not isinstance(value, dict):
+            return None
+        ready_status = value.get("ready_status")
+        if not isinstance(ready_status, str) or ready_status not in {"true", "false", "unknown"}:
+            ready_status = "unknown"
+        health = {
+            "pod": _short(anonymize_text(str(value.get("pod") or "")), 120),
+            "namespace": _short(anonymize_text(str(value.get("namespace") or "")), 120),
+            "workload": _short(anonymize_text(str(value.get("workload") or "")), 120),
+            "phase": _short(anonymize_text(str(value.get("phase") or "Unknown")), 32),
+            "ready": value.get("ready") if type(value.get("ready")) is bool else None,
+            "ready_status": ready_status,
+            "container_health": [],
+        }
+        containers = value.get("container_health") if isinstance(value.get("container_health"), list) else []
+        for container in containers[:4]:
+            if not isinstance(container, dict):
+                continue
+            item = {"name": _short(anonymize_text(str(container.get("name") or "")), 120),
+                    "ready": container.get("ready") if type(container.get("ready")) is bool else None,
+                    "restart_count": container.get("restart_count") if type(container.get("restart_count")) is int else None}
+            for state_key in ("state", "laststate"):
+                raw_state = container.get(state_key)
+                if not isinstance(raw_state, dict):
+                    continue
+                state = {"kind": raw_state["kind"]} if raw_state.get("kind") in {"waiting", "running", "terminated"} else {}
+                for key in ("reason", "exitCode", "signal", "startedAt", "finishedAt"):
+                    raw = raw_state.get(key)
+                    if isinstance(raw, (str, int, float)):
+                        state[key] = _short(anonymize_text(str(raw)), 80) if isinstance(raw, str) else raw
+                item[state_key] = state
+            health["container_health"].append(item)
+        return health
+
+    def endpoint_slices(value, *, limit=2):
+        slices = []
+        raw_slices = value if isinstance(value, list) else []
+        for raw_slice in raw_slices[:limit]:
+            if not isinstance(raw_slice, dict):
+                continue
+            row = {key: _short(anonymize_text(str(raw_slice.get(key) or "")), 120)
+                   for key in ("name", "namespace", "service", "address_type") if raw_slice.get(key)}
+            row["ports"] = []
+            raw_ports = raw_slice.get("ports") if isinstance(raw_slice.get("ports"), list) else []
+            for port in raw_ports[:4]:
+                if not isinstance(port, dict):
+                    continue
+                row["ports"].append({"name": _short(anonymize_text(str(port.get("name") or "")), 63) or None,
+                                     "port": port.get("port") if type(port.get("port")) is int else None,
+                                     "protocol": _short(str(port.get("protocol") or "TCP"), 16)})
+            row["endpoints"] = []
+            raw_endpoints = raw_slice.get("endpoints") if isinstance(raw_slice.get("endpoints"), list) else []
+            for endpoint in raw_endpoints[:4]:
+                if not isinstance(endpoint, dict):
+                    continue
+                target_ref = endpoint.get("target_ref") if isinstance(endpoint.get("target_ref"), dict) else {}
+                target = {key: _short(anonymize_text(str(target_ref.get(key))), 120)
+                          for key in ("kind", "name", "namespace") if target_ref.get(key)}
+                row["endpoints"].append({
+                    "target_ref": target,
+                    **{key: endpoint.get(key) if type(endpoint.get(key)) is bool else None
+                       for key in ("ready", "serving", "terminating")},
+                    "address_count": endpoint.get("address_count") if type(endpoint.get("address_count")) is int else None,
+                })
+            if type(raw_slice.get("omitted_endpoints")) is int and raw_slice["omitted_endpoints"]:
+                row["omitted_endpoints"] = raw_slice["omitted_endpoints"]
+            slices.append(row)
+        return slices
+
+    def service_ports(value):
+        result_ports = []
+        raw_ports = value if isinstance(value, list) else []
+        for port in raw_ports[:6]:
+            if not isinstance(port, dict):
+                continue
+            row = {"name": _short(anonymize_text(str(port.get("name") or "")), 63) or None,
+                   "port": port.get("port") if type(port.get("port")) is int else None}
+            target_port = port.get("target_port")
+            if isinstance(target_port, (str, int)):
+                row["target_port"] = _short(anonymize_text(str(target_port)), 63) if isinstance(target_port, str) else target_port
+            result_ports.append(row)
+        return result_ports
+
+    def monitor_endpoints(value):
+        result_endpoints = []
+        raw_endpoints = value if isinstance(value, list) else []
+        for endpoint in raw_endpoints[:3]:
+            if not isinstance(endpoint, dict):
+                continue
+            row = {}
+            for key in ("port", "portNumber", "targetPort", "path", "interval", "scheme"):
+                raw = endpoint.get(key)
+                if isinstance(raw, (str, int, float)):
+                    row[key] = _short(anonymize_text(str(raw)), 120) if isinstance(raw, str) else raw
+            result_endpoints.append(row)
+        return result_endpoints
+
+    def port_checks(value):
+        checks = []
+        raw_checks = value if isinstance(value, list) else []
+        for check in raw_checks[:3]:
+            if not isinstance(check, dict):
+                continue
+            status = check.get("status")
+            if not isinstance(status, str) or status not in {
+                    "matches_service_port_name", "does_not_match_service_port_name", "unknown"}:
+                status = "unknown"
+            names = check.get("service_port_names") if isinstance(check.get("service_port_names"), list) else []
+            row = {"status": status,
+                   "service_port_names": [_short(anonymize_text(str(name)), 63) for name in names[:6]],
+                   "omitted_service_ports": check.get("omitted_service_ports")
+                       if type(check.get("omitted_service_ports")) is int else None}
+            for key in ("configured_port_name", "configured_target_port"):
+                raw = check.get(key)
+                if isinstance(raw, (str, int, float)):
+                    row[key] = _short(anonymize_text(str(raw)), 80) if isinstance(raw, str) else raw
+            if check.get("omitted_monitor_endpoints"):
+                row["omitted_monitor_endpoints"] = check["omitted_monitor_endpoints"]
+            row["comparison_basis"] = _short(check.get("comparison_basis"), 200)
+            checks.append(row)
+        return checks
+
+    def pod_port_checks(value):
+        checks = []
+        raw_checks = value if isinstance(value, list) else []
+        for check in raw_checks[:3]:
+            if not isinstance(check, dict):
+                continue
+            status = check.get("status")
+            if not isinstance(status, str) or status not in {
+                    "matches_pod_container_port", "does_not_match_pod_container_port", "unknown"}:
+                status = "unknown"
+            row = {"status": status,
+                   "container_ports": service_ports(check.get("container_ports") or []),
+                   "container_ports_complete": check.get("container_ports_complete")
+                       if type(check.get("container_ports_complete")) is bool else None}
+            for key in ("configured_port_name", "configured_port_number", "configured_target_port"):
+                raw = check.get(key)
+                if isinstance(raw, (str, int, float)):
+                    row[key] = _short(anonymize_text(str(raw)), 80) if isinstance(raw, str) else raw
+            row["comparison_basis"] = _short(check.get("comparison_basis"), 200)
+            checks.append(row)
+        return checks
+
     selections = []
     represented_pools = set()
     for selection in result.get("monitor_selection", []):
@@ -512,9 +659,10 @@ def _discovery_observation(result: dict[str, Any]) -> dict[str, Any]:
         raw_resources = [item for item in (selection.get(selected_kind) or []) if isinstance(item, dict)]
         raw_resources.sort(key=lambda item: (
             item.get("name") != target_service if kind == "ServiceMonitor" and target_service else False,
-            item.get("target_relevance") not in {"alert_target_service", "alert_target_workload"},
+            item.get("target_relevance") not in {"alert_target_service", "alert_target_workload", "prometheus_target_pod"},
             item.get("workload_selector_match") is not True,
             item.get("namespace_selected") is False,
+            item.get("name") not in target_pods if kind == "PodMonitor" else False,
             item.get("selector_evaluation", {}).get("status") != "matched",
             str(item.get("name") or ""),
         ))
@@ -551,8 +699,28 @@ def _discovery_observation(result: dict[str, Any]) -> dict[str, Any]:
                 **({"workload_selector_match": resource.get("workload_selector_match")}
                    if type(resource.get("workload_selector_match")) is bool else {}),
                 **({"target_relevance": resource.get("target_relevance")}
-                   if resource.get("target_relevance") in {"alert_target_service", "alert_target_workload"} else {}),
+                   if resource.get("target_relevance") in {"alert_target_service", "alert_target_workload", "prometheus_target_pod"} else {}),
             })
+            if kind == "ServiceMonitor":
+                evaluated[-1].update({
+                    "service_selector": labels(resource.get("selector") or {}),
+                    "service_ports": service_ports(resource.get("ports") or []),
+                    "omitted_service_ports": resource.get("omitted_ports")
+                        if type(resource.get("omitted_ports")) is int else None,
+                    "service_ports_complete": resource.get("ports_complete")
+                        if type(resource.get("ports_complete")) is bool else None,
+                    "endpoint_port_checks": port_checks(resource.get("endpoint_port_checks") or []),
+                    "endpoint_slices": endpoint_slices(resource.get("endpoint_slices") or []),
+                    "endpoint_pod_health": [pod_health(item) for item in
+                                             (resource.get("endpoint_pod_health") or [])[:3]
+                                             if isinstance(item, dict)],
+                })
+            elif kind == "PodMonitor":
+                evaluated[-1]["health"] = pod_health(resource.get("health"))
+                evaluated[-1]["container_ports"] = service_ports(resource.get("container_ports") or [])
+                evaluated[-1]["container_ports_complete"] = resource.get("container_ports_complete") \
+                    if type(resource.get("container_ports_complete")) is bool else None
+                evaluated[-1]["endpoint_port_checks"] = pod_port_checks(resource.get("endpoint_port_checks") or [])
         namespace_scope = selection.get("namespace_scope") if isinstance(selection.get("namespace_scope"), dict) else {}
         selection_row = {
             "kind": kind, "name": _short(anonymize_text(str(monitor.get("name") or "")), 120),
@@ -566,6 +734,7 @@ def _discovery_observation(result: dict[str, Any]) -> dict[str, Any]:
             },
             "evaluated_resources": evaluated[:3],
             "omitted_resources": max(0, len(selection.get(selected_kind) or []) - min(3, len(evaluated))),
+            "configured_endpoints": monitor_endpoints(selection.get("configured_endpoints") or monitor.get("endpoints") or []),
             **{key: _bounded(selection[key], max_items=3) for key in ("matched_services", "matched_pods") if key in selection},
             "targets": matched[:2], "target_count": len(matched),
         }
@@ -580,7 +749,7 @@ def _discovery_observation(result: dict[str, Any]) -> dict[str, Any]:
     selections.sort(key=lambda item: (
         not any(row.get("target_relevance") == "alert_target_service" or
                 (target_service and row.get("name") == target_service) for row in item["evaluated_resources"]),
-        not any(row.get("target_relevance") == "alert_target_workload" or
+        not any(row.get("target_relevance") in {"alert_target_workload", "prometheus_target_pod"} or
                 row.get("workload_selector_match") is True for row in item["evaluated_resources"]),
         not any(target.get("pod") in pods for target in item["targets"] + item.get("current_pod_labels", [])),
         not any(target.get("selector_labels") for target in item["targets"]),
@@ -599,12 +768,22 @@ def _discovery_observation(result: dict[str, Any]) -> dict[str, Any]:
         "current_service_labels": [
             {"service": _short(anonymize_text(str(item.get("service") or "")), 120),
              "namespace": _short(anonymize_text(str(item.get("namespace") or "")), 120),
-             "labels": labels(item.get("labels") or {})}
+             "labels": labels(item.get("labels") or {}),
+             "selector": labels(item.get("selector") or {}),
+             "ports": service_ports(item.get("ports") or []),
+             "ports_complete": item.get("ports_complete") if type(item.get("ports_complete")) is bool else None,
+             "endpoint_slices": endpoint_slices(item.get("endpoint_slices") or [], limit=1)}
             for item in sorted(
                 (item for item in (result.get("current_service_labels") or []) if isinstance(item, dict)),
                 key=lambda item: (str(item.get("service") or "") != target_service,
                                   str(item.get("namespace") or ""), str(item.get("service") or "")))[:3]
         ],
+        "current_pod_health": [pod_health(item) for item in
+                               (result.get("current_pod_health") or [])[:4] if isinstance(item, dict)],
+        "endpoint_slice_inventory": {
+            "status": (result.get("endpoint_slice_inventory") or {}).get("status", "unknown"),
+            "omitted_slices": (result.get("endpoint_slice_inventory") or {}).get("omitted_slices", 0),
+        },
         "other_targets": [{key: _short(anonymize_text(str(target[key])), 120) for key in
                            ("pod", "service", "state", "health", "last_error") if target.get(key)}
                           for target in other_targets[:2]],
@@ -746,6 +925,67 @@ def _check_item(check: dict[str, Any], latest: bool) -> dict[str, Any]:
         "question": _short(check.get("question"), 180),
         "distinguishes": _short(check.get("distinguishes"), 220),
         "observation": result,
+    }
+
+
+def _tiny_discovery_observation(observation: dict[str, Any]) -> dict[str, Any]:
+    def pick(source, keys):
+        if not isinstance(source, dict):
+            return {}
+        return {key: source[key] for key in keys if key in source and source[key] not in (None, "", [], {})}
+
+    minimal_selections = []
+    for selection in observation.get("monitor_selection", [])[:1]:
+        if not isinstance(selection, dict):
+            continue
+        kind = selection.get("kind")
+        resources = []
+        for resource in (selection.get("evaluated_resources") or [])[:1]:
+            if not isinstance(resource, dict):
+                continue
+            common = ("name", "namespace", "labels", "selector_status", "requirements", "target_relevance")
+            if kind == "ServiceMonitor":
+                fields = common + ("service_selector", "namespace_selected", "workload_selector_match",
+                                   "service_ports", "service_ports_complete", "endpoint_port_checks",
+                                   "endpoint_slices", "endpoint_pod_health")
+                row = pick(resource, fields)
+                row["requirements"] = (row.get("requirements") or [])[:2]
+                row["service_ports"] = (row.get("service_ports") or [])[:2]
+                row["endpoint_port_checks"] = (row.get("endpoint_port_checks") or [])[:1]
+                row["endpoint_slices"] = [
+                    {**endpoint_slice, "ports": endpoint_slice.get("ports", [])[:2],
+                     "endpoints": endpoint_slice.get("endpoints", [])[:1]}
+                    for endpoint_slice in (row.get("endpoint_slices") or [])[:1]
+                    if isinstance(endpoint_slice, dict)]
+                row["endpoint_pod_health"] = (row.get("endpoint_pod_health") or [])[:1]
+            else:
+                fields = common + ("health", "container_ports", "container_ports_complete", "endpoint_port_checks")
+                row = pick(resource, fields)
+                row["requirements"] = (row.get("requirements") or [])[:2]
+                row["container_ports"] = (row.get("container_ports") or [])[:2]
+                row["endpoint_port_checks"] = (row.get("endpoint_port_checks") or [])[:1]
+            resources.append(row)
+        namespace = selection.get("namespace_scope") if isinstance(selection.get("namespace_scope"), dict) else {}
+        minimal_selections.append({
+            **pick(selection, ("kind", "name", "match_labels", "match_expressions", "selector_complete",
+                               "configured_endpoints", "targets", "target_count")),
+            "namespace_scope": {**pick(namespace, ("status",)),
+                                "effective_namespaces": (namespace.get("effective_namespaces") or [])[:1]},
+            "evaluated_resources": resources,
+        })
+        minimal_selections[-1]["match_expressions"] = minimal_selections[-1].get("match_expressions", [])[:2]
+        minimal_selections[-1]["configured_endpoints"] = minimal_selections[-1].get("configured_endpoints", [])[:1]
+        minimal_selections[-1]["targets"] = minimal_selections[-1].get("targets", [])[:1]
+    inventory = observation.get("endpoint_slice_inventory")
+    return {
+        "compacted_discovery": True,
+        "minimal_discovery": True,
+        "tiny_discovery": True,
+        **pick(observation, ("discovery_targets", "observed_at")),
+        "monitor_selection": minimal_selections,
+        **({"endpoint_slice_inventory": pick(inventory, ("status", "omitted_slices"))}
+           if isinstance(inventory, dict) else {}),
+        "limitation": observation.get("limitation"),
     }
 
 
@@ -985,11 +1225,20 @@ def compact_for_model(
                     item["visual_observation"] = _minimal_visual_observation(item["visual_observation"])
         elif any(
             item.get("observation")
-            and item.get("observation") != _minimal_check_observation(item)
+            and (item.get("observation") != _minimal_check_observation(item)
+                 or (item.get("tool") == "scrape_discovery"
+                     and isinstance(item.get("observation"), dict)
+                     and item["observation"].get("minimal_discovery")
+                     and not item["observation"].get("tiny_discovery")))
             for item in payload["prior_checks"]
         ):
             for item in payload["prior_checks"]:
-                item["observation"] = _minimal_check_observation(item)
+                observation = item.get("observation")
+                if (item.get("tool") == "scrape_discovery" and isinstance(observation, dict)
+                        and observation.get("minimal_discovery") and not observation.get("tiny_discovery")):
+                    item["observation"] = _tiny_discovery_observation(observation)
+                else:
+                    item["observation"] = _minimal_check_observation(item)
         elif removable_evidence():
             payload["evidence"].pop()
             visible_ids = refresh_visible_ids()

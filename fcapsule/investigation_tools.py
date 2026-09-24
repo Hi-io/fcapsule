@@ -131,6 +131,149 @@ def _selector_observation(labels: dict[str, Any], monitor: dict[str, Any], names
     return evaluated
 
 
+def _service_monitor_port_checks(monitor: dict[str, Any], service: dict[str, Any]) -> list[dict[str, Any]]:
+    """Compare declared ServiceMonitor port names with observed Service ports."""
+    endpoints = monitor.get("endpoints") if isinstance(monitor.get("endpoints"), list) else []
+    service_ports = service.get("ports") if isinstance(service.get("ports"), list) else []
+    valid_ports = [item for item in service_ports if isinstance(item, dict)]
+    omitted_ports = service.get("omitted_ports", 0)
+    omitted_endpoints = monitor.get("omitted_endpoints", 0)
+    checks = []
+    if not endpoints:
+        return [{"status": "unknown", "reason": "endpoint_declaration_unavailable",
+                 "comparison_basis": "No ServiceMonitor endpoint port declaration was available for comparison."}]
+    for endpoint in endpoints[:12]:
+        if not isinstance(endpoint, dict):
+            continue
+        configured_name = endpoint.get("port")
+        if not isinstance(configured_name, str) or not configured_name.strip():
+            status = "unknown"
+        elif any(item.get("name") == configured_name for item in valid_ports):
+            status = "matches_service_port_name"
+        elif service.get("ports_complete") is False or (type(omitted_ports) is int and omitted_ports > 0):
+            status = "unknown"
+        else:
+            status = "does_not_match_service_port_name"
+        checks.append({
+            "configured_port_name": configured_name if isinstance(configured_name, str) else None,
+            "configured_target_port": endpoint.get("targetPort"),
+            "service_port_names": [item.get("name") for item in valid_ports[:12] if item.get("name")],
+            "omitted_service_ports": omitted_ports if type(omitted_ports) is int else None,
+            "status": status,
+            "comparison_basis": "ServiceMonitor endpoint.port is compared with the current named Kubernetes Service ports; targetPort is retained separately and is not substituted for the Service port name.",
+        })
+    if not checks:
+        checks.append({"status": "unknown", "reason": "endpoint_declaration_unavailable",
+                       "comparison_basis": "No supported ServiceMonitor endpoint port declaration was available for comparison."})
+    if type(omitted_endpoints) is int and omitted_endpoints > 0:
+        checks.append({"status": "unknown", "omitted_monitor_endpoints": omitted_endpoints,
+                       "comparison_basis": "Some ServiceMonitor endpoints were omitted by the bounded Kubernetes read."})
+    return checks[:12]
+
+
+def _container_health(container: dict[str, Any]) -> dict[str, Any]:
+    result = {
+        "name": str(container.get("name") or "")[:120] or None,
+        "ready": container.get("ready") if type(container.get("ready")) is bool else None,
+        "restart_count": container.get("restartCount") if type(container.get("restartCount")) is int else None,
+    }
+    for field in ("state", "lastState"):
+        value = container.get(field) if isinstance(container.get(field), dict) else {}
+        state = next(((kind, details) for kind, details in value.items()
+                      if kind in {"waiting", "running", "terminated"} and isinstance(details, dict)), None)
+        if not state:
+            result[field.casefold()] = None
+            continue
+        kind, details = state
+        safe_details = {key: details[key] for key in ("reason", "exitCode", "signal", "startedAt", "finishedAt")
+                        if key in details and isinstance(details[key], (str, int, float))}
+        result[field.casefold()] = {"kind": kind, **safe_details}
+    return result
+
+
+def _pod_health(pod: dict[str, Any]) -> dict[str, Any]:
+    ready_status = pod.get("ready_status")
+    if not isinstance(ready_status, str) or ready_status not in {"true", "false", "unknown"}:
+        ready_status = "true" if pod.get("ready") is True else "false" if pod.get("ready") is False else "unknown"
+    statuses = pod.get("container_statuses") if isinstance(pod.get("container_statuses"), list) else []
+    return {
+        "pod": pod.get("name"),
+        "namespace": pod.get("namespace"),
+        "workload": pod.get("workload"),
+        "phase": pod.get("phase", "Unknown"),
+        "ready": ready_status == "true" if ready_status != "unknown" else None,
+        "ready_status": ready_status,
+        "container_health": [_container_health(item) for item in statuses[:12] if isinstance(item, dict)],
+    }
+
+
+def _pod_container_ports(pod: dict[str, Any]) -> tuple[list[dict[str, Any]], bool]:
+    spec = pod.get("raw_spec") if isinstance(pod.get("raw_spec"), dict) else None
+    containers = spec.get("containers") if isinstance(spec, dict) else None
+    if not isinstance(containers, list):
+        return [], False
+    ports = []
+    complete = len(containers) <= 16
+    for container in containers[:16]:
+        if not isinstance(container, dict):
+            complete = False
+            continue
+        raw_ports = container.get("ports", [])
+        if not isinstance(raw_ports, list):
+            complete = False
+            continue
+        if len(raw_ports) > 12:
+            complete = False
+        for port in raw_ports[:12]:
+            if not isinstance(port, dict):
+                complete = False
+                continue
+            number = port.get("containerPort")
+            ports.append({
+                "name": str(port.get("name"))[:63] if isinstance(port.get("name"), str) and port.get("name") else None,
+                "port": number if type(number) is int and 1 <= number <= 65535 else None,
+                "protocol": str(port.get("protocol") or "TCP")[:16],
+            })
+    return ports[:48], complete and len(ports) <= 48
+
+
+def _pod_monitor_port_checks(monitor: dict[str, Any], pod: dict[str, Any]) -> list[dict[str, Any]]:
+    endpoints = monitor.get("endpoints") if isinstance(monitor.get("endpoints"), list) else []
+    declared_ports, ports_complete = _pod_container_ports(pod)
+    checks = []
+    for endpoint in endpoints[:12]:
+        if not isinstance(endpoint, dict):
+            continue
+        configured_name = endpoint.get("port")
+        configured_number = endpoint.get("portNumber")
+        target_port = endpoint.get("targetPort")
+        if isinstance(configured_name, str) and configured_name.strip():
+            matches = any(item.get("name") == configured_name for item in declared_ports)
+        elif type(configured_number) is int and 1 <= configured_number <= 65535:
+            matches = any(item.get("port") == configured_number for item in declared_ports)
+        elif isinstance(target_port, str) and target_port.strip():
+            matches = any(item.get("name") == target_port for item in declared_ports)
+        elif type(target_port) is int and 1 <= target_port <= 65535:
+            matches = any(item.get("port") == target_port for item in declared_ports)
+        else:
+            matches = None
+        status = ("matches_pod_container_port" if matches else "does_not_match_pod_container_port") \
+            if matches is not None and (matches or ports_complete) else "unknown"
+        checks.append({
+            "configured_port_name": configured_name if isinstance(configured_name, str) else None,
+            "configured_port_number": configured_number if type(configured_number) is int else None,
+            "configured_target_port": target_port if isinstance(target_port, (str, int)) else None,
+            "container_ports": declared_ports[:12],
+            "container_ports_complete": ports_complete,
+            "status": status,
+            "comparison_basis": "PodMonitor port, portNumber, or targetPort is compared with current declared container ports using field precedence port, then portNumber, then targetPort.",
+        })
+    if not checks:
+        checks.append({"status": "unknown", "container_ports_complete": ports_complete,
+                       "comparison_basis": "No supported PodMonitor endpoint port declaration was available for comparison."})
+    return checks[:12]
+
+
 def _port_comparison(declaration: dict[str, Any], service_ports: list[dict[str, Any]]) -> dict[str, Any]:
     endpoint = declaration.get("configured_endpoint") if isinstance(declaration.get("configured_endpoint"), dict) else {}
     configured_port = endpoint.get("port")
@@ -365,7 +508,7 @@ class InvestigationTools:
         "review_omitted": "Inspect candidate evidence excluded from the initial selection, including possible counterevidence. args: {terms?: [text]}",
         "historical_episode": "Read one retained, deterministic recurrence candidate. Earlier assessments are hypotheses; compare their captured evidence with this episode. args: {episode_id: supplied candidate}",
         "alert_rule_logic": "Read the retained/live definitions for the episode's named alert rules. Explains detection logic, not root cause. args: {}",
-        "scrape_discovery": "Compare active/dropped targets with bounded ServiceMonitor/PodMonitor label and namespace selectors and current matching Service/Pod labels. Unsupported selection stays unknown. args: {}",
+        "scrape_discovery": "Compare active/dropped targets, bounded ServiceMonitor/PodMonitor selectors, current Service/Pod labels and ports, EndpointSlice readiness, and pod health. Unsupported selection stays unknown. args: {}",
     }
 
     def __init__(
@@ -509,10 +652,34 @@ class InvestigationTools:
             monitors = kubernetes.monitoring_resources({self.namespace})
             services = kubernetes.list_services(self.namespace)
             target_workload = self.discovery_targets.get("target_workload")
-            current_pods = [item for item in kubernetes.list_pods({self.namespace})
-                            if item.get("workload") in {self.workload, target_workload} or item["name"] in self.pods]
+            namespace_pods = [item for item in kubernetes.list_pods({self.namespace})
+                              if str(item.get("namespace") or self.namespace) == self.namespace]
+            target_pod_names = {str(target.get("pod")) for key in ("active", "dropped")
+                                for target in targets.get(key, []) if target.get("pod")}
+            current_pods = [item for item in namespace_pods
+                            if item.get("workload") in {self.workload, target_workload}
+                            or item.get("name") in self.pods or item.get("name") in target_pod_names]
             current_pods.sort(key=lambda item: (item.get("workload") != target_workload if target_workload else False,
-                                                item["name"] not in self.pods, str(item.get("name") or "")))
+                                                item.get("name") not in self.pods, str(item.get("name") or "")))
+            pods_by_name = {str(item.get("name")): item for item in namespace_pods if item.get("name")}
+            service_names = {str(item.get("name")) for item in services if item.get("name")}
+            endpoint_inventory = {"status": "unavailable", "slices": [], "omitted_slices": 0, "observed_at": None}
+            try:
+                collected_endpoints = kubernetes.list_endpoint_slices(self.namespace, service_names)
+                if isinstance(collected_endpoints, dict) and isinstance(collected_endpoints.get("slices"), list):
+                    endpoint_inventory = {
+                        "status": "observed",
+                        "slices": [item for item in collected_endpoints["slices"] if isinstance(item, dict)],
+                        "omitted_slices": collected_endpoints.get("omitted_slices", 0),
+                        "observed_at": collected_endpoints.get("observed_at"),
+                    }
+            except (RuntimeError, OSError, ValueError):
+                pass
+            endpoint_slices_by_service: dict[str, list[dict[str, Any]]] = {}
+            for item in endpoint_inventory["slices"]:
+                service_name = str(item.get("service") or "")
+                if item.get("namespace", self.namespace) == self.namespace and service_name in service_names:
+                    endpoint_slices_by_service.setdefault(service_name, []).append(item)
             selections = []
             for monitor in monitors:
                 monitor_namespace = str(monitor.get("namespace") or "default")
@@ -541,12 +708,35 @@ class InvestigationTools:
                         workload_selector_match = bool(selector_matches) if service_selector and workload_pods else None
                         target_relevance = ("alert_target_service" if is_alert_service else
                             "alert_target_workload" if target_workload and workload_selector_match is True else None)
-                        candidates.append({"name": service.get("name"), "namespace": service_namespace,
-                                           "labels": labels, "selector_evaluation": evaluation,
-                                           "namespace_selected": namespace_selected,
-                                           "service_selector": service_selector,
-                                           "workload_selector_match": workload_selector_match,
-                                           "target_relevance": target_relevance})
+                        service_evidence = {
+                            "name": service.get("name"), "namespace": service_namespace,
+                            "labels": labels,
+                            "selector": service_selector,
+                            "ports": service.get("ports", []) if isinstance(service.get("ports"), list) else [],
+                            "omitted_ports": service.get("omitted_ports", 0),
+                            "ports_complete": service.get("ports_complete", True) is not False,
+                            "endpoint_slices": endpoint_slices_by_service.get(str(service.get("name") or ""), [])[:12],
+                            "selector_evaluation": evaluation,
+                        }
+                        endpoint_pod_health = []
+                        for endpoint_slice in service_evidence["endpoint_slices"]:
+                            for endpoint in endpoint_slice.get("endpoints", [])[:24]:
+                                target_ref = endpoint.get("target_ref") if isinstance(endpoint.get("target_ref"), dict) else {}
+                                if target_ref.get("kind") != "Pod" or target_ref.get("namespace") != service_namespace:
+                                    continue
+                                target_pod = pods_by_name.get(str(target_ref.get("name") or ""))
+                                if target_pod:
+                                    endpoint_pod_health.append({"endpoint_ready": endpoint.get("ready"),
+                                                                **_pod_health(target_pod)})
+                        service_evidence["endpoint_pod_health"] = endpoint_pod_health[:12]
+                        service_evidence["endpoint_port_checks"] = _service_monitor_port_checks(monitor, service_evidence)
+                        service_evidence.update({
+                            "namespace_selected": namespace_selected,
+                            "service_selector": service_selector,
+                            "workload_selector_match": workload_selector_match,
+                            "target_relevance": target_relevance,
+                        })
+                        candidates.append(service_evidence)
                     candidates.sort(key=lambda item: (item["name"] != self.discovery_targets.get("target_service"),
                                                         item["target_relevance"] not in {"alert_target_service", "alert_target_workload"},
                                                         item["workload_selector_match"] is not True,
@@ -554,29 +744,41 @@ class InvestigationTools:
                                                         0 if item["selector_evaluation"]["status"] == "matched" else 1,
                                                         sum(1 for row in item["selector_evaluation"].get("requirements", []) if row.get("matches") is False),
                                                         str(item.get("name") or "")))
-                    matched = [item["name"] for item in candidates if item["namespace_selected"] and item["selector_evaluation"]["status"] == "matched"]
-                    selections.append({"monitor": monitor, "target_kind": "Service labels",
+                    matched = [item["name"] for item in candidates if item["namespace_selected"]
+                               and item["selector_evaluation"]["status"] == "matched"]
+                    selections.append({"monitor": monitor,
+                                       "configured_endpoints": monitor.get("endpoints", [])[:12]
+                                       if isinstance(monitor.get("endpoints"), list) else [],
+                                       "target_kind": "Service labels",
                                        "namespace_scope": {"status": namespace_status, "effective_namespaces": effective_namespaces[:12]},
                                        "matched_services": matched[:12], "matched_pods": [],
                                        "evaluated_services": candidates[:12], "omitted_service_candidates": max(0, len(candidates) - 12)})
                 else:
                     candidates = []
-                    for pod in current_pods:
+                    for pod in namespace_pods:
                         pod_namespace = str(pod.get("namespace") or self.namespace)
                         if pod_namespace not in effective_namespaces:
                             continue
                         labels = pod.get("labels", {}) if isinstance(pod.get("labels"), dict) else {}
                         evaluation = _selector_observation(labels, monitor, namespace_status)
+                        container_ports, container_ports_complete = _pod_container_ports(pod)
                         candidates.append({"name": pod.get("name"), "namespace": pod_namespace,
-                                           "labels": labels, "selector_evaluation": evaluation,
-                                           "target_relevance": "alert_target_workload" if target_workload and pod.get("workload") == target_workload else None})
-                    candidates.sort(key=lambda item: (item["name"] not in self.pods,
-                                                        item["target_relevance"] != "alert_target_workload",
+                                           "labels": labels, "health": _pod_health(pod),
+                                           "container_ports": container_ports,
+                                           "container_ports_complete": container_ports_complete,
+                                           "endpoint_port_checks": _pod_monitor_port_checks(monitor, pod),
+                                           "selector_evaluation": evaluation,
+                                           "target_relevance": ("alert_target_workload" if target_workload and pod.get("workload") == target_workload else
+                                                                "prometheus_target_pod" if pod.get("name") in target_pod_names else None)})
+                    candidates.sort(key=lambda item: (item["target_relevance"] not in {"alert_target_workload", "prometheus_target_pod"},
+                                                        item["name"] not in self.pods,
                                                         0 if item["selector_evaluation"]["status"] == "matched" else 1,
                                                         sum(1 for row in item["selector_evaluation"].get("requirements", []) if row.get("matches") is False),
                                                         str(item.get("name") or "")))
                     matched = [item["name"] for item in candidates if item["selector_evaluation"]["status"] == "matched"]
-                    selections.append({"monitor": monitor, "target_kind": "Pod labels",
+                    selections.append({"monitor": monitor, "configured_endpoints": monitor.get("endpoints", [])[:12]
+                                                     if isinstance(monitor.get("endpoints"), list) else [],
+                                       "target_kind": "Pod labels",
                                        "namespace_scope": {"status": namespace_status, "effective_namespaces": effective_namespaces[:12]},
                                        "matched_services": [], "matched_pods": matched[:12],
                                        "evaluated_pods": candidates[:12], "omitted_pod_candidates": max(0, len(candidates) - 12)})
@@ -589,14 +791,22 @@ class InvestigationTools:
                 "provenance": [
                     {"source": "Prometheus target API", "observed_at": observed_at},
                     {"source": "Kubernetes monitoring and Service/Pod APIs", "observed_at": observed_at},
+                    {"source": "Kubernetes API EndpointSliceList", "observed_at": endpoint_inventory.get("observed_at"),
+                     "status": endpoint_inventory["status"]},
                 ],
                 "active_targets": targets["active"],
                 "dropped_targets": targets["dropped"],
                 "monitor_selection": selections,
+                "endpoint_slice_inventory": {key: endpoint_inventory[key] for key in ("status", "omitted_slices")},
                 "current_pod_labels": [{"pod": item["name"], "namespace": item.get("namespace", self.namespace), "labels": item.get("labels", {})} for item in current_pods[:12]],
-                "current_service_labels": [{"service": item.get("name"), "namespace": item.get("namespace", self.namespace), "labels": item.get("labels", {})} for item in sorted(
+                "current_pod_health": [_pod_health(item) for item in current_pods[:12]],
+                "current_service_labels": [{"service": item.get("name"), "namespace": item.get("namespace", self.namespace),
+                    "labels": item.get("labels", {}), "selector": item.get("selector", {}), "ports": item.get("ports", []),
+                    "omitted_ports": item.get("omitted_ports", 0), "ports_complete": item.get("ports_complete", True),
+                    "endpoint_slices": endpoint_slices_by_service.get(str(item.get("name") or ""), [])[:8]}
+                    for item in sorted(
                     services, key=lambda item: (item.get("name") != self.discovery_targets.get("target_service"), str(item.get("name") or "")))[:12]],
-                "limitation": "ServiceMonitor selectors apply to Service labels; PodMonitor selectors apply to Pod labels. Supported label expressions are evaluated only for current, bounded candidates in the captured namespace. An unknown selector, Prometheus resource selector, relabeling rule, scrape configuration, or RBAC restriction can prevent a conclusion. A matched selector does not prove the target was retained or scraped.",
+                "limitation": "ServiceMonitor selectors apply to Service labels; PodMonitor selectors apply to Pod labels. Supported label expressions are evaluated only for current, bounded candidates in the captured namespace. ServiceMonitor port names are compared with current Service port names; EndpointSlice readiness and Pod health are current snapshots, not incident-time state. EndpointSlice access can be unavailable under RBAC. An unknown selector, Prometheus resource selector, relabeling rule, scrape configuration, or RBAC restriction can prevent a conclusion. A matched selector or ready backend does not prove the target was retained or scraped.",
             })
         if name == "workload_state":
             pods = [item for item in kubernetes.list_pods({self.namespace})
