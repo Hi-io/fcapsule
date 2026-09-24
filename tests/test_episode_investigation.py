@@ -6,7 +6,7 @@ from unittest.mock import Mock
 from fcapsule.episode_investigation import SYSTEM, RELATIONSHIP_REVIEW_SYSTEM, EVIDENCE_REVIEW_SYSTEM, assessment_payload, run_investigation, validate_assessment
 from fcapsule.investigation_tools import InvestigationTools, episode_context, log_patterns, metric_summary, scrub, stamp
 from fcapsule.processing.anonymizer import anonymize_text, template_for_message
-from fcapsule.reasoning.context_budget import estimate_tokens
+from fcapsule.reasoning.context_budget import _check_item, _minimal_check_observation, compact_for_model, estimate_tokens
 
 
 def assessment(ref="Q001"):
@@ -809,16 +809,21 @@ class InvestigationToolTests(unittest.TestCase):
             "dropped": [{"state": "dropped", "pod": "worker-2", "service": "worker"}],
         }
         self.kube.monitoring_resources.return_value = [
-            {"kind": "ServiceMonitor", "name": "worker", "match_labels": {"metrics": "enabled"}},
-            {"kind": "PodMonitor", "name": "worker-pods", "match_labels": {"metrics": "pod-enabled"}},
+            {"kind": "ServiceMonitor", "name": "worker", "namespace": "monitoring",
+             "target_namespaces": ["ns"], "effective_namespaces": ["ns"],
+             "namespace_selector": {"status": "resolved"}, "match_labels": {"metrics": "enabled"},
+             "match_expressions": [{"key": "tier", "operator": "In", "values": ["backend"]}]},
+            {"kind": "PodMonitor", "name": "worker-pods", "namespace": "monitoring",
+             "target_namespaces": ["ns"], "effective_namespaces": ["ns"],
+             "namespace_selector": {"status": "resolved"}, "match_labels": {"metrics": "pod-enabled"}},
         ]
         self.kube.list_services.return_value = [
-            {"name": "worker", "labels": {"metrics": "enabled"}, "selector": {"app": "worker"}},
-            {"name": "other", "labels": {"metrics": "disabled"}, "selector": {}},
+            {"namespace": "ns", "name": "worker", "labels": {"metrics": "enabled", "tier": "backend"}, "selector": {"app": "worker"}},
+            {"namespace": "ns", "name": "other", "labels": {"metrics": "disabled", "tier": "backend"}, "selector": {}},
         ]
         self.kube.list_pods.return_value = [
-            {"name": "worker-1", "workload": "worker", "labels": {"metrics": "pod-enabled"}},
-            {"name": "worker-2", "workload": "worker", "labels": {"metrics": "misspelled"}},
+            {"name": "worker-1", "namespace": "ns", "workload": "worker", "labels": {"metrics": "pod-enabled"}},
+            {"name": "worker-2", "namespace": "ns", "workload": "worker", "labels": {"metrics": "misspelled"}},
         ]
 
         result = self.kit.execute("scrape_discovery", {})
@@ -827,7 +832,77 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertEqual(result["dropped_targets"][0]["state"], "dropped")
         self.assertEqual(result["monitor_selection"][0]["matched_services"], ["worker"])
         self.assertEqual(result["monitor_selection"][1]["matched_pods"], ["worker-1"])
+        service_evidence = result["monitor_selection"][0]["evaluated_services"]
+        self.assertEqual(service_evidence[0]["selector_evaluation"]["status"], "matched")
+        self.assertEqual(service_evidence[1]["selector_evaluation"]["status"], "not_matched")
+        self.assertEqual(service_evidence[1]["selector_evaluation"]["requirements"][0]["observed"], "disabled")
+        self.assertEqual(result["monitor_selection"][0]["target_kind"], "Service labels")
+        self.assertEqual(result["monitor_selection"][0]["namespace_scope"]["effective_namespaces"], ["ns"])
+        self.assertTrue(result["observed_at"].endswith("Z"))
         self.assertIn("ServiceMonitor selectors apply to Service labels", result["limitation"])
+
+    def test_scrape_discovery_keeps_unknown_namespace_or_selector_rules_unknown(self):
+        self.prom.scrape_targets.return_value = {"active": [], "dropped": []}
+        self.kube.monitoring_resources.return_value = [{
+            "kind": "ServiceMonitor", "name": "uncertain", "namespace": "monitoring",
+            "effective_namespaces": ["ns"], "namespace_selector": {"status": "unknown"},
+            "match_labels": {"metrics": "enabled"}, "match_expressions": [], "selector_complete": False,
+        }]
+        self.kube.list_services.return_value = [{"name": "worker", "namespace": "ns",
+            "labels": {"metrics": "misspelled"}}]
+        self.kube.list_pods.return_value = []
+
+        result = self.kit.execute("scrape_discovery", {})
+
+        selection = result["monitor_selection"][0]
+        self.assertEqual(selection["matched_services"], [])
+        self.assertEqual(selection["evaluated_services"][0]["selector_evaluation"]["status"], "unknown")
+        self.assertEqual(selection["namespace_scope"]["status"], "unknown")
+
+    def test_alert_target_service_and_workload_survive_large_service_discovery_compaction(self):
+        self.entries[0]["report"]["fault_alerts"] = [{"name": "TargetMissing", "rule": {"labels": {
+            "target_service": "z-orders-metrics", "target_workload": "orders-api"}}}]
+        self.kit = InvestigationTools(self.entries, {"cluster": "test", "namespace": "ns", "name": "worker"}, self.sources)
+        self.prom.scrape_targets.return_value = {"active": [], "dropped": []}
+        self.kube.monitoring_resources.return_value = [{
+            "kind": "ServiceMonitor", "name": "all-metrics", "namespace": "monitoring",
+            "effective_namespaces": ["ns"], "namespace_selector": {"status": "resolved"},
+            "match_labels": {"monitoring": "enabled"}, "match_expressions": [],
+        }]
+        unrelated = [{"name": f"a-noise-{index:02}", "namespace": "ns", "labels": {"monitoring": "enabled"}, "selector": {}}
+                     for index in range(15)]
+        target = {"name": "z-orders-metrics", "namespace": "ns", "labels": {"monitoring": "enabeld"},
+                  "selector": {"app": "orders"}}
+        self.kube.list_services.return_value = unrelated + [target]
+        self.kube.list_pods.return_value = [{"name": "orders-api-1", "namespace": "ns", "workload": "orders-api",
+                                             "labels": {"app": "orders"}}]
+
+        raw = self.kit.execute("scrape_discovery", {})
+        service = raw["monitor_selection"][0]["evaluated_services"][0]
+        self.assertEqual(service["name"], "z-orders-metrics")
+        self.assertEqual(service["selector_evaluation"]["status"], "not_matched")
+        self.assertTrue(service["workload_selector_match"])
+        self.assertEqual(raw["current_service_labels"][0]["service"], "z-orders-metrics")
+
+        check = {"id": "Q-target", "tool": "scrape_discovery", "status": "completed",
+                 "required_observation": True, "result": raw}
+        compact = _check_item(check, True)
+        minimum = _minimal_check_observation(compact)
+        resource = minimum["monitor_selection"][0]["evaluated_resources"][0]
+        self.assertEqual(resource["name"], "z-orders-metrics")
+        self.assertEqual(resource["selector_status"], "not_matched")
+        self.assertEqual(resource["service_selector"], {"app": "orders"})
+        self.assertTrue(resource["workload_selector_match"])
+        self.assertEqual(minimum["discovery_targets"], {"target_service": "z-orders-metrics", "target_workload": "orders-api"})
+
+        bounded, visible = compact_for_model({"episode_id": "discovery-minimum", "live_capture": True, "evidence": []},
+                                              [check], max_prompt_tokens=600)
+        self.assertLessEqual(estimate_tokens(bounded), 600)
+        self.assertIn("Q-target", visible)
+        self.assertTrue(bounded["prior_checks"][0]["observation"].get("minimal_discovery"))
+        minimized_service = bounded["prior_checks"][0]["observation"]["monitor_selection"][0]["evaluated_resources"][0]
+        self.assertEqual(minimized_service["name"], "z-orders-metrics")
+        self.assertEqual(minimized_service["service_selector"], {"app": "orders"})
 
     def test_alert_rule_logic_keeps_detection_separate_from_root_cause(self):
         self.entries[0]["report"]["fault_alerts"] = [{
@@ -846,18 +921,29 @@ class InvestigationToolTests(unittest.TestCase):
         self.kube.declared_services.return_value = [{"service": "inventory", "namespace": "ns"}]
         with self.assertRaisesRegex(ValueError, "not declared"):
             self.kit.execute("dependency_evidence", {"service": "unrelated"})
-        self.kube.service_pods.assert_not_called()
+        self.kube.resolve_service.assert_not_called()
         self.logs.collect_logs.assert_not_called()
 
     def test_dependency_query_is_bounded_and_keeps_partial_evidence(self):
         self.kube.list_pods.return_value = [{"name": "worker-1", "workload": "worker"}]
-        self.kube.declared_services.return_value = [{"service": "inventory", "namespace": "ns"}]
-        self.kube.service_pods.return_value = [{"name": "inventory-1"}, {"name": "inventory-2"}]
+        self.kube.declared_services.return_value = [{"service": "inventory", "namespace": "ns",
+            "configured_via": "ConfigMap/runtime:INVENTORY_URL", "configured_endpoint": {
+                "host": "inventory", "scheme": "http", "port": 8080, "port_source": "explicit"},
+            "observed_at": "2026-09-20T12:00:00Z"}]
+        self.kube.resolve_service.return_value = {"service": {"name": "inventory", "namespace": "ns", "type": "ClusterIP",
+            "selector": {"app": "inventory"}, "ports": [{"name": "http", "port": 8081, "target_port": 8081, "protocol": "TCP"}],
+            "observed_at": "2026-09-20T12:01:00Z", "source": "Kubernetes API Service"},
+            "pods": [{"name": "inventory-1", "namespace": "ns"}, {"name": "inventory-2", "namespace": "ns"}]}
         self.logs.collect_logs.return_value = [{"message": '{"mysql_error_code":1054}', "@timestamp": "now"}]
         self.prom.collect_pod_metrics.side_effect = RuntimeError("password=private")
         self.kube.configuration_snapshot.return_value = [{"kind": "PodSpec", "name": "inventory-1"}]
         result = self.kit.execute("dependency_evidence", {"service": "inventory", "terms": ["1054"]})
         self.assertEqual(result["matching_pods"], 2)
+        self.assertEqual(result["port_comparisons"][0]["status"], "does_not_match_service_port")
+        self.assertEqual(result["port_comparisons"][0]["configured_port"], 8080)
+        self.assertEqual(result["port_comparisons"][0]["service_ports"][0]["port"], 8081)
+        self.assertEqual(result["declared_endpoints"][0]["configured_via"], "ConfigMap/runtime:INVENTORY_URL")
+        self.assertTrue(result["observed_at"].endswith("Z"))
         self.assertEqual(result["unavailable_sources"], ["Prometheus"])
         self.assertEqual(result["patterns"][0]["fields"]["mysql_error_code"], "1054")
         self.assertEqual(self.logs.collect_logs.call_args.args[:2], ("ns", "inventory-1"))
@@ -866,9 +952,64 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertNotIn("private", json.dumps(result))
         self.assertEqual(self.kit.pods, ["worker-1"])
 
+    def test_dependency_without_current_pods_returns_service_facts_without_extra_queries(self):
+        self.kube.list_pods.return_value = [{"name": "worker-1", "workload": "worker"}]
+        self.kube.declared_services.return_value = [{"service": "inventory", "namespace": "ns",
+            "configured_endpoint": {"host": "inventory", "scheme": None, "port": None, "port_source": "not_declared"}}]
+        self.kube.resolve_service.return_value = {"service": {"name": "inventory", "namespace": "ns", "type": "ClusterIP",
+            "selector": {"app": "inventory"}, "ports": [{"name": "http", "port": 8080, "target_port": 8081}],
+            "observed_at": "2026-09-20T12:01:00Z", "source": "Kubernetes API Service"}, "pods": []}
+
+        result = self.kit.execute("dependency_evidence", {"service": "inventory"})
+
+        self.assertEqual(result["matching_pods"], 0)
+        self.assertEqual(result["port_comparisons"][0]["status"], "unknown")
+        self.assertEqual(result["not_collected_sources"], ["OpenSearch", "Prometheus", "Pod configuration"])
+        self.assertEqual(result["observations"], [])
+        self.logs.collect_logs.assert_not_called()
+        self.prom.collect_pod_metrics.assert_not_called()
+
+    def test_dependency_keeps_route_facts_when_all_pod_sources_are_unavailable(self):
+        self.kube.list_pods.return_value = [{"name": "worker-1", "workload": "worker"}]
+        self.kube.declared_services.return_value = [{"service": "inventory", "namespace": "ns",
+            "configured_endpoint": {"host": "inventory", "scheme": "http", "port": 8080, "port_source": "explicit"}}]
+        self.kube.resolve_service.return_value = {"service": {"name": "inventory", "namespace": "ns", "type": "ClusterIP",
+            "selector": {"app": "inventory"}, "ports": [{"name": "http", "port": 8081, "target_port": 8081}],
+            "observed_at": "2026-09-20T12:01:00Z", "source": "Kubernetes API Service"},
+            "pods": [{"name": "inventory-1", "namespace": "ns"}]}
+        self.logs.collect_logs.side_effect = RuntimeError("OpenSearch unavailable")
+        self.prom.collect_pod_metrics.side_effect = RuntimeError("Prometheus unavailable")
+        self.kube.configuration_snapshot.side_effect = RuntimeError("Kubernetes unavailable")
+
+        result = self.kit.execute("dependency_evidence", {"service": "inventory"})
+
+        self.assertEqual(result["port_comparisons"][0]["status"], "does_not_match_service_port")
+        self.assertEqual(result["unavailable_sources"], ["OpenSearch", "Prometheus", "Kubernetes"])
+        self.assertEqual(result["service_observation"]["ports"][0]["port"], 8081)
+
     def test_sql_error_codes_do_not_collapse_into_one_pattern(self):
         groups = log_patterns([{"message": '{"mysql_error_code":1054}'}, {"message": '{"mysql_error_code":1205}'}])
         self.assertEqual(groups["matching_patterns"], 2)
+
+    def test_structured_request_ids_remain_linkable_without_fragmenting_log_patterns(self):
+        rows = [
+            {"message": "reservation rejected", "diagnostic_fields": {
+                "error_code": "ER_DUP_ENTRY", "request_id": "request-1", "authorization": "secret-value"}},
+            {"message": "reservation rejected", "diagnostic_fields": {
+                "error_code": "ER_DUP_ENTRY", "request_id": "request-2"}},
+        ]
+
+        result = log_patterns(rows)
+
+        self.assertEqual(result["matching_patterns"], 1)
+        self.assertEqual(result["patterns"][0]["count"], 2)
+        first, second = [example["diagnostic_fields"]["request_id"]
+                         for example in result["patterns"][0]["examples"]]
+        self.assertTrue(first.startswith("<REF:"))
+        self.assertNotEqual(first, second)
+        self.assertNotIn("request-1", json.dumps(result))
+        self.assertNotIn("request-2", json.dumps(result))
+        self.assertNotIn("secret-value", json.dumps(result))
 
     def test_post_alert_metrics_do_not_mix_in_healthy_baseline(self):
         series = [{"metric": "connections", "values": [["2026-09-20T12:00:00Z", 1],
@@ -1026,6 +1167,26 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertEqual(context["alerts"][0]["labels"], {"target_service": "app-metrics", "target_workload": "orders-api"})
         self.assertEqual(context["alerts"][0]["alert_identity"], "MetricsMissing")
 
+    def test_representative_diagnostics_survive_report_episode_and_prompt_path(self):
+        events = [
+            {"timestamp": "2026-09-20T12:00:00Z", "level": "ERROR", "message": "Reservation rejected",
+             "diagnostic_fields": {"buffered_bytes": "4096"}},
+            {"timestamp": "2026-09-20T12:04:00Z", "level": "ERROR", "message": "Reservation rejected",
+             "diagnostic_fields": {"buffered_bytes": "8192"}},
+        ]
+        self.entries[0]["report"]["supporting_evidence"] = [{
+            "evidence_id": "ev_buffer", "type": "log_template", "title": "Reservation rejected",
+            "summary": "Repeated bounded diagnostic pattern", "representative_events": events,
+            "representative_lines": ["old unstructured rendering"], "diagnostic_fields": {},
+        }]
+
+        context = episode_context({"episode_id": "episode"}, self.entries)
+        compact, _ = compact_for_model(context, [], max_prompt_tokens=500)
+
+        pairs = compact["evidence"][0]["diagnostic_examples"]
+        self.assertEqual([item["diagnostic_fields"]["buffered_bytes"] for item in pairs], ["4096", "8192"])
+        self.assertEqual([item["timestamp"] for item in pairs], ["2026-09-20T12:00:00Z", "2026-09-20T12:04:00Z"])
+
     def test_diagnostic_codes_survive_reduction_and_secrets_do_not(self):
         self.assertNotEqual(template_for_message('exit_code=137 job=19'), template_for_message('exit_code=1 job=20'))
         self.assertEqual(template_for_message('exit_code=1 job=19'), template_for_message('exit_code=1 job=20'))
@@ -1033,7 +1194,9 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertNotIn("a value", masked)
         self.assertNotIn("abc", masked)
         self.assertNotIn("token", scrub({"token": "abc", "reason": "known"}))
-        self.assertEqual(metric_summary([{"metric": "empty", "values": [["now", "NaN"]]}]), [])
+        empty_summary = metric_summary([{"metric": "empty", "values": [["now", "NaN"]]}])
+        self.assertEqual(empty_summary[0]["samples"], 0)
+        self.assertEqual(empty_summary[0]["freshness"]["status"], "no_data")
         groups = log_patterns([{"message": "exit_code=1"}, {"message": "exit_code=137"}])
         self.assertEqual(groups["matching_patterns"], 2)
 

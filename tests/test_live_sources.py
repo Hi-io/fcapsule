@@ -278,6 +278,48 @@ class LiveSourceTests(unittest.TestCase):
         self.assertEqual(logs[0]["level"], "ERROR")
         self.assertEqual(logs[0]["service"], "payments")
 
+    def test_opensearch_adapter_preserves_bounded_structured_diagnostics(self):
+        adapter = OpenSearchAdapter("http://opensearch")
+        adapter.transport = FakeTransport(
+            {
+                "/_search": {
+                    "hits": {
+                        "hits": [
+                            {
+                                "_source": {
+                                    "@timestamp": "2026-09-20T00:00:00Z",
+                                    "message": "dependency request failed",
+                                    "level": "error",
+                                    "error": {"code": "ECONNREFUSED", "message": "password=do-not-keep"},
+                                    "http": {"response": {"status_code": 503}},
+                                    "request": {"id": "request-4821"},
+                                    "authorization": "Bearer do-not-keep-this",
+                                    "unrelated_payload": "do-not-retain-arbitrary-body",
+                                    "kubernetes": {
+                                        "namespace": "shop",
+                                        "pod": {"name": "api-1"},
+                                        "container": {"name": "api"},
+                                    },
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+        )
+        end = datetime(2026, 9, 20, tzinfo=timezone.utc)
+
+        logs = adapter.collect_logs("shop", "api-1", end - timedelta(minutes=5), end)
+
+        self.assertEqual(logs[0]["message"], "dependency request failed")
+        fields = logs[0]["diagnostic_fields"]
+        self.assertEqual(fields["error_code"], "ECONNREFUSED")
+        self.assertEqual(fields["status_code"], "503")
+        self.assertRegex(fields["request_id"], r"^<REF:[A-Z2-7]{10}>$")
+        self.assertNotIn("request-4821", repr(logs))
+        self.assertNotIn("do-not-keep", repr(logs))
+        self.assertNotIn("do-not-retain-arbitrary-body", repr(logs))
+
     def test_opensearch_adapter_reserves_capacity_for_post_alert_logs(self):
         adapter = OpenSearchAdapter("http://opensearch")
         adapter.transport = FocusedLogTransport()
@@ -339,8 +381,10 @@ class LiveSourceTests(unittest.TestCase):
                     "items": [{
                         "metadata": {"name": "api", "namespace": "monitoring", "resourceVersion": "12"},
                         "spec": {
-                            "namespaceSelector": {"matchNames": ["shop"]},
-                            "selector": {"matchLabels": {"metrics": "enabled"}},
+                        "namespaceSelector": {"matchNames": ["shop"]},
+                            "selector": {"matchLabels": {"metrics": "enabled"}, "matchExpressions": [
+                                {"key": "tier", "operator": "In", "values": ["api", "worker"]},
+                            ]},
                             "endpoints": [{"port": "metrics", "path": "/metrics", "interval": "30s"}],
                         },
                     }]
@@ -350,7 +394,9 @@ class LiveSourceTests(unittest.TestCase):
                         "metadata": {"name": "worker", "namespace": "monitoring"},
                         "spec": {
                             "namespaceSelector": {"matchNames": ["shop"]},
-                            "selector": {"matchLabels": {"metrics": "pod-enabled"}},
+                            "selector": {"matchLabels": {"metrics": "pod-enabled"}, "matchExpressions": [
+                                {"key": "deprecated", "operator": "DoesNotExist", "values": []},
+                            ]},
                             "podMetricsEndpoints": [{"port": "metrics"}],
                         },
                     }]
@@ -363,6 +409,42 @@ class LiveSourceTests(unittest.TestCase):
         self.assertEqual([item["kind"] for item in monitors], ["ServiceMonitor", "PodMonitor"])
         self.assertEqual(monitors[0]["match_labels"], {"metrics": "enabled"})
         self.assertEqual(monitors[1]["match_labels"], {"metrics": "pod-enabled"})
+        self.assertEqual(monitors[0]["match_expressions"], [
+            {"key": "tier", "operator": "In", "values": ["api", "worker"]},
+        ])
+        self.assertEqual(monitors[1]["match_expressions"], [
+            {"key": "deprecated", "operator": "DoesNotExist", "values": []},
+        ])
+        self.assertEqual(monitors[0]["effective_namespaces"], ["shop"])
+        self.assertEqual(monitors[0]["namespace_selector"]["status"], "resolved")
+        self.assertTrue(monitors[0]["observed_at"].endswith("Z"))
+
+    def test_monitor_namespace_any_is_scoped_to_requested_namespaces(self):
+        adapter = KubernetesAdapter("http://kubernetes")
+        adapter.transport = FakeTransport({
+            "/apis/monitoring.coreos.com/v1/servicemonitors": {"items": [
+                {"metadata": {"name": "global", "namespace": "monitoring"},
+                 "spec": {"namespaceSelector": {"any": True}, "selector": {}}},
+                {"metadata": {"name": "local-default", "namespace": "shop"},
+                 "spec": {"selector": {"matchLabels": {"app": "api"}}}},
+                {"metadata": {"name": "other-only", "namespace": "monitoring"},
+                 "spec": {"namespaceSelector": {"matchNames": ["other"]}, "selector": {}}},
+                {"metadata": {"name": "malformed-cross-ns", "namespace": "monitoring"},
+                 "spec": {"namespaceSelector": {"any": "true"}}},
+            ]},
+            "/apis/monitoring.coreos.com/v1/podmonitors": {"items": []},
+        })
+
+        monitors = adapter.monitoring_resources({"shop"})
+
+        self.assertEqual([item["name"] for item in monitors], ["global", "local-default", "malformed-cross-ns"])
+        self.assertEqual(monitors[0]["effective_namespaces"], ["shop"])
+        self.assertTrue(monitors[0]["namespace_selector"]["any"])
+        self.assertEqual(monitors[1]["effective_namespaces"], ["shop"])
+        self.assertTrue(monitors[1]["namespace_selector"]["defaults_to_monitor_namespace"])
+        self.assertEqual(monitors[2]["effective_namespaces"], ["shop"])
+        self.assertEqual(monitors[2]["namespace_selector"]["status"], "unknown")
+        self.assertFalse(monitors[2]["selector_complete"])
 
     def test_source_configuration_is_validated_and_persisted(self):
         with tempfile.TemporaryDirectory() as directory:

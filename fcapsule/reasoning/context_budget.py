@@ -13,7 +13,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from fcapsule.processing.anonymizer import anonymize_text
+from fcapsule.processing.anonymizer import anonymize_text, diagnostic_fields
 
 
 def estimate_tokens(value: Any) -> int:
@@ -64,7 +64,9 @@ def _bounded(value: Any, depth: int = 0, max_depth: int = 4, max_items: int = 6)
     return _short(value)
 
 
-def _visual_observation(observations: list[Any], budget: int = 1000) -> dict[str, Any]:
+def _visual_observation(
+    observations: list[Any], visible_text: list[Any] | None = None, budget: int = 1000,
+) -> dict[str, Any]:
     """Share space between complete extracted facts, independent of their meaning."""
 
     rows = []
@@ -85,13 +87,33 @@ def _visual_observation(observations: list[Any], budget: int = 1000) -> dict[str
             kept.append((index, row))
             budget -= size
         remaining -= 1
+    visible_rows = []
+    raw_visible_text = visible_text if isinstance(visible_text, list) else []
+    for item in raw_visible_text[:6]:
+        raw_text = item.get("text") if isinstance(item, dict) else item
+        text = anonymize_text(str(raw_text or "")).strip()
+        if text:
+            visible_rows.append({"text": _short(text, 120), "source": "Vision-model text extraction"})
     return {"facts": [row for _, row in sorted(kept)],
-            "omitted_facts": len(observations) - len(kept)}
+            "visible_text": visible_rows,
+            "provenance": {
+                "facts": "Vision-model observations from the uploaded image; not independently verified.",
+                "visible_text": "OCR-style text extracted from the uploaded image by the configured vision model; transcription may be imperfect.",
+            },
+            "omitted_facts": len(observations) - len(kept),
+            "omitted_visible_text": max(0, len(raw_visible_text) - len(visible_rows))}
 
 
 def _minimal_visual_observation(value: dict[str, Any]) -> dict[str, Any]:
-    reduced = _visual_observation(value["facts"], budget=600)
-    reduced["omitted_facts"] += value.get("omitted_facts", 0)
+    facts = value.get("facts") if isinstance(value.get("facts"), list) else []
+    visible_text = value.get("visible_text") if isinstance(value.get("visible_text"), list) else []
+    reduced = _visual_observation(facts, visible_text, budget=600)
+    # Count only newly removed rows; this must be idempotent because the budget
+    # loop can re-check an already-minimal image observation.
+    reduced["omitted_facts"] = int(value.get("omitted_facts", 0)) + max(0, len(facts) - len(reduced["facts"]))
+    reduced["omitted_visible_text"] = int(value.get("omitted_visible_text", 0)) + max(
+        0, len(visible_text) - len(reduced["visible_text"])
+    )
     return reduced
 
 
@@ -111,7 +133,11 @@ def _evidence_item(item: dict[str, Any]) -> dict[str, Any]:
         "title": _short(item.get("title"), 180),
         "summary": _short(item.get("summary"), 360),
         "time_range": _bounded(item.get("time_range"), max_items=3),
-        "diagnostic_example": _bounded(examples[:1], max_items=1) if examples else None,
+        "diagnostic_examples": [
+            _paired_log_example(example) for example in examples[:2]
+        ] if examples else None,
+        "diagnostic_fields": diagnostic_fields(None, item.get("diagnostic_fields"))
+        if isinstance(item.get("diagnostic_fields"), dict) else None,
         "configuration": _bounded(item.get("configuration"), max_items=3) if item.get("configuration") else None,
         "operator_context": _bounded(item.get("operator_context"), max_items=3) if item.get("operator_context") else None,
         "limitation": _short(item.get("limitation"), 180),
@@ -119,9 +145,11 @@ def _evidence_item(item: dict[str, Any]) -> dict[str, Any]:
         "metric_observation": compact_metric_observation(item.get("metric_observation")),
     }
     if item.get("domain") == "image_evidence" and item.get("visual_observations"):
-        values["visual_observation"] = _visual_observation(item["visual_observations"])
+        values["visual_observation"] = _visual_observation(
+            item["visual_observations"], item.get("visible_text", [])
+        )
         values.pop("summary", None)
-        values.pop("diagnostic_example", None)
+        values.pop("diagnostic_examples", None)
     # Empty keys cost meaningful tokens across several calls without helping a
     # model distinguish hypotheses. The full retained record stays on disk.
     return {key: value for key, value in values.items() if value not in (None, "", [], {})}
@@ -268,14 +296,18 @@ def _log_example(item: dict[str, Any]) -> dict[str, Any] | str | None:
     """Extract the semantic portion of structured logs before applying a character cap."""
 
     examples = item.get("examples") or []
-    example = examples[0] if examples else None
+    example = item if "message" in item else (examples[0] if examples else None)
     if not isinstance(example, dict):
         return _short(example, 220) if example else None
-    message = str(example.get("message", ""))
+    raw_message = example.get("message", "")
+    message = json.dumps(raw_message, ensure_ascii=True, sort_keys=True, separators=(",", ":")) \
+        if isinstance(raw_message, dict) else str(raw_message)
     try:
         structured = json.loads(message)
     except (TypeError, ValueError):
         structured = None
+    fields = diagnostic_fields(message, example.get("diagnostic_fields")
+                               if isinstance(example.get("diagnostic_fields"), dict) else None)
     if isinstance(structured, dict):
         values = {key: structured.get(key) for key in (
             "level", "message", "error", "error_type", "reason", "exit_code", "errno",
@@ -283,13 +315,34 @@ def _log_example(item: dict[str, Any]) -> dict[str, Any] | str | None:
             "buffered_bytes", "page_bytes", "delivery", "rows", "kdf", "rounds", "mode",
             "timeout_seconds", "expected_schema", "response_schema", "query_revision", "endpoint",
         )}
-        return {"timestamp": example.get("timestamp"),
-                **{key: _short(value, 180) for key, value in values.items() if value not in (None, "")}}
+        result = {key: _short(anonymize_text(str(value)), 180) for key, value in values.items()
+                  if value not in (None, "")}
+    else:
+        result = {
+            "level": example.get("level"),
+            "message": _short(message, 220),
+        }
+    result.update({key: _short(value, 180) for key, value in fields.items()
+                   if key not in result and value not in (None, "")})
     return {
         "timestamp": example.get("timestamp"),
-        "level": example.get("level"),
-        "message": _short(message, 220),
+        **{key: value for key, value in result.items() if value not in (None, "")},
     }
+
+
+def _paired_log_example(example: dict[str, Any]) -> dict[str, Any] | str | None:
+    """Keep event-local diagnostics attached to the timestamped representative that supplied them."""
+    if isinstance(example, str):
+        return _short(example, 220)
+    normalized = _log_example(example)
+    if not isinstance(normalized, dict):
+        return normalized
+    fields = {key: value for key, value in normalized.items()
+              if key not in {"timestamp", "level", "message"}}
+    result = {key: normalized[key] for key in ("timestamp", "level", "message") if normalized.get(key) is not None}
+    if fields:
+        result["diagnostic_fields"] = fields
+    return result
 
 
 def _log_observation(result: dict[str, Any]) -> dict[str, Any]:
@@ -301,6 +354,7 @@ def _log_observation(result: dict[str, Any]) -> dict[str, Any]:
     values = {
         "matching_patterns": result.get("matching_patterns"),
         "top_signal": _log_example(primary) if primary else None,
+        "fields": diagnostic_fields(None, primary.get("fields")) if primary.get("fields") else None,
         "first_seen": primary.get("first_seen"),
         "last_seen": primary.get("last_seen"),
         "occurrences": primary.get("count") if primary else None,
@@ -342,9 +396,22 @@ def _workload_observation(result: dict[str, Any]) -> dict[str, Any]:
             },
             "restart_count": state.get("restart_count"),
         })
+    dependencies = []
+    for item in result.get("declared_dependencies", []):
+        if not isinstance(item, dict) or not item.get("service"):
+            continue
+        endpoint = item.get("configured_endpoint") if isinstance(item.get("configured_endpoint"), dict) else {}
+        dependencies.append({
+            "service": item.get("service"),
+            "configured_via": _short(item.get("configured_via"), 180),
+            "configured_endpoint": {
+                key: endpoint[key] for key in ("host", "scheme", "port", "port_source") if endpoint.get(key) is not None
+            },
+            "port_configured_via": _short(item.get("port_configured_via"), 180),
+            "observed_at": item.get("observed_at"),
+        })
     values = {
-        "declared_dependencies": [item.get("service") for item in result.get("declared_dependencies", [])
-                                  if isinstance(item, dict) and item.get("service")][:4],
+        "declared_dependencies": dependencies[:4],
         "workloads": workloads,
         "configuration": configuration[:4],
     }
@@ -380,7 +447,7 @@ def _safe_configuration_values(values: dict[str, Any]) -> dict[str, str]:
 
 
 def _discovery_observation(result: dict[str, Any]) -> dict[str, Any]:
-    """Keep selectors beside their captured target labels, without diagnosing them."""
+    """Keep bounded selector requirements beside target and Service/Pod label observations."""
 
     pods = set((result.get("scope") or {}).get("pods") or [])
     targets = [item for key in ("active_targets", "dropped_targets") for item in result.get(key, [])
@@ -391,14 +458,34 @@ def _discovery_observation(result: dict[str, Any]) -> dict[str, Any]:
         return {str(key): _short(anonymize_text(str(item)), 120) for key, item in value.items()
                 if not any(word in str(key).casefold() for word in sensitive)}
 
+    discovery_targets = result.get("discovery_targets") if isinstance(result.get("discovery_targets"), dict) else {}
+    target_service = _short(anonymize_text(str(discovery_targets.get("target_service") or "")), 120)
+    target_workload = _short(anonymize_text(str(discovery_targets.get("target_workload") or "")), 120)
     selections = []
     represented_pools = set()
     for selection in result.get("monitor_selection", []):
+        if not isinstance(selection, dict):
+            continue
         monitor = selection.get("monitor") or {}
         kind = monitor.get("kind")
         if kind not in {"ServiceMonitor", "PodMonitor"}:
             continue
         selector = labels(monitor.get("match_labels") or {})
+        expressions = []
+        selector_keys = list(selector)
+        for expression in (monitor.get("match_expressions") or [])[:8]:
+            if not isinstance(expression, dict):
+                continue
+            key = str(expression.get("key") or "")
+            if not key:
+                continue
+            selector_keys.append(key)
+            row = {"key": _short(key, 253), "operator": _short(expression.get("operator"), 32)}
+            if not any(word in key.casefold() for word in sensitive):
+                row["values"] = [_short(anonymize_text(str(value)), 120) for value in (expression.get("values") or [])[:8]]
+            else:
+                row["redacted"] = True
+            expressions.append(row)
         prefix = "__meta_kubernetes_" + ("service" if kind == "ServiceMonitor" else "pod") + "_label_"
         pool = f"{kind[0].lower() + kind[1:]}/{monitor.get('namespace')}/{monitor.get('name')}/"
         represented_pools.add(pool)
@@ -407,27 +494,88 @@ def _discovery_observation(result: dict[str, Any]) -> dict[str, Any]:
             if not str(target.get("scrape_pool") or "").startswith(pool):
                 continue
             discovered = target.get("labels") or {}
-            observed = {key: discovered[prefix + re.sub(r"[^a-zA-Z0-9_]", "_", key)] for key in selector
+            observed = {key: discovered[prefix + re.sub(r"[^a-zA-Z0-9_]", "_", key)] for key in selector_keys
                         if prefix + re.sub(r"[^a-zA-Z0-9_]", "_", key) in discovered}
             matched.append({**{key: _short(anonymize_text(str(target[key])), 120) for key in
                               ("pod", "service", "state", "health", "last_error") if target.get(key)},
                             "selector_labels": labels(observed)})
         matched.sort(key=lambda item: (item.get("pod") not in pods, not bool(item.get("last_error")),
                                        not bool(item["selector_labels"])))
-        selections.append({
+        selected_kind = "evaluated_services" if kind == "ServiceMonitor" else "evaluated_pods"
+        evaluated = []
+        raw_resources = [item for item in (selection.get(selected_kind) or []) if isinstance(item, dict)]
+        raw_resources.sort(key=lambda item: (
+            item.get("name") != target_service if kind == "ServiceMonitor" and target_service else False,
+            item.get("target_relevance") not in {"alert_target_service", "alert_target_workload"},
+            item.get("workload_selector_match") is not True,
+            item.get("namespace_selected") is False,
+            item.get("selector_evaluation", {}).get("status") != "matched",
+            str(item.get("name") or ""),
+        ))
+        for resource in raw_resources[:12]:
+            raw_labels = resource.get("labels") if isinstance(resource.get("labels"), dict) else {}
+            safe_evaluation = resource.get("selector_evaluation") if isinstance(resource.get("selector_evaluation"), dict) else {}
+            requirements = []
+            for requirement in (safe_evaluation.get("requirements") or [])[:8]:
+                if not isinstance(requirement, dict):
+                    continue
+                key = str(requirement.get("key") or "")
+                row = {"key": _short(key, 253), "operator": _short(requirement.get("operator"), 32)}
+                if requirement.get("redacted") or any(word in key.casefold() for word in sensitive):
+                    row["redacted"] = True
+                else:
+                    for field in ("expected", "observed"):
+                        if field in requirement:
+                            raw = requirement[field]
+                            row[field] = ([_short(anonymize_text(str(value)), 120) for value in raw[:8]]
+                                          if isinstance(raw, list) else _short(anonymize_text(str(raw)), 120))
+                if type(requirement.get("matches")) is bool:
+                    row["matches"] = requirement["matches"]
+                requirements.append(row)
+            evaluated.append({
+                "name": _short(anonymize_text(str(resource.get("name") or "")), 120),
+                "namespace": _short(anonymize_text(str(resource.get("namespace") or "")), 120),
+                "labels": labels({key: raw_labels[key] for key in selector_keys if key in raw_labels}),
+                "selector_status": safe_evaluation.get("status", "unknown"),
+                "requirements": requirements,
+                **({"service_selector": labels(resource.get("service_selector"))}
+                   if isinstance(resource.get("service_selector"), dict) else {}),
+                **({"namespace_selected": resource.get("namespace_selected")}
+                   if type(resource.get("namespace_selected")) is bool else {}),
+                **({"workload_selector_match": resource.get("workload_selector_match")}
+                   if type(resource.get("workload_selector_match")) is bool else {}),
+                **({"target_relevance": resource.get("target_relevance")}
+                   if resource.get("target_relevance") in {"alert_target_service", "alert_target_workload"} else {}),
+            })
+        namespace_scope = selection.get("namespace_scope") if isinstance(selection.get("namespace_scope"), dict) else {}
+        selection_row = {
             "kind": kind, "name": _short(anonymize_text(str(monitor.get("name") or "")), 120),
             "match_labels": dict(list(selector.items())[:8]),
+            "match_expressions": expressions,
+            "selector_complete": monitor.get("selector_complete") is not False,
+            "namespace_scope": {
+                "status": namespace_scope.get("status", "unknown"),
+                "effective_namespaces": [_short(anonymize_text(str(value)), 120)
+                                          for value in (namespace_scope.get("effective_namespaces") or [])[:3]],
+            },
+            "evaluated_resources": evaluated[:3],
+            "omitted_resources": max(0, len(selection.get(selected_kind) or []) - min(3, len(evaluated))),
             **{key: _bounded(selection[key], max_items=3) for key in ("matched_services", "matched_pods") if key in selection},
             "targets": matched[:2], "target_count": len(matched),
-        })
+        }
+        selections.append(selection_row)
         if kind == "PodMonitor":
             pod_labels = [item for item in result.get("current_pod_labels", []) if isinstance(item, dict)]
             pod_labels.sort(key=lambda item: item.get("pod") not in pods)
             selections[-1]["current_pod_labels"] = [
                 {"pod": _short(anonymize_text(str(item.get("pod") or "")), 120),
-                 "labels": labels({key: value for key, value in (item.get("labels") or {}).items() if key in selector})}
+                 "labels": labels({key: value for key, value in (item.get("labels") or {}).items() if key in selector_keys})}
                 for item in pod_labels[:2]]
     selections.sort(key=lambda item: (
+        not any(row.get("target_relevance") == "alert_target_service" or
+                (target_service and row.get("name") == target_service) for row in item["evaluated_resources"]),
+        not any(row.get("target_relevance") == "alert_target_workload" or
+                row.get("workload_selector_match") is True for row in item["evaluated_resources"]),
         not any(target.get("pod") in pods for target in item["targets"] + item.get("current_pod_labels", [])),
         not any(target.get("selector_labels") for target in item["targets"]),
     ))
@@ -435,12 +583,138 @@ def _discovery_observation(result: dict[str, Any]) -> dict[str, Any]:
         str(target.get("scrape_pool") or "").startswith(pool) for pool in represented_pools)]
     other_targets.sort(key=lambda item: (item.get("pod") not in pods, not bool(item.get("last_error"))))
     return {
+        "compacted_discovery": True,
         "monitor_selection": selections[:3], "monitor_count": len(selections),
+        **({"discovery_targets": {key: value for key, value in (
+            ("target_service", target_service), ("target_workload", target_workload)) if value}}
+           if target_service or target_workload else {}),
+        "observed_at": result.get("observed_at"),
+        "provenance": _bounded(result.get("provenance"), max_items=3) if result.get("provenance") else [],
+        "current_service_labels": [
+            {"service": _short(anonymize_text(str(item.get("service") or "")), 120),
+             "namespace": _short(anonymize_text(str(item.get("namespace") or "")), 120),
+             "labels": labels(item.get("labels") or {})}
+            for item in sorted(
+                (item for item in (result.get("current_service_labels") or []) if isinstance(item, dict)),
+                key=lambda item: (str(item.get("service") or "") != target_service,
+                                  str(item.get("namespace") or ""), str(item.get("service") or "")))[:3]
+        ],
         "other_targets": [{key: _short(anonymize_text(str(target[key])), 120) for key in
                            ("pod", "service", "state", "health", "last_error") if target.get(key)}
                           for target in other_targets[:2]],
         "target_count": len(targets),
         "limitation": "Current bounded discovery, not incident-time state. Missing labels/targets may be omitted or filtered; absence is not proof of a cause.",
+    }
+
+
+def _dependency_observation(result: dict[str, Any]) -> dict[str, Any]:
+    """Keep endpoint and Service-port facts explicit within the model's check budget."""
+    service = result.get("service_observation") if isinstance(result.get("service_observation"), dict) else {}
+    declarations = []
+    for item in (result.get("declared_endpoints") or [])[:4]:
+        if not isinstance(item, dict):
+            continue
+        endpoint = item.get("configured_endpoint") if isinstance(item.get("configured_endpoint"), dict) else {}
+        declarations.append({
+            "service": _short(anonymize_text(str(item.get("service") or "")), 120),
+            "configured_via": _short(anonymize_text(str(item.get("configured_via") or "")), 160),
+            "configured_endpoint": {
+                key: (_short(anonymize_text(str(endpoint[key])), 120) if isinstance(endpoint.get(key), str) else endpoint.get(key))
+                for key in ("host", "scheme", "port", "port_source") if endpoint.get(key) is not None
+            },
+            "port_configured_via": _short(anonymize_text(str(item.get("port_configured_via"))), 180)
+            if item.get("port_configured_via") else None,
+            "observed_at": item.get("observed_at"),
+        })
+    safe_ports = []
+    for item in (service.get("ports") or [])[:8]:
+        if not isinstance(item, dict):
+            continue
+        safe_ports.append({key: item.get(key) for key in ("name", "port", "target_port", "protocol") if item.get(key) is not None})
+    service_record = {
+        key: _short(anonymize_text(str(service[key])), 160) if isinstance(service.get(key), str) else service.get(key)
+        for key in ("name", "namespace", "type", "source", "observed_at", "resource_version")
+        if service.get(key) is not None
+    }
+    if isinstance(service.get("selector"), dict):
+        sensitive = ("password", "secret", "token", "credential", "private", "certificate", "apikey", "api_key", "authorization")
+        service_record["selector"] = {
+            str(key): ("<redacted>" if any(word in str(key).casefold() for word in sensitive)
+                      else _short(anonymize_text(str(value)), 120))
+            for key, value in list(service["selector"].items())[:16]
+        }
+    service_record["ports"] = safe_ports
+    comparisons = []
+    for item in (result.get("port_comparisons") or [])[:4]:
+        if not isinstance(item, dict):
+            continue
+        comparisons.append({
+            key: (_short(anonymize_text(str(item[key])), 160) if isinstance(item.get(key), str) else item.get(key))
+            for key in ("configured_host", "configured_port", "configured_port_source", "status", "comparison_basis")
+            if item.get(key) is not None
+        } | {"service_ports": safe_ports})
+    observations = _bounded((result.get("observations") or [])[:5], max_items=5)
+    return {
+        "compacted_dependency": True,
+        "service": _short(anonymize_text(str(result.get("service") or "")), 120),
+        "pod": _short(anonymize_text(str(result.get("pod") or "")), 120) if result.get("pod") else None,
+        "matching_pods": result.get("matching_pods"),
+        "declared_endpoints": declarations,
+        "service_observation": service_record,
+        "port_comparisons": comparisons,
+        "latest_alert_at": result.get("latest_alert_at"),
+        "window": result.get("window"),
+        "observed_at": result.get("observed_at"),
+        "provenance": _bounded(result.get("provenance") or [], max_items=4),
+        "observations": observations,
+        "unavailable_sources": (result.get("unavailable_sources") or [])[:3],
+        "not_collected_sources": (result.get("not_collected_sources") or [])[:3],
+        "limitation": _short(result.get("limitation"), 360),
+    }
+
+
+def _resource_history_observation(result: dict[str, Any], *, minimal: bool = False) -> dict[str, Any]:
+    """Preserve a few timestamped alert-phase samples and report data freshness without guessing a TTL."""
+    observations = []
+    for item in result.get("observations", []) if isinstance(result.get("observations"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        row = {"metric": _short(item.get("metric") or "unknown", 120),
+               "samples": item.get("samples", 0)}
+        if isinstance(item.get("labels"), dict) and item["labels"]:
+            row["labels"] = _bounded(item["labels"], max_items=4)
+        freshness = item.get("freshness") if isinstance(item.get("freshness"), dict) else {}
+        row["freshness"] = {key: _bounded(freshness[key], max_items=2)
+                             for key in ("status", "latest_sample_at", "age_seconds", "captured_at", "assessment")
+                             if key in freshness}
+        for key in ("before_alert", "nearest_alert", "after_alert", "sampled_peak"):
+            anchor = item.get(key)
+            if isinstance(anchor, dict):
+                row[key] = {name: anchor[name] for name in ("timestamp", "value", "offset_seconds") if name in anchor}
+            elif key in item:
+                row[key] = None
+        for key in (("max",) if minimal else ("start", "end", "min", "max", "median", "first", "last")):
+            if key in item:
+                row[key] = item[key]
+        if row:
+            observations.append(row)
+        if len(observations) >= (2 if minimal else 8):
+            break
+    no_data = not observations or all(
+        item.get("samples") == 0 or
+        (isinstance(item.get("freshness"), dict) and item["freshness"].get("status") == "no_data")
+        for item in observations
+    )
+    return {
+        "compacted_resource_history": True,
+        "captured_at": result.get("captured_at") or result.get("observed_at"),
+        "latest_alert_at": result.get("latest_alert_at"),
+        "data_status": "no_data" if no_data else "sampled",
+        "observations": observations,
+        **({"metric_semantics": _bounded(result.get("metric_semantics"), max_items=2)}
+           if not minimal and result.get("metric_semantics") else {}),
+        "limitation": _short(result.get("limitation") or
+            "Prometheus samples are bounded; capture age is reported without assuming a scrape interval or retention policy.", 220),
     }
 
 
@@ -452,6 +726,10 @@ def _check_item(check: dict[str, Any], latest: bool) -> dict[str, Any]:
         result = _workload_observation(raw_result)
     elif check.get("tool") == "scrape_discovery" and check.get("status") == "completed":
         result = _discovery_observation(raw_result)
+    elif check.get("tool") == "dependency_evidence" and check.get("status") == "completed":
+        result = _dependency_observation(raw_result)
+    elif check.get("tool") == "resource_history" and check.get("status") == "completed":
+        result = _resource_history_observation(raw_result)
     else:
         result = _bounded(raw_result, max_items=8 if latest else 4)
     return {
@@ -471,13 +749,42 @@ def _minimal_check_observation(check: dict[str, Any]) -> Any:
         return observation
     if check.get("tool") == "search_logs" and isinstance(observation, dict):
         return {key: observation[key] for key in
-                ("top_signal", "first_seen", "last_seen", "occurrences", "sampled") if key in observation}
-    if check.get("tool") == "scrape_discovery" and isinstance(observation, dict) and "monitor_selection" in observation:
-        if observation.get("compacted_discovery"):
+                ("top_signal", "fields", "first_seen", "last_seen", "occurrences", "sampled") if key in observation}
+    if check.get("tool") == "resource_history" and isinstance(observation, dict):
+        if observation.get("minimal_resource_history"):
             return observation
-        selections = [{**item, "targets": item.get("targets", [])[:1]}
+        minimal = _resource_history_observation(observation, minimal=True)
+        minimal["minimal_resource_history"] = True
+        for item in minimal.get("observations", []):
+            item.pop("min", None)
+            item.pop("median", None)
+            item.pop("first", None)
+            item.pop("last", None)
+            item.pop("start", None)
+            item.pop("end", None)
+        minimal.pop("metric_semantics", None)
+        return minimal
+    if check.get("tool") == "dependency_evidence" and isinstance(observation, dict):
+        if observation.get("minimal_dependency"):
+            return observation
+        compact = observation if observation.get("compacted_dependency") else _dependency_observation(observation)
+        return {
+            **compact,
+            "minimal_dependency": True,
+            "declared_endpoints": compact.get("declared_endpoints", [])[:1],
+            "port_comparisons": compact.get("port_comparisons", [])[:1],
+            "provenance": compact.get("provenance", [])[:2],
+            "observations": compact.get("observations", [])[:2],
+        }
+    if check.get("tool") == "scrape_discovery" and isinstance(observation, dict) and "monitor_selection" in observation:
+        if observation.get("minimal_discovery"):
+            return observation
+        selections = [{**item, "targets": item.get("targets", [])[:1],
+                       "evaluated_resources": item.get("evaluated_resources", [])[:1],
+                       "match_expressions": item.get("match_expressions", [])[:4]}
                       for item in observation["monitor_selection"][:1]]
-        return {**observation, "compacted_discovery": True, "monitor_selection": selections,
+        return {**observation, "compacted_discovery": True, "minimal_discovery": True,
+                "monitor_selection": selections, "current_service_labels": observation.get("current_service_labels", [])[:1],
                 "other_targets": observation.get("other_targets", [])[:1]}
     if check.get("tool") == "historical_episode" and isinstance(observation, dict):
         if observation.get("compacted_history"):
@@ -620,9 +927,13 @@ def compact_for_model(
             # Protect pod/namespace (or the only known non-pod identity), plus
             # capture time, even when repetitive alert details no longer fit.
             payload["scope"].pop("service")
-        elif any(item.get("diagnostic_example") is not None for item in payload["evidence"]):
+        elif any(len(item.get("diagnostic_examples") or []) > 1 for item in payload["evidence"]):
             for item in payload["evidence"]:
-                item["diagnostic_example"] = None
+                if item.get("diagnostic_examples"):
+                    item["diagnostic_examples"] = item["diagnostic_examples"][:1]
+        elif any(item.get("diagnostic_examples") for item in payload["evidence"]):
+            for item in payload["evidence"]:
+                item.pop("diagnostic_examples", None)
         elif any(item.get("configuration") is not None for item in payload["evidence"]):
             for item in payload["evidence"]:
                 item["configuration"] = None
@@ -681,10 +992,12 @@ def compact_for_model(
             visible_ids = refresh_visible_ids()
         elif payload["evidence"] and len(str(payload["evidence"][0].get("summary") or "")) > 60:
             payload["evidence"][0]["summary"] = _short(payload["evidence"][0].get("summary"), 60)
-        elif any(set(item) - {"id", "summary", "metric_observation", "visual_observation", "time_range", "limitation"}
+        elif any(set(item) - {"id", "summary", "metric_observation", "visual_observation", "diagnostic_fields", "diagnostic_examples",
+                              "time_range", "limitation"}
                  for item in payload["evidence"]):
             payload["evidence"] = [{key: item[key] for key in
-                                    ("id", "summary", "metric_observation", "visual_observation", "time_range", "limitation")
+                                    ("id", "summary", "metric_observation", "visual_observation", "diagnostic_fields", "diagnostic_examples",
+                                     "time_range", "limitation")
                                     if key in item} for item in payload["evidence"]]
             visible_ids = refresh_visible_ids()
         else:
