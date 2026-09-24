@@ -358,7 +358,28 @@ function renderTargets(state) {
 function renderSettings(state) {
   const ai = state.ai;
   const media = state.media || {provider:'openrouter',api_key_configured:false,vision:{model:'',capability:{}},audio:{model:'',capability:{}}};
-  const options = ai.models.map(item => `<option value="${safe(item.model_id)}">${safe(item.model_id)}</option>`).join('');
+  const configuredProviders = Array.isArray(ai.providers) ? ai.providers : [];
+  const knownProviders = [{id:'deepseek',label:'DeepSeek'},{id:'openrouter',label:'OpenRouter'}];
+  const providers = [...knownProviders.map(item => configuredProviders.find(provider => provider.id === item.id) || item), ...configuredProviders.filter(item => !knownProviders.some(known => known.id === item.id))];
+  const providerId = typeof ai.provider === 'string' && ai.provider ? ai.provider : 'deepseek';
+  if (!providers.some(item => item.id === providerId)) providers.push({id:providerId,label:providerId});
+  const providerLabel = id => providers.find(item => item.id === id)?.label || id;
+  const profiles = Array.isArray(ai.models) ? ai.models : [];
+  const defaultModels = {deepseek:'deepseek-v4-pro',openrouter:'deepseek/deepseek-v4-pro-0813'};
+  const profileIdsFor = id => profiles.filter(item => item.model_id && (item.provider ? item.provider === id : id === providerId)).map(item => item.model_id);
+  const enabledModelFor = id => {
+    const profile = profiles.find(item => item.provider === id && item.model_id === defaultModels[id] && item.enabled)
+      || profiles.find(item => item.provider === id && item.enabled)
+      || profiles.find(item => item.provider === id);
+    return profile?.model_id || defaultModels[id] || ai.model;
+  };
+  const optionsFor = id => {
+    const ids = profileIdsFor(id);
+    if (defaultModels[id]) ids.unshift(defaultModels[id]);
+    return [...new Set(ids)].map(model => `<option value="${safe(model)}">${safe(model)}</option>`).join('');
+  };
+  const options = optionsFor(providerId);
+  const activeProviderLabel = providerLabel(providerId);
   const keyState = capability(ai.capability);
   app.innerHTML = `
     <div class="page-head"><div><div class="eyebrow">Runtime configuration</div><h1>Settings</h1><p>Retention, investigation limits, and optional evidence models.</p></div></div>
@@ -367,15 +388,16 @@ function renderSettings(state) {
       ${window.generalSettingsNotice ? `<p class="notice">${safe(window.generalSettingsNotice)}</p>` : ''}
       <div class="actions"><button id="save-general-settings">Save retention</button></div>
     </div></section><section class="sheet"><div class="sheet-head"><h2>${icon('activity')}Episode investigation</h2>${keyState}</div><div class="sheet-body">
-      <div class="field"><label for="ai-provider">Provider</label><input id="ai-provider" value="DeepSeek-compatible" disabled></div>
-      <div class="field"><label for="ai-model">Model ID</label><input id="ai-model" list="ai-model-options" value="${safe(ai.model)}"><datalist id="ai-model-options">${options}</datalist><small>Configured models are available here; a compatible model ID may also be entered.</small></div>
+      <div class="ai-active-summary" aria-label="Saved investigation provider status"><span><strong>Active provider</strong> ${safe(activeProviderLabel)}</span><span><strong>Model</strong> <code>${safe(ai.model)}</code></span><span><strong>API key</strong> ${ai.api_key_configured ? 'Configured' : 'Not configured'}</span></div>
+      <div class="field"><label for="ai-provider">Investigation provider</label><select id="ai-provider">${providers.map(item => `<option value="${safe(item.id)}" ${item.id === providerId ? 'selected' : ''}>${safe(item.label || item.id)}</option>`).join('')}</select></div>
+      <div class="field"><label for="ai-model">Model ID</label><input id="ai-model" list="ai-model-options" value="${safe(ai.model)}"><datalist id="ai-model-options">${options}</datalist><small id="ai-provider-hint" aria-live="polite">Selecting a provider loads its enabled/default model. Review or edit the model ID before saving; provider errors never switch providers.</small></div>
       <div class="settings-number-grid"><div class="field"><label for="ai-max-tokens">Output per call</label><input id="ai-max-tokens" type="number" min="256" max="6000" value="${safe(ai.max_tokens)}"></div><div class="field"><label for="ai-total-tokens">Investigation budget</label><input id="ai-total-tokens" type="number" min="4000" max="100000" value="${safe(ai.max_total_tokens)}"></div><div class="field"><label for="ai-prompt-tokens">Input per call</label><input id="ai-prompt-tokens" type="number" min="1600" max="12000" value="${safe(ai.max_prompt_tokens)}"><small>Includes instructions, tool catalogue, and selected evidence.</small></div><div class="field"><label for="ai-max-checks">Additional checks</label><input id="ai-max-checks" type="number" min="0" max="4" value="${safe(ai.max_checks)}"></div></div>
-      <div class="field"><label for="ai-key">API key</label><input id="ai-key" type="password" autocomplete="new-password" placeholder="${ai.api_key_configured ? 'Leave blank to keep the saved key' : 'Paste a key to enable investigation'}"><small>New credentials are checked before they replace a working local credential.</small></div>
+      <div class="field"><label for="ai-key">${safe(activeProviderLabel)} API key</label><input id="ai-key" type="password" autocomplete="new-password" placeholder="${ai.api_key_configured ? 'Leave blank to keep this provider key' : 'Paste a key to enable investigation'}"><small id="ai-key-hint">This key belongs to the selected investigation provider. Leave blank to keep that provider's configured key; validate separately. Provider errors do not switch providers.</small></div>
       ${window.settingsNotice ? `<p class="notice">${safe(window.settingsNotice)}</p>` : ''}
       <div class="actions"><button id="save-ai-settings">Save investigation settings</button><button class="secondary" id="validate-ai-settings">Validate model</button></div>
     </div></section><section id="evidence-models" class="sheet"><div class="sheet-head"><h2>${icon('file-code-2')}Evidence models</h2>${capability(media.core_investigator?.capability)}</div><div class="sheet-body">
       <div class="model-state"><span>Image extraction ${capability(media.vision?.capability)}</span><span>Audio transcription ${capability(media.audio?.capability)}</span></div>
-      <div class="field"><label for="media-key">OpenRouter API key</label><input id="media-key" type="password" autocomplete="new-password" placeholder="${media.api_key_configured ? 'Leave blank to keep the saved key' : 'Paste an optional key'}"><small>Image and audio evidence remain unavailable until the core investigator and the selected specialist are validated.</small></div>
+      <div class="field"><label for="media-key">OpenRouter API key</label><input id="media-key" type="password" autocomplete="new-password" placeholder="${media.api_key_configured ? 'Leave blank to keep the saved key' : 'Paste an optional key'}"><small>Separate from the investigation provider key above. Image and audio evidence remain unavailable until the core investigator and the selected specialist are validated.</small></div>
       <div class="field"><label for="vision-model">Image model</label><input id="vision-model" value="${safe(media.vision?.model)}"></div>
       <div class="field"><label for="asr-model">Audio model</label><input id="asr-model" value="${safe(media.audio?.model)}"></div>
       ${window.mediaSettingsNotice ? `<p class="notice">${safe(window.mediaSettingsNotice)}</p>` : ''}
@@ -386,6 +408,17 @@ function renderSettings(state) {
   document.querySelector('#validate-ai-settings').addEventListener('click', validateAiSettings);
   document.querySelector('#save-media-settings').addEventListener('click', saveMediaSettings);
   document.querySelector('#validate-media-settings').addEventListener('click', validateMediaSettings);
+  document.querySelector('#ai-provider').addEventListener('change', event => {
+    const id = event.target.value;
+    const label = providerLabel(id);
+    document.querySelector('#ai-model').value = enabledModelFor(id);
+    document.querySelector('#ai-model-options').innerHTML = optionsFor(id);
+    document.querySelector('#ai-provider-hint').textContent = `Loaded ${document.querySelector('#ai-model').value} for ${label}. Review or edit the model ID before saving; provider errors never switch providers.`;
+    document.querySelector('#ai-key').placeholder = id === providerId
+      ? (ai.api_key_configured ? 'Leave blank to keep this provider key' : 'Paste a key to enable investigation')
+      : `Optional key for ${label}; blank keeps that provider's configured key`;
+    document.querySelector('label[for="ai-key"]').textContent = `${label} API key`;
+  });
 }
 
 function applicationTable(items) {
@@ -796,7 +829,7 @@ async function correctEvidence(attachmentId) {
 }
 
 async function saveAiSettings() {
-  const payload = {model:document.querySelector('#ai-model').value, max_tokens:Number(document.querySelector('#ai-max-tokens').value), max_total_tokens:Number(document.querySelector('#ai-total-tokens').value), max_prompt_tokens:Number(document.querySelector('#ai-prompt-tokens').value), max_checks:Number(document.querySelector('#ai-max-checks').value), api_key:document.querySelector('#ai-key').value};
+  const payload = {provider:document.querySelector('#ai-provider').value, model:document.querySelector('#ai-model').value, max_tokens:Number(document.querySelector('#ai-max-tokens').value), max_total_tokens:Number(document.querySelector('#ai-total-tokens').value), max_prompt_tokens:Number(document.querySelector('#ai-prompt-tokens').value), max_checks:Number(document.querySelector('#ai-max-checks').value), api_key:document.querySelector('#ai-key').value};
   const response = await fetch('/api/settings/ai', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
   const result = await response.json();
   if (!response.ok) { alert(result.error || 'Unable to save settings'); return; }

@@ -74,6 +74,59 @@ test('connection testing does not replace unsaved settings', async () => {
   assert.match(notice.textContent, /Saved source connections are healthy/);
 });
 
+test('investigation settings expose the active provider without revealing credentials', () => {
+  const controls = new Map();
+  const app = {innerHTML:''};
+  const document = {querySelector(selector) {
+    if (!controls.has(selector)) controls.set(selector, {listeners:{}, addEventListener(name, callback) { this.listeners[name] = callback; }});
+    return controls.get(selector);
+  }};
+  const render = helper('renderSettings', 'applicationTable', {
+    app, document, window:{}, safe:value=>String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;'),
+    icon:name=>`<i>${name}</i>`, capability:item=>`<span>${item?.status || 'Not configured'}</span>`,
+    saveGeneralSettings:()=>{}, saveAiSettings:()=>{}, validateAiSettings:()=>{}, saveMediaSettings:()=>{}, validateMediaSettings:()=>{},
+  });
+  const ai = {provider:'openrouter',providers:[{id:'deepseek',label:'DeepSeek'},{id:'openrouter',label:'OpenRouter'}],model:'deepseek/deepseek-v4-pro-0813',models:[
+    {model_id:'deepseek-v4-pro',provider:'deepseek',enabled:true,max_tokens:3600},
+    {model_id:'deepseek/deepseek-v4-pro-0813',provider:'openrouter',enabled:true,max_tokens:3600},
+    {model_id:'deepseek/deepseek-v4-flash-0731',provider:'openrouter',enabled:false,max_tokens:2400},
+  ],api_key_configured:true,api_key:'never-render-this',capability:{status:'ready'},max_tokens:2000,max_total_tokens:16000,max_prompt_tokens:8000,max_checks:1};
+  controls.set('#ai-model', {value:ai.model});
+  controls.set('#ai-model-options', {innerHTML:''});
+  render({ai,media:{api_key_configured:false,vision:{model:'vision-model'},audio:{model:'audio-model'}},settings:{incident_retention_days:30}});
+  assert.match(app.innerHTML, /Active provider<\/strong> OpenRouter/);
+  assert.match(app.innerHTML, /deepseek\/deepseek-v4-pro-0813/);
+  assert.match(app.innerHTML, /API key<\/strong> Configured/);
+  assert.match(app.innerHTML, /value="openrouter" selected/);
+  assert.match(app.innerHTML, /Separate from the investigation provider key above/);
+  assert.doesNotMatch(app.innerHTML, /never-render-this/);
+
+  controls.get('#ai-provider').listeners.change({target:{value:'deepseek'}});
+  assert.equal(controls.get('#ai-model').value, 'deepseek-v4-pro');
+  assert.match(controls.get('#ai-model-options').innerHTML, /deepseek-v4-pro/);
+  assert.match(controls.get('#ai-provider-hint').textContent, /DeepSeek/);
+  assert.match(controls.get('#ai-key').placeholder, /Optional key for DeepSeek/);
+  assert.equal(controls.get('label[for="ai-key"]').textContent, 'DeepSeek API key');
+  assert.match(app.innerHTML, /Active provider<\/strong> OpenRouter/);
+  assert.match(app.innerHTML, /API key<\/strong> Configured/);
+  controls.get('#ai-provider').listeners.change({target:{value:'openrouter'}});
+  assert.equal(controls.get('#ai-model').value, 'deepseek/deepseek-v4-pro-0813');
+  assert.match(controls.get('#ai-model-options').innerHTML, /deepseek\/deepseek-v4-flash-0731/);
+});
+
+test('investigation settings save the explicitly selected provider and model', async () => {
+  const values = {'#ai-provider':'openrouter','#ai-model':'deepseek/deepseek-v4-pro-0813','#ai-max-tokens':'2400','#ai-total-tokens':'20000','#ai-prompt-tokens':'9000','#ai-max-checks':'2','#ai-key':'openrouter-secret'};
+  let request;
+  const code = source.slice(source.indexOf('async function saveAiSettings('), source.indexOf('async function validateAiSettings('));
+  const save = vm.runInNewContext(code + '\nsaveAiSettings', {
+    document:{querySelector:selector=>({value:values[selector]})},
+    fetch:async(_url, options)=>{request=JSON.parse(options.body);return {ok:true,json:async()=>({provider:'openrouter'})};},
+    window:{}, lastState:{ai:{}}, renderSettings:()=>{},
+  });
+  await save();
+  assert.deepEqual(request, {provider:'openrouter',model:'deepseek/deepseek-v4-pro-0813',max_tokens:2400,max_total_tokens:20000,max_prompt_tokens:9000,max_checks:2,api_key:'openrouter-secret'});
+});
+
 test('masked JSON logs retain concise messages, including escaped quotes', () => {
   const label = helper('logLabel', 'briefingPanel');
   assert.equal(label('{"message":"Poison job failed", "job_id": <NUM>}'), 'Poison job failed');

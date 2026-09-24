@@ -264,6 +264,9 @@ tbody tr:hover { background:#fafbfe; }
 .settings-layout .sheet-head > .queue-note { display:block; margin:9px 0 0 28px; font-size:12px; }
 .settings-layout .sheet-head > .capability { margin:10px 0 0 28px; }
 .settings-layout .sheet-body { min-width:0; }
+.ai-active-summary { display:flex; flex-wrap:wrap; gap:6px 18px; margin:0 0 18px; padding:0 0 12px; border-bottom:1px solid var(--line); color:var(--muted); font-size:12px; }
+.ai-active-summary strong { color:var(--ink); font-weight:650; }
+.ai-active-summary code { overflow-wrap:anywhere; }
 #retention-days, #ai-max-tokens { max-width:180px; }
 .settings-number-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px 24px; max-width:520px; margin-bottom:24px; }
 .settings-number-grid .field { margin:0; }
