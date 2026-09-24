@@ -39,11 +39,12 @@ pods plus referenced ConfigMaps through the Kubernetes API. Both paths preserve 
 ## AI Configuration Boundary
 
 The AI model is a local optional enrichment setting. `.fcapsule/ai-settings.json` holds
-the selected provider, model ID, and completion budget; `.env` holds the provider secret
+the selected provider, model ID, and completion budget; `.env` holds provider secrets
 and is Git-ignored. The console reports only whether a key is configured. It never
-returns, renders, archives, or stores the key in SQLite. The current runtime implements
-the DeepSeek-compatible client; another provider requires an explicit adapter, not merely
-an unverified model name.
+returns, renders, archives, or stores a key in SQLite. Core investigation supports the
+DeepSeek and OpenRouter adapters; another provider requires an explicit adapter, not
+merely an unverified model name. The optional OpenRouter media specialists have
+separate capability validation from the core investigator.
 
 ## Open-source Readiness
 

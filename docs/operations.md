@@ -190,10 +190,11 @@ Capsule creation always completes with deterministic detection and evidence-grou
 
 ## AI Investigation Settings
 
-Open **Settings** in the console to choose the DeepSeek-compatible model and
-completion budget per call for the optional episode investigator. Paste a replacement API key only when
-necessary. It is saved to the configured state directory's `.env` file and never returned to the browser or
-written to SQLite. The non-secret selection is persisted in `.fcapsule/ai-settings.json`.
+Open **Settings** to choose the optional episode investigator's provider and model,
+set its bounded budgets, and validate the core capability. Provider precedence,
+provider-specific credentials, smoke testing, and recovery are documented in the
+[core LLM provider runbook](llm_provider_operations.md). The saved key is never
+returned to the browser or written to SQLite.
 
 ## Local Files
 

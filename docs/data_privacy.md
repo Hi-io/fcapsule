@@ -32,7 +32,7 @@ Kubernetes collection reads referenced ConfigMaps and pod context. Credential-sh
 
 ## Model Boundary
 
-The optional episode investigation sends compact retained evidence, configuration and additional scrubbed tool observations to the configured DeepSeek-compatible provider, not the unrestricted source window. Each attempt can make up to six provider calls, including final evidence review. This is an external disclosure and a paid API operation. Confirm organizational approval before enabling it. Selected evidence and ConfigMap values can still contain sensitive information despite masking.
+The optional episode investigation sends compact retained evidence, configuration and additional scrubbed tool observations to the configured core provider (DeepSeek or OpenRouter), not the unrestricted source window. Each attempt can make up to six provider calls, including final evidence review. This is an external disclosure and a paid API operation. Confirm organizational approval before enabling it. Selected evidence and ConfigMap values can still contain sensitive information despite masking.
 
 The investigation retains its bounded context, public check questions, observations, structured model decisions, validation failures and usage metadata. It does not retain private model deliberation. Completed/incomplete investigations are included in the capsule ZIP. Source errors are recorded generically to avoid persisting request credentials. Offline evaluation separately records prompts/responses. Citation validation checks reference integrity, not factual entailment or causal truth. The tool does not execute remediation. Prometheus/OpenSearch retention is not inferred.
 
