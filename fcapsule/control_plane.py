@@ -849,7 +849,9 @@ class ControlPlane:
         rows.sort(key=lambda item: item[0], reverse=True)
         return [item for _, item in rows[:3]]
 
-    def capsule_payload(self, capsule_id: str) -> dict[str, Any] | None:
+    def capsule_artifact_payload(self, capsule_id: str) -> dict[str, Any] | None:
+        """Return capsule metadata and its path without loading the capsule document."""
+
         record = self.store.get_capsule(capsule_id)
         if not record:
             return None
@@ -860,8 +862,18 @@ class ControlPlane:
         comparison = json.loads(comparison_path.read_text(encoding="utf-8")) if comparison_path.is_file() else None
         return {
             "record": record,
-            "capsule": json.loads(path.read_text(encoding="utf-8")),
+            "capsule_path": path,
             "comparison": self._compact_comparison(comparison),
+        }
+
+    def capsule_payload(self, capsule_id: str) -> dict[str, Any] | None:
+        payload = self.capsule_artifact_payload(capsule_id)
+        if not payload:
+            return None
+        return {
+            "record": payload["record"],
+            "capsule": json.loads(payload["capsule_path"].read_text(encoding="utf-8")),
+            "comparison": payload["comparison"],
         }
 
     def incident_report_payload(self, incident_id: str) -> dict[str, Any] | None:
@@ -877,10 +889,10 @@ class ControlPlane:
         if not capsule_path.is_file():
             return {"incident": incident, "report": None}
         report_path = Path(capsule_record["output_dir"]) / "incident_report.json"
-        capsule = json.loads(capsule_path.read_text(encoding="utf-8"))
         report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.is_file() else None
         if not report or report.get("report_version") != "1.3":
             # Retained reports must remain readable after source telemetry expires.
+            capsule = json.loads(capsule_path.read_text(encoding="utf-8"))
             try:
                 source_metrics = load_case(incident["case_dir"]).metrics if Path(incident["case_dir"]).is_dir() else None
             except FileNotFoundError:
