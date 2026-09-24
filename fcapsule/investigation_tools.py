@@ -652,7 +652,18 @@ class InvestigationTools:
             monitors = kubernetes.monitoring_resources({self.namespace})
             services = kubernetes.list_services(self.namespace)
             target_workload = self.discovery_targets.get("target_workload")
-            namespace_pods = [item for item in kubernetes.list_pods({self.namespace})
+            collected_pods = kubernetes.list_pods({self.namespace})
+            pod_status = getattr(collected_pods, "status", "observed")
+            if pod_status == "observed" and (getattr(collected_pods, "complete", True) is False
+                                              or getattr(collected_pods, "has_more", False) is True):
+                pod_status = "partial"
+            pod_inventory = {
+                "status": pod_status if pod_status in {"observed", "partial", "unavailable"} else "unavailable",
+                "complete": pod_status == "observed" and getattr(collected_pods, "complete", True) is True,
+                "has_more": getattr(collected_pods, "has_more", None),
+                "omitted_pods": getattr(collected_pods, "omitted_pods", 0),
+            }
+            namespace_pods = [item for item in collected_pods
                               if str(item.get("namespace") or self.namespace) == self.namespace]
             target_pod_names = {str(target.get("pod")) for key in ("active", "dropped")
                                 for target in targets.get(key, []) if target.get("pod")}
@@ -663,16 +674,25 @@ class InvestigationTools:
                                                 item.get("name") not in self.pods, str(item.get("name") or "")))
             pods_by_name = {str(item.get("name")): item for item in namespace_pods if item.get("name")}
             service_names = {str(item.get("name")) for item in services if item.get("name")}
-            endpoint_inventory = {"status": "unavailable", "slices": [], "omitted_slices": 0, "observed_at": None}
+            endpoint_inventory = {"status": "unavailable", "slices": [], "omitted_slices": 0,
+                                  "complete": False, "has_more": None, "observed_at": None}
             try:
                 collected_endpoints = kubernetes.list_endpoint_slices(self.namespace, service_names)
                 if isinstance(collected_endpoints, dict) and isinstance(collected_endpoints.get("slices"), list):
-                    endpoint_inventory = {
-                        "status": "observed",
-                        "slices": [item for item in collected_endpoints["slices"] if isinstance(item, dict)],
-                        "omitted_slices": collected_endpoints.get("omitted_slices", 0),
-                        "observed_at": collected_endpoints.get("observed_at"),
-                    }
+                    status = collected_endpoints.get("status", "observed")
+                    if status == "observed" and (collected_endpoints.get("complete") is False
+                                                  or collected_endpoints.get("has_more") is True):
+                        status = "partial"
+                    if status in {"observed", "partial"}:
+                        endpoint_inventory = {
+                            "status": status,
+                            "slices": [item for item in collected_endpoints["slices"] if isinstance(item, dict)],
+                            "omitted_slices": collected_endpoints.get("omitted_slices", 0),
+                            "complete": status == "observed"
+                            and collected_endpoints.get("complete", True) is True,
+                            "has_more": collected_endpoints.get("has_more"),
+                            "observed_at": collected_endpoints.get("observed_at"),
+                        }
             except (RuntimeError, OSError, ValueError):
                 pass
             endpoint_slices_by_service: dict[str, list[dict[str, Any]]] = {}
@@ -797,7 +817,9 @@ class InvestigationTools:
                 "active_targets": targets["active"],
                 "dropped_targets": targets["dropped"],
                 "monitor_selection": selections,
-                "endpoint_slice_inventory": {key: endpoint_inventory[key] for key in ("status", "omitted_slices")},
+                "pod_inventory": pod_inventory,
+                "endpoint_slice_inventory": {key: endpoint_inventory[key] for key in
+                                              ("status", "omitted_slices", "complete", "has_more")},
                 "current_pod_labels": [{"pod": item["name"], "namespace": item.get("namespace", self.namespace), "labels": item.get("labels", {})} for item in current_pods[:12]],
                 "current_pod_health": [_pod_health(item) for item in current_pods[:12]],
                 "current_service_labels": [{"service": item.get("name"), "namespace": item.get("namespace", self.namespace),

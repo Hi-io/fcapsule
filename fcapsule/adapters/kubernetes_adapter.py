@@ -11,15 +11,52 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 
-from fcapsule.adapters.transport import JsonTransport
+from fcapsule.adapters.transport import JsonTransport, ResponseTooLargeError
 
 SERVICE_ACCOUNT = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 SENSITIVE_KEY = re.compile(r"password|passwd|secret|token|credential|api[-_]?key|private[-_]?key", re.I)
 MAX_SELECTOR_LABELS = 32
 MAX_SELECTOR_EXPRESSIONS = 16
 MAX_SELECTOR_VALUES = 16
+MAX_ENDPOINT_SLICE_PAGE_SIZE = 50
+MAX_ENDPOINT_SLICE_PAGES = 8
+MAX_ENDPOINT_SLICE_BYTES = 1024 * 1024
+MAX_ENDPOINT_SLICES = 200
+MAX_ENDPOINT_SLICE_ENDPOINTS = 24
+MAX_ENDPOINT_SLICE_PORTS = 12
+MAX_ENDPOINT_SLICE_CURSOR_LENGTH = 4096
+MAX_ENDPOINT_SLICE_SELECTOR_QUERY = 2048
+LABEL_VALUE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,61}[A-Za-z0-9])?\Z")
+MAX_POD_PAGE_SIZE = 50
+MAX_POD_PAGES = 8
+MAX_POD_RESPONSE_BYTES = 1024 * 1024
+MAX_PODS = 200
+MAX_POD_CURSOR_LENGTH = 4096
+
+
+class KubernetesInventory(list[dict[str, Any]]):
+    """A list-compatible Kubernetes result with explicit discovery completeness."""
+
+    def __init__(
+        self,
+        items: list[dict[str, Any]] | None = None,
+        *,
+        status: str = "observed",
+        complete: bool = True,
+        has_more: bool | None = False,
+        omitted_pods: int = 0,
+        reason: str | None = None,
+        observed_at: str | None = None,
+    ) -> None:
+        super().__init__(items or [])
+        self.status = status
+        self.complete = complete
+        self.has_more = has_more
+        self.omitted_pods = omitted_pods
+        self.reason = reason
+        self.observed_at = observed_at
 
 
 def _observed_at() -> str:
@@ -178,45 +215,223 @@ class KubernetesAdapter:
             "authentication": "service-account" if (SERVICE_ACCOUNT / "token").is_file() else "external-token",
         }
 
-    def list_pods(self, namespaces: set[str] | None = None) -> list[dict[str, Any]]:
-        payload = self.transport.request("/api/v1/pods")
+    def list_pods(self, namespaces: set[str] | None = None) -> KubernetesInventory:
+        """Return bounded Pods, querying each requested namespace independently."""
+        requested_namespaces = sorted(name for name in (namespaces or set())
+                                      if isinstance(name, str) and name)
+        invalid_scope = namespaces is not None and bool(namespaces) and len(requested_namespaces) != len(namespaces)
+        if namespaces and not requested_namespaces:
+            return KubernetesInventory(status="unavailable", complete=False, has_more=None,
+                                       reason="invalid_namespace_scope")
+        scopes: list[str | None] = requested_namespaces if namespaces else [None]
         pods = []
-        for item in payload.get("items", []):
-            metadata = item.get("metadata", {})
-            namespace = str(metadata.get("namespace", "default"))
+        omitted_pods = 0
+        partial = invalid_scope
+        has_more: bool | None = bool(invalid_scope)
+        reason = "invalid_namespace_scope" if invalid_scope else None
+        observed_at: str | None = None
+        page_count = 0
+        stop = False
+
+        def retain(item: Any, namespace_hint: str | None) -> None:
+            nonlocal omitted_pods, partial, stop
+            if not isinstance(item, dict):
+                partial = True
+                return
+            metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+            namespace = str(metadata.get("namespace") or namespace_hint or "default")
             if namespaces and namespace not in namespaces:
-                continue
-            status = item.get("status", {})
-            spec = item.get("spec", {})
-            labels = metadata.get("labels", {})
-            owners = metadata.get("ownerReferences", [])
-            owner = owners[0] if owners else {}
-            ready_condition = next((condition for condition in status.get("conditions", [])
-                                    if condition.get("type") == "Ready"), {})
+                partial = True
+                return
+            if len(pods) >= MAX_PODS:
+                omitted_pods += 1
+                partial = True
+                stop = True
+                return
+
+            raw_status = item.get("status", {})
+            status_data = raw_status if isinstance(raw_status, dict) else {}
+            raw_spec = item.get("spec", {})
+            spec = raw_spec if isinstance(raw_spec, dict) else {}
+            if not isinstance(raw_status, dict) or not isinstance(raw_spec, dict):
+                partial = True
+            raw_labels = metadata.get("labels", {})
+            labels = _safe_labels(raw_labels)
+            if not isinstance(raw_labels, dict) or len(raw_labels) > MAX_SELECTOR_LABELS:
+                partial = True
+            raw_owners = metadata.get("ownerReferences", [])
+            owners = raw_owners if isinstance(raw_owners, list) else []
+            if not isinstance(raw_owners, list) or len(owners) > 16:
+                partial = True
+            owner = next((candidate for candidate in owners[:16] if isinstance(candidate, dict)), {})
+            conditions = status_data.get("conditions", [])
+            if not isinstance(conditions, list):
+                partial = True
+                conditions = []
+            elif len(conditions) > 100:
+                partial = True
+            ready_condition = next((condition for condition in conditions[:100]
+                                    if isinstance(condition, dict) and condition.get("type") == "Ready"), {})
             ready_status = str(ready_condition.get("status") or "unknown").lower()
-            ready = ready_status == "true"
-            pod_name = str(metadata.get("name", "unknown"))
-            workload = labels.get("app.kubernetes.io/name") or labels.get("app") or labels.get("k8s-app") or owner.get("name") or pod_name
-            pods.append(
-                {
-                    "name": pod_name,
-                    "namespace": namespace,
-                    "uid": metadata.get("uid"),
-                    "workload": str(workload),
-                    "owner_kind": owner.get("kind"),
-                    "owner_name": owner.get("name"),
-                    "node": spec.get("nodeName"),
-                    "phase": status.get("phase", "Unknown"),
-                    "ready": ready,
-                    "ready_status": ready_status if ready_status in {"true", "false", "unknown"} else "unknown",
-                    "labels": labels,
-                    "containers": [container.get("name") for container in spec.get("containers", [])],
-                    "images": [container.get("image") for container in spec.get("containers", [])],
-                    "raw_spec": spec,
-                    "container_statuses": status.get("containerStatuses", []),
-                }
-            )
-        return pods
+            pod_name = str(metadata.get("name") or "unknown")[:253]
+            raw_containers = spec.get("containers", [])
+            containers = raw_containers if isinstance(raw_containers, list) else []
+            if not isinstance(raw_containers, list) or len(containers) > 16:
+                partial = True
+            if any(not isinstance(container, dict) for container in containers[:16]):
+                partial = True
+            container_statuses = status_data.get("containerStatuses", [])
+            if not isinstance(container_statuses, list):
+                partial = True
+                container_statuses = []
+            elif len(container_statuses) > 12:
+                partial = True
+            if any(not isinstance(container, dict) for container in container_statuses[:12]):
+                partial = True
+            workload = (labels.get("app.kubernetes.io/name") or labels.get("app") or labels.get("k8s-app")
+                        or owner.get("name") or pod_name)
+            pods.append({
+                "name": pod_name,
+                "namespace": namespace,
+                "uid": str(metadata.get("uid") or "")[:128] or None,
+                "workload": str(workload)[:253],
+                "owner_kind": str(owner.get("kind") or "")[:63] or None,
+                "owner_name": str(owner.get("name") or "")[:253] or None,
+                "node": str(spec.get("nodeName") or "")[:253] or None,
+                "phase": str(status_data.get("phase") or "Unknown")[:32],
+                "ready": ready_status == "true",
+                "ready_status": ready_status if ready_status in {"true", "false", "unknown"} else "unknown",
+                "labels": labels,
+                "containers": [str(container.get("name") or "")[:63] or None
+                                for container in containers[:16] if isinstance(container, dict)],
+                "images": [str(container.get("image") or "")[:512] or None
+                           for container in containers[:16] if isinstance(container, dict)],
+                "raw_spec": spec,
+                "container_statuses": container_statuses[:12],
+            })
+
+        for scope_index, namespace_hint in enumerate(scopes):
+            if stop:
+                break
+            resource_path = (f"/api/v1/namespaces/{quote(namespace_hint, safe='')}/pods"
+                             if namespace_hint is not None else "/api/v1/pods")
+            cursor: str | None = None
+            seen_cursors: set[str] = set()
+            while True:
+                if page_count >= MAX_POD_PAGES:
+                    partial = True
+                    has_more = True
+                    reason = reason or "page_limit_reached"
+                    stop = True
+                    break
+                params = {"limit": str(MAX_POD_PAGE_SIZE)}
+                if cursor is not None:
+                    params["continue"] = cursor
+                try:
+                    payload = self.transport.request(
+                        f"{resource_path}?{urlencode(params)}",
+                        max_response_bytes=MAX_POD_RESPONSE_BYTES,
+                    )
+                except ResponseTooLargeError:
+                    if page_count == 0:
+                        return KubernetesInventory(status="unavailable", complete=False, has_more=None,
+                                                   reason="response_too_large")
+                    partial = True
+                    has_more = True
+                    reason = "page_unavailable"
+                    stop = True
+                    break
+                except (RuntimeError, OSError, ValueError):
+                    if page_count == 0:
+                        return KubernetesInventory(status="unavailable", complete=False, has_more=None,
+                                                   reason="request_failed")
+                    partial = True
+                    has_more = True
+                    reason = "page_unavailable"
+                    stop = True
+                    break
+                if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+                    if page_count == 0:
+                        return KubernetesInventory(status="unavailable", complete=False, has_more=None,
+                                                   reason="unsupported_response")
+                    partial = True
+                    has_more = True
+                    reason = "unsupported_response"
+                    stop = True
+                    break
+
+                page_count += 1
+                if observed_at is None:
+                    observed_at = _observed_at()
+                raw_items = payload["items"]
+                page_items = raw_items[:MAX_POD_PAGE_SIZE]
+                if len(raw_items) > MAX_POD_PAGE_SIZE:
+                    partial = True
+                    has_more = True
+                    reason = reason or "page_limit_ignored"
+                for item in page_items:
+                    retain(item, namespace_hint)
+                    if stop:
+                        break
+                if stop or len(raw_items) > MAX_POD_PAGE_SIZE:
+                    has_more = True
+                    stop = True
+                    break
+
+                metadata = payload.get("metadata")
+                if not isinstance(metadata, dict):
+                    partial = True
+                    has_more = True
+                    reason = "unsupported_response"
+                    stop = True
+                    break
+                next_cursor = metadata.get("continue")
+                if next_cursor is not None and not isinstance(next_cursor, str):
+                    partial = True
+                    has_more = True
+                    reason = "unsupported_response"
+                    stop = True
+                    break
+                remaining = metadata.get("remainingItemCount")
+                if not next_cursor:
+                    if type(remaining) is int and remaining > 0:
+                        partial = True
+                        has_more = True
+                        reason = "pagination_incomplete"
+                        stop = True
+                    break
+                if len(next_cursor) > MAX_POD_CURSOR_LENGTH or next_cursor in seen_cursors:
+                    partial = True
+                    has_more = True
+                    reason = "pagination_incomplete"
+                    stop = True
+                    break
+                seen_cursors.add(next_cursor)
+                cursor = next_cursor
+                if len(pods) >= MAX_PODS:
+                    partial = True
+                    has_more = True
+                    reason = reason or "pod_limit_reached"
+                    stop = True
+                    break
+
+            if stop:
+                break
+            if scope_index < len(scopes) - 1 and len(pods) >= MAX_PODS:
+                partial = True
+                has_more = True
+                reason = reason or "pod_limit_reached"
+                break
+
+        return KubernetesInventory(
+            pods,
+            status="partial" if partial else "observed",
+            complete=not partial,
+            has_more=has_more,
+            omitted_pods=omitted_pods,
+            reason=reason,
+            observed_at=observed_at,
+        )
 
     def declared_services(self, pod: dict[str, Any]) -> list[dict[str, Any]]:
         """Resolve explicit endpoint environment values, never Secrets or arbitrary URLs."""
@@ -385,28 +600,63 @@ class KubernetesAdapter:
 
     def list_endpoint_slices(self, namespace: str, service_names: set[str] | None = None) -> dict[str, Any]:
         """Return bounded EndpointSlice readiness facts for Services in one namespace."""
-        payload = self.transport.request(f"/apis/discovery.k8s.io/v1/namespaces/{namespace}/endpointslices")
-        observed_at = _observed_at()
+        endpoint = f"/apis/discovery.k8s.io/v1/namespaces/{namespace}/endpointslices"
+        wanted_services = ({name for name in service_names if isinstance(name, str)}
+                           if service_names is not None else None)
+        if wanted_services == set():
+            return {"status": "observed", "complete": True, "has_more": False,
+                    "slices": [], "omitted_slices": 0, "observed_at": _observed_at()}
+
+        # Keep each selector under the practical URL budget. Invalid label values
+        # fall back to bounded client-side filtering rather than entering a selector.
+        selector_groups: list[list[str] | None] = [None]
+        if wanted_services is not None and all(LABEL_VALUE.fullmatch(name) for name in wanted_services):
+            selector_groups = []
+            group: list[str] = []
+            for name in sorted(wanted_services):
+                candidate = [*group, name]
+                selector = f"kubernetes.io/service-name in ({','.join(candidate)})"
+                if group and len(urlencode({"labelSelector": selector})) > MAX_ENDPOINT_SLICE_SELECTOR_QUERY:
+                    selector_groups.append(group)
+                    group = [name]
+                else:
+                    group = candidate
+            if group:
+                selector_groups.append(group)
+
+        observed_at: str | None = None
         slices = []
         omitted_slices = 0
-        raw_items = payload.get("items") if isinstance(payload, dict) else None
-        if not isinstance(raw_items, list):
-            raise RuntimeError("EndpointSlice API returned an unsupported response")
-        for item in raw_items:
+        partial = False
+        has_more = False
+        failure_reason: str | None = None
+        page_count = 0
+        stop = False
+
+        def retain(item: Any) -> None:
+            nonlocal omitted_slices, partial, stop
             if not isinstance(item, dict):
-                continue
+                partial = True
+                return
             metadata = item.get("metadata", {}) if isinstance(item.get("metadata"), dict) else {}
             labels = metadata.get("labels", {}) if isinstance(metadata.get("labels"), dict) else {}
             service = str(labels.get("kubernetes.io/service-name") or "")
-            if not service or (service_names is not None and service not in service_names):
-                continue
-            raw_endpoints = item.get("endpoints", []) if isinstance(item.get("endpoints"), list) else []
+            if not service or (wanted_services is not None and service not in wanted_services):
+                return
+            if len(slices) >= MAX_ENDPOINT_SLICES:
+                omitted_slices += 1
+                partial = True
+                stop = True
+                return
+
+            raw_endpoints_value = item.get("endpoints")
+            raw_endpoints = raw_endpoints_value if isinstance(raw_endpoints_value, list) else []
             endpoint_rows = []
-            for endpoint in raw_endpoints[:24]:
-                if not isinstance(endpoint, dict):
+            for endpoint_row in raw_endpoints[:MAX_ENDPOINT_SLICE_ENDPOINTS]:
+                if not isinstance(endpoint_row, dict):
                     continue
-                target = endpoint.get("targetRef") if isinstance(endpoint.get("targetRef"), dict) else {}
-                conditions = endpoint.get("conditions") if isinstance(endpoint.get("conditions"), dict) else {}
+                target = endpoint_row.get("targetRef") if isinstance(endpoint_row.get("targetRef"), dict) else {}
+                conditions = endpoint_row.get("conditions") if isinstance(endpoint_row.get("conditions"), dict) else {}
                 target_ref = {key: str(target[key])[:253] for key in ("kind", "name", "namespace")
                               if isinstance(target.get(key), str) and target[key]}
                 endpoint_rows.append({
@@ -414,11 +664,21 @@ class KubernetesAdapter:
                     "ready": conditions.get("ready") if type(conditions.get("ready")) is bool else None,
                     "serving": conditions.get("serving") if type(conditions.get("serving")) is bool else None,
                     "terminating": conditions.get("terminating") if type(conditions.get("terminating")) is bool else None,
-                    "address_count": len(endpoint.get("addresses", [])) if isinstance(endpoint.get("addresses"), list) else None,
+                    "address_count": len(endpoint_row.get("addresses", []))
+                    if isinstance(endpoint_row.get("addresses"), list) else None,
                 })
-            raw_ports = item.get("ports", []) if isinstance(item.get("ports"), list) else []
+            omitted_endpoints = max(0, len(raw_endpoints) - len(endpoint_rows))
+            endpoints_complete = (
+                (raw_endpoints_value is None or isinstance(raw_endpoints_value, list))
+                and omitted_endpoints == 0
+            )
+            if not endpoints_complete:
+                partial = True
+
+            raw_ports_value = item.get("ports")
+            raw_ports = raw_ports_value if isinstance(raw_ports_value, list) else []
             ports = []
-            for port in raw_ports[:12]:
+            for port in raw_ports[:MAX_ENDPOINT_SLICE_PORTS]:
                 if not isinstance(port, dict):
                     continue
                 number = port.get("port")
@@ -427,22 +687,140 @@ class KubernetesAdapter:
                     "port": number if type(number) is int and 1 <= number <= 65535 else None,
                     "protocol": str(port.get("protocol") or "TCP")[:16],
                 })
-            row = {
+            omitted_ports = max(0, len(raw_ports) - len(ports))
+            ports_complete = (
+                (raw_ports_value is None or isinstance(raw_ports_value, list))
+                and omitted_ports == 0
+            )
+            if not ports_complete:
+                partial = True
+
+            slices.append({
                 "name": str(metadata.get("name") or "")[:253],
                 "namespace": namespace,
                 "service": service[:253],
                 "address_type": str(item.get("addressType") or "")[:32] or None,
                 "ports": ports,
                 "endpoints": endpoint_rows,
-                "omitted_endpoints": max(0, len(raw_endpoints) - len(endpoint_rows)),
+                "omitted_endpoints": omitted_endpoints,
+                "endpoints_complete": endpoints_complete,
+                "omitted_ports": omitted_ports,
+                "ports_complete": ports_complete,
                 "source": "Kubernetes API EndpointSliceList",
                 "observed_at": observed_at,
-            }
-            if len(slices) < 200:
-                slices.append(row)
-            else:
-                omitted_slices += 1
-        return {"slices": slices, "omitted_slices": omitted_slices, "observed_at": observed_at}
+            })
+
+        for group_index, names in enumerate(selector_groups):
+            if stop:
+                break
+            cursor: str | None = None
+            seen_cursors: set[str] = set()
+            group_selector = (f"kubernetes.io/service-name in ({','.join(names)})"
+                              if names is not None else None)
+            while True:
+                if page_count >= MAX_ENDPOINT_SLICE_PAGES:
+                    partial = True
+                    has_more = True
+                    stop = True
+                    break
+                params: dict[str, str] = {"limit": str(MAX_ENDPOINT_SLICE_PAGE_SIZE)}
+                if group_selector is not None:
+                    params["labelSelector"] = group_selector
+                if cursor is not None:
+                    params["continue"] = cursor
+                request_path = f"{endpoint}?{urlencode(params)}"
+                try:
+                    payload = self.transport.request(
+                        request_path, max_response_bytes=MAX_ENDPOINT_SLICE_BYTES,
+                    )
+                except ResponseTooLargeError:
+                    if page_count == 0:
+                        return {"status": "unavailable", "complete": False, "has_more": None,
+                                "reason": "response_too_large",
+                                "slices": [], "omitted_slices": 0, "observed_at": None}
+                    partial = True
+                    has_more = True
+                    failure_reason = "page_unavailable"
+                    stop = True
+                    break
+                except (RuntimeError, OSError, ValueError):
+                    if page_count == 0:
+                        return {"status": "unavailable", "complete": False, "has_more": None,
+                                "reason": "request_failed", "slices": [],
+                                "omitted_slices": 0, "observed_at": None}
+                    partial = True
+                    has_more = True
+                    failure_reason = "page_unavailable"
+                    stop = True
+                    break
+                if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+                    if page_count == 0:
+                        return {"status": "unavailable", "complete": False, "has_more": None,
+                                "reason": "unsupported_response", "slices": [],
+                                "omitted_slices": 0, "observed_at": None}
+                    partial = True
+                    has_more = True
+                    failure_reason = "unsupported_response"
+                    stop = True
+                    break
+
+                page_count += 1
+                if observed_at is None:
+                    observed_at = _observed_at()
+                raw_items = payload["items"]
+                page_items = raw_items[:MAX_ENDPOINT_SLICE_PAGE_SIZE]
+                if len(raw_items) > MAX_ENDPOINT_SLICE_PAGE_SIZE:
+                    partial = True
+                    has_more = True
+                for item in page_items:
+                    retain(item)
+                    if stop:
+                        break
+                if stop:
+                    has_more = True
+                    break
+
+                metadata = payload.get("metadata")
+                if not isinstance(metadata, dict):
+                    partial = True
+                    has_more = True
+                    failure_reason = "unsupported_response"
+                    stop = True
+                    break
+                next_cursor = metadata.get("continue")
+                if next_cursor is not None and not isinstance(next_cursor, str):
+                    partial = True
+                    has_more = True
+                    failure_reason = "unsupported_response"
+                    stop = True
+                    break
+                if not next_cursor:
+                    break
+                if len(next_cursor) > MAX_ENDPOINT_SLICE_CURSOR_LENGTH or next_cursor in seen_cursors:
+                    partial = True
+                    has_more = True
+                    failure_reason = "pagination_incomplete"
+                    stop = True
+                    break
+                seen_cursors.add(next_cursor)
+                cursor = next_cursor
+
+            if stop:
+                break
+            if group_index < len(selector_groups) - 1 and len(slices) >= MAX_ENDPOINT_SLICES:
+                partial = True
+                has_more = True
+                break
+
+        return {
+            "status": "partial" if partial else "observed",
+            "complete": not partial,
+            "has_more": has_more,
+            "reason": failure_reason,
+            "slices": slices,
+            "omitted_slices": omitted_slices,
+            "observed_at": observed_at,
+        }
 
     def monitoring_resources(self, namespaces: set[str]) -> list[dict[str, Any]]:
         """Read bounded Prometheus-operator selectors relevant to captured namespaces."""

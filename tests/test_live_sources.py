@@ -4,8 +4,9 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
+from urllib.parse import parse_qs, urlsplit
 
-from fcapsule.adapters.kubernetes_adapter import KubernetesAdapter
+from fcapsule.adapters.kubernetes_adapter import KubernetesAdapter, KubernetesInventory
 from fcapsule.adapters.opensearch_adapter import OpenSearchAdapter
 from fcapsule.adapters.prometheus_adapter import PrometheusAdapter
 from fcapsule.adapters.transport import ResponseTooLargeError
@@ -24,6 +25,19 @@ class FakeTransport:
             if key in path:
                 return response
         raise AssertionError(f"Unexpected request: {path}")
+
+
+class PagedTransport:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.requests = []
+
+    def request(self, path, method="GET", body=None, max_response_bytes=None):
+        self.requests.append((path, method, body, max_response_bytes))
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 class FocusedLogTransport:
@@ -55,6 +69,23 @@ class FocusedLogTransport:
 
 
 class LiveSourceTests(unittest.TestCase):
+    def test_synchronize_does_not_treat_unavailable_pod_inventory_as_empty(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            coordinator = LiveSourceCoordinator(Mock(), state)
+            kubernetes = Mock()
+            kubernetes.list_pods.return_value = KubernetesInventory(
+                status="unavailable", complete=False, has_more=None, reason="request_failed",
+            )
+            coordinator.configuration = Mock(return_value={"namespaces": ["shop"]})
+            coordinator.adapters = Mock(return_value=(Mock(), Mock(), kubernetes))
+            coordinator.test_connections = Mock(
+                return_value={"targets": {"kubernetes": {"ok": True}}},
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "pod inventory is unavailable"):
+                coordinator.synchronize()
+
     def test_alert_for_disappeared_named_pod_is_not_reassigned(self):
         pods = [{"namespace": "shop", "name": "healthy-api", "workload": "api"}]
 
@@ -543,7 +574,7 @@ class LiveSourceTests(unittest.TestCase):
     def test_endpoint_slice_inventory_is_namespace_and_service_scoped_without_addresses(self):
         adapter = KubernetesAdapter("http://kubernetes")
         adapter.transport = FakeTransport({
-            "/apis/discovery.k8s.io/v1/namespaces/shop/endpointslices": {"items": [
+            "/apis/discovery.k8s.io/v1/namespaces/shop/endpointslices": {"metadata": {}, "items": [
                 {"metadata": {"name": "mysql-a", "labels": {"kubernetes.io/service-name": "mysql-exporter"}},
                  "addressType": "IPv4", "ports": [{"name": "metrics", "port": 9104, "protocol": "TCP"}],
                  "endpoints": [{"addresses": ["10.10.0.7"], "conditions": {"ready": False, "serving": False},
@@ -566,9 +597,84 @@ class LiveSourceTests(unittest.TestCase):
         self.assertTrue(inventory["observed_at"].endswith("Z"))
         self.assertIn("/namespaces/shop/endpointslices", adapter.transport.requests[0][0])
 
+    def test_endpoint_slice_list_paginates_with_service_scope_and_byte_budget(self):
+        adapter = KubernetesAdapter("http://kubernetes")
+        adapter.transport = PagedTransport([
+            {"metadata": {"continue": "opaque cursor"}, "items": [
+                {"metadata": {"name": "mysql-a", "labels": {"kubernetes.io/service-name": "mysql-exporter"}},
+                 "endpoints": [], "ports": []},
+            ]},
+            {"metadata": {}, "items": [
+                {"metadata": {"name": "mysql-b", "labels": {"kubernetes.io/service-name": "mysql-exporter"}},
+                 "endpoints": [], "ports": []},
+            ]},
+        ])
+
+        inventory = adapter.list_endpoint_slices("shop", {"mysql-exporter"})
+
+        self.assertEqual(inventory["status"], "observed")
+        self.assertTrue(inventory["complete"])
+        self.assertEqual([item["name"] for item in inventory["slices"]], ["mysql-a", "mysql-b"])
+        self.assertEqual(len(adapter.transport.requests), 2)
+        first_query = parse_qs(urlsplit(adapter.transport.requests[0][0]).query)
+        second_query = parse_qs(urlsplit(adapter.transport.requests[1][0]).query)
+        self.assertEqual(first_query["limit"], ["50"])
+        self.assertEqual(first_query["labelSelector"], ["kubernetes.io/service-name in (mysql-exporter)"])
+        self.assertEqual(second_query["continue"], ["opaque cursor"])
+        self.assertEqual([request[3] for request in adapter.transport.requests], [1024 * 1024] * 2)
+
+    def test_endpoint_slice_page_cap_returns_useful_partial_discovery(self):
+        adapter = KubernetesAdapter("http://kubernetes")
+        adapter.transport = PagedTransport([
+            {"metadata": {"continue": "next"}, "items": [
+                {"metadata": {"name": "mysql-a", "labels": {"kubernetes.io/service-name": "mysql-exporter"}},
+                 "endpoints": [], "ports": []},
+            ]},
+            {"metadata": {}, "items": []},
+        ])
+
+        with patch("fcapsule.adapters.kubernetes_adapter.MAX_ENDPOINT_SLICE_PAGES", 1):
+            inventory = adapter.list_endpoint_slices("shop", {"mysql-exporter"})
+
+        self.assertEqual(inventory["status"], "partial")
+        self.assertFalse(inventory["complete"])
+        self.assertTrue(inventory["has_more"])
+        self.assertEqual([item["name"] for item in inventory["slices"]], ["mysql-a"])
+        self.assertEqual(len(adapter.transport.requests), 1)
+
+    def test_oversized_endpoint_slice_page_is_explicitly_unavailable(self):
+        adapter = KubernetesAdapter("http://kubernetes")
+        adapter.transport = PagedTransport([ResponseTooLargeError("too large")])
+
+        inventory = adapter.list_endpoint_slices("shop", {"mysql-exporter"})
+
+        self.assertEqual(inventory["status"], "unavailable")
+        self.assertFalse(inventory["complete"])
+        self.assertEqual(inventory["reason"], "response_too_large")
+        self.assertEqual(inventory["slices"], [])
+        self.assertEqual(adapter.transport.requests[0][3], 1024 * 1024)
+
+    def test_later_endpoint_slice_page_failure_preserves_partial_results(self):
+        adapter = KubernetesAdapter("http://kubernetes")
+        adapter.transport = PagedTransport([
+            {"metadata": {"continue": "next"}, "items": [
+                {"metadata": {"name": "mysql-a", "labels": {"kubernetes.io/service-name": "mysql-exporter"}},
+                 "endpoints": [], "ports": []},
+            ]},
+            ResponseTooLargeError("too large"),
+        ])
+
+        inventory = adapter.list_endpoint_slices("shop", {"mysql-exporter"})
+
+        self.assertEqual(inventory["status"], "partial")
+        self.assertFalse(inventory["complete"])
+        self.assertTrue(inventory["has_more"])
+        self.assertEqual(inventory["reason"], "page_unavailable")
+        self.assertEqual([item["name"] for item in inventory["slices"]], ["mysql-a"])
+
     def test_pod_inventory_distinguishes_not_ready_from_unreported_readiness(self):
         adapter = KubernetesAdapter("http://kubernetes")
-        adapter.transport = FakeTransport({"/api/v1/pods": {"items": [
+        adapter.transport = FakeTransport({"/api/v1/namespaces/shop/pods": {"metadata": {}, "items": [
             {"metadata": {"name": "starting", "namespace": "shop"}, "status": {"phase": "Running", "conditions": [
                 {"type": "Ready", "status": "False"}]}},
             {"metadata": {"name": "missing-condition", "namespace": "shop"}, "status": {"phase": "Pending", "conditions": []}},
@@ -580,6 +686,75 @@ class LiveSourceTests(unittest.TestCase):
         self.assertEqual(pods["starting"]["ready_status"], "false")
         self.assertFalse(pods["missing-condition"]["ready"])
         self.assertEqual(pods["missing-condition"]["ready_status"], "unknown")
+
+    def test_pod_inventory_is_namespaced_paginated_and_bounded(self):
+        adapter = KubernetesAdapter("http://kubernetes")
+        adapter.transport = PagedTransport([
+            {"metadata": {"continue": "opaque cursor"}, "items": [
+                {"metadata": {"name": "starting", "namespace": "shop"}, "status": {"phase": "Running"}},
+            ]},
+            {"metadata": {}, "items": [
+                {"metadata": {"name": "other", "namespace": "shop"}, "status": {"phase": "Pending"}},
+            ]},
+        ])
+
+        pods = adapter.list_pods({"shop"})
+
+        self.assertIsInstance(pods, list)
+        self.assertEqual(pods.status, "observed")
+        self.assertTrue(pods.complete)
+        self.assertEqual([item["name"] for item in pods], ["starting", "other"])
+        self.assertEqual(len(adapter.transport.requests), 2)
+        first_path, second_path = (request[0] for request in adapter.transport.requests)
+        self.assertTrue(first_path.startswith("/api/v1/namespaces/shop/pods?"))
+        self.assertTrue(second_path.startswith("/api/v1/namespaces/shop/pods?"))
+        self.assertEqual(parse_qs(urlsplit(first_path).query)["limit"], ["50"])
+        self.assertEqual(parse_qs(urlsplit(second_path).query)["continue"], ["opaque cursor"])
+        self.assertEqual([request[3] for request in adapter.transport.requests], [1024 * 1024] * 2)
+
+    def test_pod_inventory_exposes_unavailable_and_partial_states_without_breaking_list_callers(self):
+        adapter = KubernetesAdapter("http://kubernetes")
+        adapter.transport = PagedTransport([ResponseTooLargeError("too large")])
+
+        unavailable = adapter.list_pods({"shop"})
+
+        self.assertIsInstance(unavailable, list)
+        self.assertEqual(unavailable.status, "unavailable")
+        self.assertFalse(unavailable.complete)
+        self.assertEqual(unavailable.reason, "response_too_large")
+        self.assertEqual(unavailable, [])
+
+        adapter.transport = PagedTransport([
+            {"metadata": {"continue": "next"}, "items": [
+                {"metadata": {"name": "starting", "namespace": "shop"}, "status": {"phase": "Running"}},
+            ]},
+            RuntimeError("page unavailable"),
+        ])
+        partial = adapter.list_pods({"shop"})
+
+        self.assertEqual(partial.status, "partial")
+        self.assertFalse(partial.complete)
+        self.assertTrue(partial.has_more)
+        self.assertEqual(partial.reason, "page_unavailable")
+        self.assertEqual([item["name"] for item in partial], ["starting"])
+
+    def test_pod_inventory_page_cap_is_explicitly_partial(self):
+        adapter = KubernetesAdapter("http://kubernetes")
+        adapter.transport = PagedTransport([
+            {"metadata": {"continue": "next"}, "items": [
+                {"metadata": {"name": "starting", "namespace": "shop"}, "status": {"phase": "Running"}},
+            ]},
+            {"metadata": {}, "items": []},
+        ])
+
+        with patch("fcapsule.adapters.kubernetes_adapter.MAX_POD_PAGES", 1):
+            pods = adapter.list_pods({"shop"})
+
+        self.assertEqual(pods.status, "partial")
+        self.assertFalse(pods.complete)
+        self.assertTrue(pods.has_more)
+        self.assertEqual([item["name"] for item in pods], ["starting"])
+        self.assertEqual(len(adapter.transport.requests), 1)
 
     def test_monitor_namespace_any_is_scoped_to_requested_namespaces(self):
         adapter = KubernetesAdapter("http://kubernetes")

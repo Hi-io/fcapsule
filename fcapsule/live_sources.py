@@ -149,7 +149,14 @@ class LiveSourceCoordinator:
         if not probes["targets"]["kubernetes"].get("ok"):
             raise RuntimeError(probes["targets"]["kubernetes"].get("error", "Kubernetes API is unavailable"))
 
-        pods = kubernetes.list_pods(namespaces)
+        pod_inventory = kubernetes.list_pods(namespaces)
+        pod_status = getattr(pod_inventory, "status", "observed")
+        if pod_status == "observed" and (getattr(pod_inventory, "complete", True) is False
+                                          or getattr(pod_inventory, "has_more", False) is True):
+            pod_status = "partial"
+        if pod_status == "unavailable":
+            raise RuntimeError("Kubernetes pod inventory is unavailable")
+        pods = pod_inventory
         prometheus_inventory: dict[tuple[str, str], dict[str, str]] = {}
         log_counts: dict[tuple[str, str], int] = {}
         if probes["targets"]["prometheus"].get("ok"):
@@ -182,7 +189,14 @@ class LiveSourceCoordinator:
                 "faults": {"adapter": "prometheus", "status": "connected" if probes["targets"]["prometheus"].get("ok") else "error"},
                 "metrics": {"adapter": "prometheus", "status": "observed" if metric_pods else "missing", "pods_observed": metric_pods},
                 "logs": {"adapter": "opensearch", "status": "observed" if recent_logs else "waiting", "recent_documents": recent_logs},
-                "configuration": {"adapter": "kubernetes", "status": "available", "pods_visible": len(workload_pods)},
+                "configuration": {
+                    "adapter": "kubernetes",
+                    "status": "partial" if pod_status == "partial" else "available",
+                    "pods_visible": len(workload_pods),
+                    "complete": getattr(pod_inventory, "complete", True) is True,
+                    "has_more": getattr(pod_inventory, "has_more", False),
+                    "omitted_pods": getattr(pod_inventory, "omitted_pods", 0),
+                },
                 "traces": {"adapter": "not_configured", "status": "not_configured", "retain_raw_spans": False},
                 "pods": pod_records,
             }

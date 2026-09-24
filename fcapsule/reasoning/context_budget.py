@@ -763,6 +763,10 @@ def _discovery_observation(result: dict[str, Any]) -> dict[str, Any]:
         **({"discovery_targets": {key: value for key, value in (
             ("target_service", target_service), ("target_workload", target_workload)) if value}}
            if target_service or target_workload else {}),
+        **({"pod_inventory": {key: result["pod_inventory"][key] for key in
+                               ("status", "complete", "has_more", "omitted_pods")
+                               if key in result["pod_inventory"]}}
+           if isinstance(result.get("pod_inventory"), dict) else {}),
         "observed_at": result.get("observed_at"),
         "provenance": _bounded(result.get("provenance"), max_items=3) if result.get("provenance") else [],
         "current_service_labels": [
@@ -982,6 +986,9 @@ def _tiny_discovery_observation(observation: dict[str, Any]) -> dict[str, Any]:
         "minimal_discovery": True,
         "tiny_discovery": True,
         **pick(observation, ("discovery_targets", "observed_at")),
+        **({"pod_inventory": pick(observation.get("pod_inventory"),
+                                   ("status", "complete", "has_more", "omitted_pods"))}
+           if isinstance(observation.get("pod_inventory"), dict) else {}),
         "monitor_selection": minimal_selections,
         **({"endpoint_slice_inventory": pick(inventory, ("status", "omitted_slices"))}
            if isinstance(inventory, dict) else {}),

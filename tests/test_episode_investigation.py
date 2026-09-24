@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 from fcapsule.episode_investigation import SYSTEM, RELATIONSHIP_REVIEW_SYSTEM, EVIDENCE_REVIEW_SYSTEM, assessment_payload, normalize_evidence_citations, run_investigation, validate_assessment
 from fcapsule.investigation_tools import InvestigationTools, episode_context, log_patterns, metric_summary, scrub, stamp
 from fcapsule.processing.anonymizer import anonymize_text, template_for_message
+from fcapsule.adapters.kubernetes_adapter import KubernetesInventory
 from fcapsule.reasoning.context_budget import _check_item, _minimal_check_observation, compact_for_model, estimate_tokens
 
 
@@ -1083,16 +1084,17 @@ class InvestigationToolTests(unittest.TestCase):
             "selector": {"app": "mysql-exporter"},
             "ports": [{"name": "mysql", "port": 9104, "target_port": 9104}], "omitted_ports": 0,
         }]
-        self.kube.list_pods.return_value = [
+        self.kube.list_pods.return_value = KubernetesInventory([
             {"name": "worker-1", "namespace": "ns", "workload": "worker", "ready": True,
              "ready_status": "true", "labels": {"app": "worker"}},
             exporter,
-        ]
+        ], status="partial", complete=False, has_more=True, omitted_pods=1)
         self.kube.list_endpoint_slices.return_value = {
             "slices": [{"name": "mysql-exporter-a", "namespace": "ns", "service": "mysql-exporter",
                         "ports": [{"name": "mysql", "port": 9104, "protocol": "TCP"}],
                         "endpoints": [{"target_ref": {"kind": "Pod", "name": "mysql-exporter-0", "namespace": "ns"},
                                        "ready": False, "serving": False, "terminating": False, "address_count": 1}]}],
+            "status": "partial", "complete": False, "has_more": True,
             "omitted_slices": 0, "observed_at": "2026-09-20T12:11:00Z",
         }
 
@@ -1107,6 +1109,10 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertEqual(service["endpoint_slices"][0]["endpoints"][0]["ready"], False)
         self.assertEqual(service["endpoint_pod_health"][0]["ready_status"], "false")
         self.assertEqual(service["endpoint_pod_health"][0]["container_health"][0]["restart_count"], 2)
+        self.assertEqual(result["endpoint_slice_inventory"]["status"], "partial")
+        self.assertFalse(result["endpoint_slice_inventory"]["complete"])
+        self.assertEqual(result["pod_inventory"]["status"], "partial")
+        self.assertFalse(result["pod_inventory"]["complete"])
         self.assertEqual(pod_monitor["matched_pods"], ["mysql-exporter-0"])
         exporter_evidence = next(item for item in pod_monitor["evaluated_pods"] if item["name"] == "mysql-exporter-0")
         self.assertEqual(exporter_evidence["target_relevance"], "prometheus_target_pod")
@@ -1114,8 +1120,13 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertEqual(exporter_evidence["endpoint_port_checks"][0]["status"],
                          "does_not_match_pod_container_port")
         self.assertNotIn("private", json.dumps(result))
-        compact = _check_item({"id": "Q-exporter", "tool": "scrape_discovery", "status": "completed",
-                               "result": result}, False)["observation"]
+        compact_check = _check_item({"id": "Q-exporter", "tool": "scrape_discovery", "status": "completed",
+                                     "result": result}, False)
+        compact = compact_check["observation"]
+        self.assertEqual(compact["endpoint_slice_inventory"]["status"], "partial")
+        self.assertEqual(compact["pod_inventory"]["status"], "partial")
+        minimum = _minimal_check_observation(compact_check)
+        self.assertEqual(minimum["pod_inventory"]["status"], "partial")
         compact_pod_monitor = next(item for item in compact["monitor_selection"] if item["kind"] == "PodMonitor")
         self.assertEqual(compact_pod_monitor["evaluated_resources"][0]["name"], "mysql-exporter-0")
         self.assertEqual(compact_pod_monitor["evaluated_resources"][0]["target_relevance"], "prometheus_target_pod")
