@@ -265,7 +265,8 @@ def episode_context(
                 priority_evidence_ids.append(item["id"])
     ordered_evidence.sort(key=lambda item: not item.get("revision_priority", False))
     alerts.sort(key=lambda item: str(item.get("incident_id")) != primary_incident_id)
-    return scrub({"episode_id": episode["episode_id"], "live_capture": any(entry["incident"].get("source_kind") == "live" for entry in entries),
+    return scrub({"episode_id": episode["episode_id"], "primary_incident_id": primary_incident_id,
+        "live_capture": any(entry["incident"].get("source_kind") == "live" for entry in entries),
         "episode_lifecycle": {key: episode.get(key) for key in
                   ("status", "started_at", "ended_at", "last_activity_at")}, "alerts": alerts,
         "scope": scope, "recurrence": recurrence_context,
@@ -373,25 +374,53 @@ class InvestigationTools:
         application: dict[str, Any],
         sources: Any,
         historical_episodes: list[dict[str, Any]] | None = None,
+        primary_incident_id: str | None = None,
     ):
         self.entries, self.application, self.sources = entries, application, sources
         self.historical_episodes = {str(item["episode_id"]): item for item in historical_episodes or []}
         self.namespace = str(application.get("namespace", ""))
         self.workload = str(application.get("name", ""))
-        self.pods = sorted({str(entry["capsule"]["case"]["pod"]) for entry in entries if entry["capsule"]["case"].get("pod")})
-        self.window_start = min(stamp(entry["capsule"]["case"]["window"]["start"]) for entry in entries)
-        self.window_end = min(datetime.now(timezone.utc), max(stamp(entry["capsule"]["case"]["window"]["end"]) for entry in entries))
+        entry_by_id = {str(item.get("incident", {}).get("incident_id") or ""): item for item in entries}
+        requested_primary = str(primary_incident_id or "")
+        fallback_primary = str(entries[0].get("episode", {}).get("primary_incident_id") or "") if entries else ""
+        chosen = entry_by_id.get(requested_primary) or entry_by_id.get(fallback_primary)
+        if chosen is None and entries:
+            chosen = max(entries, key=lambda item: str(
+                item.get("incident", {}).get("started_at") or
+                (item.get("report", {}).get("incident") or {}).get("started_at") or ""))
+        self.primary_entry = chosen
+        self.primary_incident_id = str(chosen.get("incident", {}).get("incident_id") or "") if chosen else ""
+        primary_case = (chosen.get("capsule") or {}).get("case") or {} if chosen else {}
+        primary_report_incident = (chosen.get("report") or {}).get("incident") or {} if chosen else {}
+        primary_resource = (chosen.get("incident", {}).get("resource") or primary_report_incident.get("resource") or {}) if chosen else {}
+        primary_pod = primary_case.get("pod") or primary_report_incident.get("pod")
+        if not primary_pod and isinstance(primary_resource, dict) and str(primary_resource.get("kind", "")).casefold() == "pod":
+            primary_pod = primary_resource.get("name")
+        self.pods = [str(primary_pod)] if isinstance(primary_pod, str) and primary_pod else []
+        captured_window = primary_case.get("window") if isinstance(primary_case.get("window"), dict) else {}
+        primary_alert_at = ((chosen or {}).get("incident") or {}).get("started_at") or primary_report_incident.get("started_at")
+        try:
+            self.focus_time = stamp(str(primary_alert_at)) if primary_alert_at else stamp(str(captured_window.get("end")))
+        except (TypeError, ValueError):
+            self.focus_time = datetime.now(timezone.utc)
+        now_at = datetime.now(timezone.utc)
+        try:
+            self.window_end = min(now_at, stamp(str(captured_window.get("end"))))
+        except (TypeError, ValueError):
+            self.window_end = min(now_at, self.focus_time + timedelta(minutes=5))
+        try:
+            self.window_start = stamp(str(captured_window.get("start")))
+        except (TypeError, ValueError):
+            self.window_start = self.focus_time - timedelta(minutes=5)
         self.window_start = max(self.window_start, self.window_end - timedelta(minutes=30))
-        self.focus_time = max((stamp(item["incident"]["started_at"]) for item in entries if item["incident"].get("started_at")), default=self.window_start)
+        if self.window_start >= self.window_end:
+            self.window_start = self.window_end - timedelta(minutes=5)
         self.alert_names = {
             str(alert.get("name") or alert.get("alertname") or "")
-            for entry in entries for alert in entry["report"].get("fault_alerts", [])
+            for alert in ((chosen or {}).get("report") or {}).get("fault_alerts", [])
         } - {""}
         self.discovery_targets: dict[str, str] = {}
-        latest_first = sorted(entries, key=lambda entry: str(
-            entry.get("incident", {}).get("started_at") or
-            (entry.get("report", {}).get("incident") or {}).get("started_at") or ""), reverse=True)
-        for entry in latest_first:
+        for entry in ([chosen] if chosen else []):
             labels = _discovery_labels(entry.get("report", {}))
             target_service = labels.get("target_service") or labels.get("kubernetes_service")
             target_workload = labels.get("target_workload")
@@ -405,7 +434,7 @@ class InvestigationTools:
 
     def _adapters(self):
         config = self.sources.configuration()
-        if not any(item["incident"].get("source_kind") == "live" for item in self.entries):
+        if not self.primary_entry or self.primary_entry["incident"].get("source_kind") != "live":
             raise ValueError("Imported case: live queries are disabled; use retained evidence.")
         if config.get("cluster_name") != self.application.get("cluster"):
             raise ValueError("The episode belongs to a different cluster than the configured sources.")
@@ -428,7 +457,7 @@ class InvestigationTools:
             raise ValueError("Terms must contain at most three short literal strings")
         if name == "review_omitted":
             candidates = []
-            for entry in self.entries:
+            for entry in ([self.primary_entry] if self.primary_entry else []):
                 selected = {item["source_id"] for item in entry["capsule"].get("selected_evidence", [])}
                 for item in entry["capsule"].get("log_templates", []):
                     if item["template_id"] in selected:
@@ -449,7 +478,7 @@ class InvestigationTools:
         prometheus, opensearch, kubernetes = self._adapters()
         if name == "alert_rule_logic":
             retained = []
-            for entry in self.entries:
+            for entry in ([self.primary_entry] if self.primary_entry else []):
                 for alert in entry["report"].get("fault_alerts", [])[:8]:
                     rule = alert.get("rule") if isinstance(alert.get("rule"), dict) else {}
                     if rule:

@@ -46,6 +46,29 @@ class ContextBudgetTests(unittest.TestCase):
                 self.assertEqual(visible, [item["id"] for item in compact["evidence"]])
         self.assertEqual(context, before)
 
+    def test_primary_alert_and_evidence_attribution_survive_large_episode_compaction(self):
+        alerts = [{"incident_id": f"incident-{index:02d}", "alertname": f"Alert{index}",
+                   "started_at": f"2026-09-20T12:{index:02d}:00Z"} for index in range(14)]
+        context = {
+            "episode_id": "multi-alert", "primary_incident_id": "incident-07",
+            "alerts": alerts,
+            "evidence": [{"id": "E-current", "summary": "Current alert sample",
+                          "provenance": [{"incident_id": "incident-07", "evidence_id": "ev_metric_002"}]},
+                         {"id": "E-sibling", "summary": "Earlier sibling sample",
+                          "provenance": [{"incident_id": "incident-04", "evidence_id": "ev_log_004"}]}],
+        }
+
+        compact, visible = compact_for_model(context, [], max_prompt_tokens=800)
+
+        self.assertEqual(compact["primary_incident_id"], "incident-07")
+        self.assertEqual(compact["alerts"][0]["incident_id"], "incident-07")
+        evidence = next(row for row in compact["evidence"] if row["id"] == "E-current")
+        self.assertNotIn("incident_ids", evidence)
+        sibling = next(row for row in compact["evidence"] if row["id"] == "E-sibling")
+        self.assertEqual(sibling["incident_ids"], ["incident-04"])
+        self.assertIn("E-current", visible)
+        self.assertLessEqual(len(compact["alerts"]), 12)
+
     def test_scope_and_recurrence_are_field_masked_even_for_direct_contexts(self):
         context = {
             "episode_id": "scope-mask", "evidence": [{"id": "E1"}],

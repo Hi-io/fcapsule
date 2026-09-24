@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import Mock
 
-from fcapsule.episode_investigation import SYSTEM, RELATIONSHIP_REVIEW_SYSTEM, EVIDENCE_REVIEW_SYSTEM, assessment_payload, run_investigation, validate_assessment
+from fcapsule.episode_investigation import SYSTEM, RELATIONSHIP_REVIEW_SYSTEM, EVIDENCE_REVIEW_SYSTEM, assessment_payload, normalize_evidence_citations, run_investigation, validate_assessment
 from fcapsule.investigation_tools import InvestigationTools, episode_context, log_patterns, metric_summary, scrub, stamp
 from fcapsule.processing.anonymizer import anonymize_text, template_for_message
 from fcapsule.reasoning.context_budget import _check_item, _minimal_check_observation, compact_for_model, estimate_tokens
@@ -76,6 +76,47 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(state["assessment"]["provenance"], "deterministic_abstention")
         self.assertEqual(state["usage"]["total_tokens"], 130)
 
+    def test_exact_visible_source_alias_is_normalized_and_audited(self):
+        context = {"evidence": [{"id": "E-visible", "provenance": [
+            {"incident_id": "one", "evidence_id": "ev_metric_002"},
+        ]}]}
+        value = {**assessment("ev_metric_002"), "hypotheses": [{
+            "explanation": "Memory pressure", "status": "supported", "reason": "A sampled value rose.",
+            "evidence_ids": ["ev_metric_002"],
+        }]}
+
+        normalized, applied = normalize_evidence_citations(value, context, {"E-visible"})
+
+        self.assertEqual(normalized["evidence_ids"], ["E-visible"])
+        self.assertEqual(normalized["hypotheses"][0]["evidence_ids"], ["E-visible"])
+        self.assertEqual(applied, {"ev_metric_002": "E-visible"})
+        self.assertEqual(value["evidence_ids"], ["ev_metric_002"])
+
+    def test_investigation_accepts_only_provenance_backed_aliases(self):
+        self.context["evidence"] = [{"id": "E1", "provenance": [
+            {"incident_id": "one", "evidence_id": "ev_metric_002"},
+        ]}]
+        state, _ = self.run_case([{"action": "finish", "assessment": assessment("ev_metric_002")}], max_checks=0)
+
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["assessment"]["evidence_ids"], ["E1"])
+        self.assertEqual(state["calls"][0]["citation_aliases_normalized"], {"ev_metric_002": "E1"})
+
+    def test_hidden_or_ambiguous_source_alias_remains_invalid(self):
+        hidden = {"evidence": [{"id": "E-hidden", "provenance": [
+            {"incident_id": "one", "evidence_id": "ev_metric_002"},
+        ]}]}
+        ambiguous = {"evidence": [
+            {"id": "E-one", "provenance": [{"evidence_id": "ev_metric_002"}]},
+            {"id": "E-two", "provenance": [{"evidence_id": "ev_metric_002"}]},
+        ]}
+        for context in (hidden, ambiguous):
+            normalized, applied = normalize_evidence_citations(assessment("ev_metric_002"), context, set())
+            self.assertEqual(normalized["evidence_ids"], ["ev_metric_002"])
+            self.assertEqual(applied, {})
+            with self.assertRaisesRegex(ValueError, "unavailable evidence"):
+                validate_assessment(normalized, {"E-one", "E-two"}, {"one"})
+
     def test_prompt_default_and_explicit_smaller_limits_remain_distinct(self):
         for context_limit, explicit_limit, expected in ((None, None, 3200), (2100, None, 2100), (3200, 2100, 2100)):
             with self.subTest(context_limit=context_limit, explicit_limit=explicit_limit):
@@ -117,7 +158,7 @@ class InvestigationEngineTests(unittest.TestCase):
         value["basis"] = "Repeated decoder failure supports an application error. password=never-retain-basis"
         state, client = self.run_case([{"action": "finish", "assessment": value}], max_checks=0)
         self.assertEqual(state["status"], "ready")
-        self.assertEqual(state["policy_version"], "episode-investigation-1.22")
+        self.assertEqual(state["policy_version"], "episode-investigation-1.23")
         self.assertEqual(len(client.requests), 2)
         self.assertEqual(state["assessment"]["evidence_ids"], ["Q001"])
         self.assertNotIn("never-retain-basis", json.dumps(state))
@@ -809,6 +850,27 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertEqual(self.logs.collect_logs.call_args.kwargs, {"limit": 300, "terms": ["decoder"], "focus": self.kit.focus_time})
         self.assertEqual(self.logs.collect_logs.call_args.args[:2], ("ns", "worker-1"))
 
+    def test_live_query_scope_uses_requested_primary_incident_not_latest_sibling(self):
+        older = copy.deepcopy(self.entries[0])
+        older["incident"].update(incident_id="primary", started_at="2026-09-20T12:02:00Z")
+        older["capsule"]["case"].update(pod="checkout-primary", window={
+            "start": "2026-09-20T11:58:00Z", "end": "2026-09-20T12:06:00Z",
+        })
+        later = copy.deepcopy(self.entries[0])
+        later["incident"].update(incident_id="sibling", started_at="2026-09-20T12:09:00Z")
+        later["capsule"]["case"].update(pod="checkout-sibling", window={
+            "start": "2026-09-20T12:07:00Z", "end": "2026-09-20T12:14:00Z",
+        })
+        kit = InvestigationTools([later, older], self.kit.application, self.sources, primary_incident_id="primary")
+
+        self.assertEqual(kit.pods, ["checkout-primary"])
+        self.assertEqual(kit.focus_time, stamp("2026-09-20T12:02:00Z"))
+        self.assertEqual(kit.window_start, stamp("2026-09-20T11:58:00Z"))
+        self.assertEqual(kit.window_end, stamp("2026-09-20T12:06:00Z"))
+        self.logs.collect_logs.return_value = []
+        kit.execute("search_logs", {"terms": ["decoder"]})
+        self.assertEqual(self.logs.collect_logs.call_args.args[:2], ("ns", "checkout-primary"))
+
     def test_scrape_discovery_explains_the_selection_chain_without_claiming_a_typo(self):
         self.prom.scrape_targets.return_value = {
             "active": [{"state": "active", "health": "down", "pod": "worker-1", "service": "worker"}],
@@ -1062,6 +1124,7 @@ class InvestigationToolTests(unittest.TestCase):
 
         focused = episode_context({"episode_id": "episode", "primary_incident_id": "current"}, [earlier, current], "earlier")
         self.assertEqual(focused["alerts"][0]["incident_id"], "earlier")
+        self.assertEqual(focused["primary_incident_id"], "earlier")
 
     def test_active_alert_does_not_inherit_legacy_capture_window_end(self):
         self.entries[0]["incident"].update(status="firing", ended_at="2026-09-20T12:10:00Z")

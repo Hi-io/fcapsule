@@ -80,6 +80,77 @@ class AlertExpressionTests(unittest.TestCase):
         self.assertIsNone(result["unit"])
         self.assertNotIn('pod=', result["expression"])
 
+    def test_per_pod_derived_rule_is_narrowed_only_when_every_aggregation_keeps_pod(self):
+        expression = 'sum by (namespace,pod) (rate(order_errors_total{namespace="shop"}[1m])) > 3'
+        result = self.plan(expression, labels={"namespace": "shop", "pod": "orders-7"})
+        parsed = promql.parse(result["expression"])
+        vector = parsed.expr.args[0].vector_selector
+        self.assertEqual(
+            {matcher.name: matcher.value for matcher in vector.matchers.matchers},
+            {"namespace": "shop", "pod": "orders-7"},
+        )
+        self.assertIn("by (namespace, pod)", result["expression"])
+        self.assertEqual(result["scope"], {"namespace": "shop", "pod": "orders-7"})
+
+    def test_per_pod_derived_rule_fails_closed_when_scope_is_lost_or_ambiguous(self):
+        cases = (
+            ('sum by (namespace) (rate(order_errors_total{namespace="shop"}[1m])) > 3',
+             {"namespace": "shop", "pod": "orders-7"}, "drops_incident_identity"),
+            ('sum by (namespace,pod) (sum by (namespace) (rate(order_errors_total{namespace="shop"}[1m]))) > 3',
+             {"namespace": "shop", "pod": "orders-7"}, "drops_incident_identity"),
+            ('sum by (namespace,pod) (rate(order_errors_total{namespace="shop",pod=~"orders-.*"}[1m])) > 3',
+             {"namespace": "shop", "pod": "orders-7"}, "not_exact"),
+            ('sum by (namespace,pod) (rate(order_errors_total{namespace="elsewhere"}[1m])) > 3',
+             {"namespace": "shop", "pod": "orders-7"}, "outside_incident_namespace"),
+        )
+        for query, labels, reason in cases:
+            with self.subTest(query=query), self.assertRaisesRegex(UnavailableExpression, reason):
+                self.plan(query, labels=labels)
+
+    def test_compound_latency_alert_captures_primary_value_not_sample_guards(self):
+        expression = (
+            '(order_checkout_latency_p95_seconds{namespace="shop",service="orders-api"} > 0.25) '
+            'and on(namespace,pod,service) '
+            '(order_checkout_latency_sample_count{namespace="shop",service="orders-api"} >= 10) '
+            'and on(namespace,pod,service) (up{namespace="shop",service="orders-api"} == 1)'
+        )
+        result = self.plan(expression, labels={"namespace": "shop", "service": "orders-api", "pod": "orders-7"})
+        self.assertEqual(result["capture_mode"], "primary_threshold_series")
+        self.assertEqual(result["rule_qualifier_count"], 2)
+        self.assertEqual(result["threshold"], 0.25)
+        self.assertEqual(result["operator"], ">")
+        self.assertEqual(result["unit"], "seconds")
+        self.assertEqual(result["expression"],
+                         'order_checkout_latency_p95_seconds{namespace="shop",service="orders-api",pod="orders-7"}')
+
+    def test_compound_connection_alert_selects_ratio_and_scopes_every_source(self):
+        expression = (
+            '(inventory_mysql_client_sessions_active{namespace="shop",service="inventory-api"} '
+            '/ clamp_min(inventory_mysql_server_max_connections{namespace="shop",service="inventory-api"}, 1)) > 0.8 '
+            'and on(namespace,pod,service) '
+            '(inventory_mysql_server_max_connections{namespace="shop",service="inventory-api"} > 0) '
+            'and on(namespace,pod,service) (up{namespace="shop",service="inventory-api"} == 1)'
+        )
+        result = self.plan(expression, labels={"namespace": "shop", "service": "inventory-api", "pod": "inventory-3"})
+        parsed = promql.parse(result["expression"])
+        selectors = []
+        promql.walk(parsed, pre_visit=lambda node: selectors.append(node) if isinstance(node, promql.VectorSelector) else None)
+        self.assertEqual(result["capture_mode"], "primary_threshold_series")
+        self.assertEqual(result["threshold"], 0.8)
+        self.assertEqual(result["unit"], "ratio")
+        self.assertEqual(result["scope"], {"namespace": "shop", "pod": "inventory-3"})
+        self.assertEqual(len(selectors), 2)
+        self.assertTrue(all({m.name: m.value for m in item.matchers.matchers}.get("pod") == "inventory-3"
+                            for item in selectors))
+
+    def test_compound_alert_with_two_equally_plausible_primary_metrics_fails_closed(self):
+        expression = (
+            '(request_latency_seconds{namespace="shop"} > 1) '
+            'and on(namespace,pod) (request_duration_seconds{namespace="shop"} > 1)'
+        )
+        with self.assertRaisesRegex(UnavailableExpression, "ambiguous_primary_threshold_series"):
+            self.plan(expression, labels={"namespace": "shop", "pod": "orders-7"})
+
     def test_unsupported_or_unsafe_expressions_are_not_rewritten(self):
         expressions = (
             "up == 0 or latency_seconds > 0.25", "(up == 0) and (ready == 0)",
@@ -125,6 +196,24 @@ class AlertMetricCaptureTests(unittest.TestCase):
         self.assertEqual(captured["series"][0]["source"]["capture_mode"], "incident_capture")
         self.assertEqual(captured["series"][0]["labels"], LABELS)
         self.assertEqual(captured["series"][0]["rule"]["query"], alert()["rule"]["query"])
+
+    def test_compound_rule_captures_primary_signal_and_discloses_omitted_qualifiers(self):
+        expression = (
+            '(order_checkout_latency_p95_seconds{namespace="shop",service="mysql-exporter"} > 0.25) '
+            'and on(namespace,pod,service) '
+            '(order_checkout_latency_sample_count{namespace="shop",service="mysql-exporter"} >= 10) '
+            'and on(namespace,pod,service) (up{namespace="shop",service="mysql-exporter"} == 1)'
+        )
+        captured = self.collect(query=expression)
+        sent = parse_qs(urlparse(self.adapter.transport.request.call_args.args[0]).query)["query"][0]
+        parsed = promql.parse(sent)
+        self.assertIsInstance(parsed, promql.VectorSelector)
+        self.assertEqual(parsed.name, "order_checkout_latency_p95_seconds")
+        self.assertEqual(captured["alert_evidence"]["capture_mode"], "primary_threshold_series")
+        self.assertEqual(captured["alert_evidence"]["rule_qualifier_count"], 2)
+        self.assertEqual(captured["series"][0]["source"]["capture_mode"], "primary_threshold_series")
+        self.assertIn("not graphed", captured["series"][0]["source"]["capture_note"])
+        self.assertIn("sample_count", captured["alert_evidence"]["rule"]["query"])
 
     def test_non_finite_and_missing_samples_remain_null_not_zero(self):
         captured = self.collect([[START.timestamp(), "1"], [START.timestamp() + 15, "NaN"], [START.timestamp() + 45, "+Inf"]])
