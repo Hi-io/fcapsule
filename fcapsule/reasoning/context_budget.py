@@ -1181,13 +1181,6 @@ def compact_for_model(
             # retained summaries. Keep their structured form before trimming it.
             payload["evidence"].pop()
             visible_ids = refresh_visible_ids()
-        elif len(payload["prior_checks"]) > 1 and any(
-            not item.get("required_observation") for item in payload["prior_checks"]
-        ):
-            removable = next(index for index, item in enumerate(payload["prior_checks"])
-                             if not item.get("required_observation"))
-            payload["prior_checks"].pop(removable)
-            visible_ids = refresh_visible_ids()
         elif payload.get("impact"):
             payload["impact"] = []
         elif payload.get("scope", {}).get("cluster"):
@@ -1246,6 +1239,16 @@ def compact_for_model(
                     item["observation"] = _tiny_discovery_observation(observation)
                 else:
                     item["observation"] = _minimal_check_observation(item)
+        elif len(payload["prior_checks"]) > 1 and any(
+            not item.get("required_observation") for item in payload["prior_checks"]
+        ):
+            # A model-selected source read should survive at least its specialized
+            # compact representation. Drop optional checks only after reducing the
+            # observation, not before the current result reaches the next turn.
+            removable = next(index for index, item in enumerate(payload["prior_checks"])
+                             if not item.get("required_observation"))
+            payload["prior_checks"].pop(removable)
+            visible_ids = refresh_visible_ids()
         elif removable_evidence():
             payload["evidence"].pop()
             visible_ids = refresh_visible_ids()

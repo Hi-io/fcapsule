@@ -210,6 +210,59 @@ class ContextBudgetTests(unittest.TestCase):
         self.assertEqual(signal["level"], "ERROR")
         self.assertEqual(signal["error"], "Only base64 data is allowed")
 
+    def test_selected_resource_history_survives_prompt_compaction(self):
+        context = {
+            "episode_id": "resource-history-budget",
+            "live_capture": True,
+            "scope": {"pod": "worker-1", "namespace": "production",
+                      "alert_started_at": "2026-09-23T02:00:00Z",
+                      "window": {"start": "2026-09-23T01:55:00Z", "end": "2026-09-23T02:05:00Z"}},
+            "alerts": [{"incident_id": "incident-1", "alertname": "WorkerPressure"}],
+            "evidence": [{"id": f"E{index}", "domain": "log_template",
+                          "summary": "Routine worker status remained available. " * 80}
+                         for index in range(12)],
+        }
+        checks = [
+            {"id": "Q001", "tool": "workload_state", "status": "completed", "required_observation": True,
+             "result": {"observations": [
+                 {"kind": "PodSpec", "ready": True, "resources": [{"limits": {"memory": "160Mi"}}]},
+                 {"kind": "ConfigMap", "name": "worker-config", "data": {"WORKER_MAX_BUFFER_BYTES": "104857600"}},
+             ]}},
+            {"id": "Q002", "tool": "search_logs", "status": "completed", "required_observation": True,
+             "result": {"patterns": [{"count": 4, "examples": [{"message": "worker completed request"}]}]}},
+            {"id": "Q003", "tool": "historical_episode", "status": "completed", "required_observation": True,
+             "result": {"observations": [{"summary": "Earlier alert observations are incomplete."}],
+                        "limitation": "Partial retained history."}},
+            {"id": "Q004", "tool": "resource_history", "status": "completed", "required_observation": False,
+             "question": "Did sampled memory approach its configured limit?",
+             "distinguishes": "Resource exhaustion versus an unrelated alert.",
+             "result": {"captured_at": "2026-09-23T02:05:02Z", "latest_alert_at": "2026-09-23T02:00:00Z",
+                        "observations": [{
+                            "metric": metric, "samples": 31, "labels": {"pod": "worker-1", "namespace": "production"},
+                            "freshness": {"status": "sampled", "latest_sample_at": "2026-09-23T02:04:48Z",
+                                          "age_seconds": 14, "captured_at": "2026-09-23T02:05:02Z"},
+                            "before_alert": {"timestamp": "2026-09-23T01:59:48Z", "value": 120000000},
+                            "nearest_alert": {"timestamp": "2026-09-23T02:00:08Z", "value": 128000000,
+                                               "offset_seconds": 8},
+                            "after_alert": {"timestamp": "2026-09-23T02:00:08Z", "value": 128000000},
+                            "sampled_peak": {"timestamp": "2026-09-23T02:00:08Z", "value": 128000000},
+                            "max": 128000000, "min": 100000000, "median": 110000000,
+                        } for metric in ("pod_memory_working_set_bytes", "pod_memory_limit_bytes",
+                                        "pod_cpu_throttled_ratio", "pod_container_restarts_total")]}}
+        ]
+
+        compact, visible = compact_for_model(context, checks, max_prompt_tokens=1200)
+
+        self.assertLessEqual(estimate_tokens(compact), 1200)
+        self.assertIn("Q004", visible)
+        history = next(item for item in compact["prior_checks"] if item["id"] == "Q004")
+        metrics = {item["metric"] for item in history["observation"]["observations"]}
+        self.assertIn("pod_memory_working_set_bytes", metrics)
+        self.assertIn("Q001", visible)
+        workload = next(item for item in compact["prior_checks"] if item["id"] == "Q001")
+        self.assertIn("160Mi", json.dumps(workload["observation"]))
+        self.assertIn("104857600", json.dumps(workload["observation"]))
+
     def test_log_observation_prefers_less_frequent_operational_signal_over_heartbeat(self):
         observation = _log_observation({"patterns": [
             {"pattern": "Worker scheduler heartbeat", "count": 100,
