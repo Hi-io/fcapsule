@@ -491,7 +491,10 @@ class InvestigationService:
             ]
             context["capture_limit"] = "At most 12 latest member reports and 80 initial evidence items; additional members remain individually accessible."
             application = self.plane.store.get_application(episode["app_id"])
-            kit = InvestigationTools(entries, application or {}, self.plane.live_sources, historical)
+            kit = InvestigationTools(
+                entries, application or {}, self.plane.live_sources, historical,
+                primary_incident_id=primary_incident_id,
+            )
             config = self.plane.ai_configuration()
             context["investigation_limits"] = {
                 "max_checks": config["max_checks"],

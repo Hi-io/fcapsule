@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+import copy
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -169,6 +170,54 @@ def validate_assessment(
     return result
 
 
+def normalize_evidence_citations(
+    value: Any, context: dict[str, Any], visible_evidence_ids: set[str],
+) -> tuple[Any, dict[str, str]]:
+    """Resolve source aliases only when retained provenance maps them uniquely to visible evidence."""
+    if not isinstance(value, dict):
+        return value, {}
+
+    alias_targets: dict[str, set[str]] = {}
+    for item in context.get("evidence", []):
+        if not isinstance(item, dict):
+            continue
+        canonical = item.get("id")
+        if not isinstance(canonical, str) or canonical not in visible_evidence_ids:
+            continue
+        for provenance in item.get("provenance", []):
+            if not isinstance(provenance, dict):
+                continue
+            alias = provenance.get("evidence_id")
+            if isinstance(alias, str) and alias and alias not in visible_evidence_ids and alias != canonical:
+                alias_targets.setdefault(alias, set()).add(canonical)
+    aliases = {alias: next(iter(targets)) for alias, targets in alias_targets.items() if len(targets) == 1}
+
+    normalized = copy.deepcopy(value)
+    applied: dict[str, str] = {}
+
+    def visit(node: Any) -> None:
+        if isinstance(node, dict):
+            refs = node.get("evidence_ids")
+            if isinstance(refs, list):
+                mapped = []
+                for ref in refs:
+                    canonical = aliases.get(ref) if isinstance(ref, str) else None
+                    if canonical:
+                        applied[ref] = canonical
+                        mapped.append(canonical)
+                    else:
+                        mapped.append(ref)
+                node["evidence_ids"] = mapped
+            for child in node.values():
+                visit(child)
+        elif isinstance(node, list):
+            for child in node:
+                visit(child)
+
+    visit(normalized)
+    return normalized, applied
+
+
 def ground_historical_comparison(assessment: dict[str, Any], checks: list[dict[str, Any]],
                                 model_context: dict[str, Any]) -> dict[str, Any]:
     """A valid current citation cannot substitute for the selected prior capsule."""
@@ -303,6 +352,41 @@ do not call tools or add facts, diagnoses, numbers, or evidence IDs. Preserve th
 and uncertainty. Correct the stated validation error using only the available evidence IDs. Every assessment, hypothesis,
 connection, and historical comparison citation array must contain one to eight available IDs. No private deliberation."""
 
+PRIMARY_FOCUS_INSTRUCTION = "Keep diagnosis and live checks on primary_incident_id; sibling alerts are context, not substitutes."
+STRUCTURED_DIAGNOSTIC_INSTRUCTION = (
+    "Use distinguishing structured diagnostics (statuses, schema fields, outcomes, measured durations); join repeated jobs or "
+    "transactions only by exact opaque references and recorded event order. Compare producer and consumer values only when "
+    "both are observed, and do not just repeat the alert."
+)
+REVIEW_DIAGNOSTIC_INSTRUCTION = (
+    "Preserve supported structured discriminators such as paired statuses, schema fields, measured durations and event "
+    "relationships proven by opaque references; do not restate the alert."
+)
+
+
+def has_structured_diagnostics(context: dict[str, Any], checks: list[dict[str, Any]]) -> bool:
+    def contains_fields(value: Any, depth: int = 0) -> bool:
+        if depth > 8:
+            return False
+        if isinstance(value, dict):
+            if isinstance(value.get("diagnostic_fields"), dict) and value["diagnostic_fields"]:
+                return True
+            return any(contains_fields(item, depth + 1) for item in value.values())
+        if isinstance(value, list):
+            return any(contains_fields(item, depth + 1) for item in value[:80])
+        return False
+
+    return contains_fields(context.get("evidence", [])) or contains_fields(checks)
+
+
+def investigation_system(context: dict[str, Any], checks: list[dict[str, Any]]) -> str:
+    additions = []
+    if context.get("primary_incident_id"):
+        additions.append(PRIMARY_FOCUS_INSTRUCTION)
+    if has_structured_diagnostics(context, checks):
+        additions.append(STRUCTURED_DIAGNOSTIC_INSTRUCTION)
+    return SYSTEM + ("\n" + "\n".join(additions) if additions else "")
+
 
 def inconclusive_assessment(evidence_ids: set[str], error: Exception | None = None) -> dict[str, Any]:
     """Return an honest, cited abstention when a model result cannot be validated."""
@@ -348,7 +432,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
     if max_prompt_tokens < 1200 or max_prompt_tokens > 12000:
         raise ValueError("max_prompt_tokens must be between 1200 and 12000")
     state = {"version": "1", "episode_id": context["episode_id"], "status": "running", "started_at": now(),
-              "policy_version": "episode-investigation-1.22", "max_completion_tokens_per_call": max_tokens,
+              "policy_version": "episode-investigation-1.23", "max_completion_tokens_per_call": max_tokens,
              "model": model, "context": context, "checks": [], "calls": [], "assessment": None,
              "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True},
              "token_budget": {"maximum_total_tokens": max_total_tokens, "maximum_prompt_tokens": max_prompt_tokens,
@@ -365,8 +449,10 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
     review_candidate = None
     relationship_repair = False
 
-    def compact_payload(base: dict[str, Any], system: str = SYSTEM) -> tuple[dict[str, Any], list[str]]:
+    def compact_payload(base: dict[str, Any], system: str | None = None) -> tuple[dict[str, Any], list[str]]:
         """Fit the entire API request, not only its incident evidence, into the cap."""
+
+        system = system or investigation_system(context, state["checks"])
 
         # ``compact_for_model`` only owns the episode ledger.  The provider sees
         # the system instruction, tools, review draft and citation catalogue too,
@@ -415,7 +501,8 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
         }
         return payload, visible_evidence_ids
 
-    def request_model(payload, effort, phase, desired_completion_tokens, system=SYSTEM):
+    def request_model(payload, effort, phase, desired_completion_tokens, system=None):
+        system = system or investigation_system(context, state["checks"])
         if time.monotonic() - started > 420:
             raise ValueError("Investigation time budget reached")
         encoded = json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
@@ -568,6 +655,11 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 call["decision"] = scrub(decision, reference_ids=set(visible_evidence_ids))
                 if decision.get("action") == "finish":
                     candidate = assessment_payload(decision, call)
+                    candidate, normalized_aliases = normalize_evidence_citations(
+                        candidate, context, set(visible_evidence_ids),
+                    )
+                    if normalized_aliases:
+                        call["citation_aliases_normalized"] = normalized_aliases
                     state["assessment"] = validate_assessment(candidate, set(visible_evidence_ids),
                                                                 {item["incident_id"] for item in context["alerts"]},
                                                                 {item["episode_id"] for item in context.get("historical_candidates", [])},
@@ -630,6 +722,8 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 "draft_validation_error": state.get("draft_validation_error"),
                 "instruction": REVIEW_INSTRUCTION}
             review_system = RELATIONSHIP_REVIEW_SYSTEM if relationship_repair else EVIDENCE_REVIEW_SYSTEM
+            if not relationship_repair and has_structured_diagnostics(context, state["checks"]):
+                review_system += "\n" + REVIEW_DIAGNOSTIC_INSTRUCTION
             if relationship_repair:
                 review_base["available_incident_ids"] = sorted({item["incident_id"] for item in context["alerts"]})
             payload, visible_evidence_ids = compact_payload(review_base, review_system)
@@ -638,8 +732,14 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             call["decision"] = scrub(decision, reference_ids=set(visible_evidence_ids))
             repaired_review = False
             try:
+                review_candidate_value = review_assessment_payload(decision, call)
+                review_candidate_value, normalized_aliases = normalize_evidence_citations(
+                    review_candidate_value, context, set(visible_evidence_ids),
+                )
+                if normalized_aliases:
+                    call["citation_aliases_normalized"] = normalized_aliases
                 reviewed = validate_assessment(
-                    review_assessment_payload(decision, call), set(visible_evidence_ids),
+                    review_candidate_value, set(visible_evidence_ids),
                     {item["incident_id"] for item in context["alerts"]},
                     {item["episode_id"] for item in context.get("historical_candidates", [])},
                     require_connections=require_connections,
@@ -663,8 +763,14 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 response, repair_call = request_model(payload, "none", "evidence_review_repair", 700, review_system)
                 repair_decision = parse_object(str(response.get("content", "")))
                 repair_call["decision"] = scrub(repair_decision, reference_ids=set(visible_evidence_ids))
+                repair_candidate_value = review_assessment_payload(repair_decision, repair_call)
+                repair_candidate_value, normalized_aliases = normalize_evidence_citations(
+                    repair_candidate_value, context, set(visible_evidence_ids),
+                )
+                if normalized_aliases:
+                    repair_call["citation_aliases_normalized"] = normalized_aliases
                 reviewed = validate_assessment(
-                    review_assessment_payload(repair_decision, repair_call), set(visible_evidence_ids),
+                    repair_candidate_value, set(visible_evidence_ids),
                     {item["incident_id"] for item in context["alerts"]},
                     {item["episode_id"] for item in context.get("historical_candidates", [])},
                     require_connections=require_connections,

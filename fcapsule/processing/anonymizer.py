@@ -30,6 +30,18 @@ _DIAGNOSTIC_ALIASES = {
     "errno": "errno",
     "status": "status",
     "statuscode": "status_code",
+    "upstreamstatus": "upstream_status",
+    "upstreamstatuscode": "upstream_status",
+    "consumerstatus": "consumer_status",
+    "consumerstatuscode": "consumer_status",
+    "observedstatus": "observed_status",
+    "validationfailure": "validation_failure",
+    "outcome": "outcome",
+    "identityfield": "identity_field",
+    "missingfields": "missing_fields",
+    "observedfields": "observed_fields",
+    "expectedfields": "expected_fields",
+    "changedfields": "changed_fields",
     "httpstatus": "status_code",
     "httpstatuscode": "status_code",
     "httpresponsestatuscode": "status_code",
@@ -49,6 +61,22 @@ _DIAGNOSTIC_ALIASES = {
     "bufferedbytes": "buffered_bytes",
     "pagebytes": "page_bytes",
     "delivery": "delivery",
+    "acknowledgement": "acknowledgement",
+    "ack": "acknowledgement",
+    "consumerdecision": "consumer_decision",
+    "ownershipmatch": "ownership_match",
+    "constraint": "constraint",
+    "pairid": "pair_id",
+    "lockorder": "lock_order",
+    "sku": "sku",
+    "firstsku": "first_sku",
+    "secondsku": "second_sku",
+    "requestkeyid": "request_key_id",
+    "acceptedkeyid": "accepted_key_id",
+    "signingkeyid": "signing_key_id",
+    "ownerref": "owner_ref",
+    "orderref": "order_ref",
+    "existingorderref": "existing_order_ref",
     "rows": "rows",
     "kdf": "kdf",
     "rounds": "rounds",
@@ -78,19 +106,38 @@ _DIAGNOSTIC_ALIASES = {
 }
 _CORRELATION_FIELDS = {
     "trace_id", "request_id", "correlation_id", "transaction_id", "span_id",
-    "order_id", "event_id", "message_id", "job_id", "session_id",
+    "order_id", "event_id", "message_id", "job_id", "session_id", "pair_id",
+    "sku", "first_sku", "second_sku", "owner_ref", "order_ref", "existing_order_ref",
 }
+_VERSION_ONLY_IDENTIFIER_FIELDS = {"request_key_id", "accepted_key_id", "signing_key_id"}
 _GROUPING_DIAGNOSTIC_FIELDS = {
-    "exit_code", "errno", "status", "status_code", "sqlstate", "mysql_error_code",
+    "exit_code", "errno", "status", "status_code", "upstream_status", "consumer_status", "observed_status",
+    "sqlstate", "mysql_error_code",
     "error_code", "error_type", "reason", "disposition", "payload_encoding",
     "delivery", "kdf", "rounds", "mode", "expected_schema", "response_schema",
-    "schema_version", "query_revision", "endpoint", "host", "port",
+    "schema_version", "query_revision", "endpoint", "host", "port", "validation_failure", "outcome",
+    "missing_fields", "observed_fields", "expected_fields", "changed_fields",
+    "acknowledgement", "consumer_decision", "ownership_match", "constraint", "lock_order",
 }
 _SENSITIVE_FIELD_PARTS = (
     "password", "secret", "token", "credential", "private", "certificate",
     "authorization", "cookie", "api_key", "apikey",
 )
 _MAX_DIAGNOSTIC_FIELDS = 12
+_MAX_DIAGNOSTIC_CANDIDATES = 96
+_FIELD_NAME_LISTS = {"missing_fields", "observed_fields", "expected_fields", "changed_fields"}
+_DIAGNOSTIC_FIELD_PRIORITY = {
+    name: index for index, name in enumerate((
+        "outcome", "validation_failure", "observed_status", "upstream_status", "consumer_status",
+        "status_code", "mysql_error_code", "error_code", "error_type", "sqlstate", "missing_fields",
+        "observed_fields", "expected_fields", "changed_fields", "response_schema", "expected_schema",
+        "schema_version", "ownership_match", "constraint", "lock_order", "acknowledgement",
+        "consumer_decision", "request_key_id", "accepted_key_id", "signing_key_id", "pair_id",
+        "first_sku", "second_sku", "owner_ref", "order_ref", "existing_order_ref",
+        "reason", "disposition", "timeout_ms", "timeout_seconds", "duration_ms",
+        "retry_count", "buffered_bytes", "max_connections", "exit_code", "status",
+    ))
+}
 
 
 def anonymize_text(value: str, mask_numbers: bool = False, *, preserve_relations: bool = True) -> str:
@@ -146,9 +193,28 @@ def diagnostic_fields(
                     break
 
     result: dict[str, str] = {}
-    for raw_key, item in candidates.items():
+    ordered_candidates = sorted(enumerate(candidates.items()), key=lambda pair: (
+        _DIAGNOSTIC_FIELD_PRIORITY.get(_canonical_diagnostic_key(pair[1][0]) or "", 100), pair[0]
+    ))
+    for _, (raw_key, item) in ordered_candidates:
         canonical = _canonical_diagnostic_key(raw_key)
         if not canonical or _is_sensitive_field(raw_key):
+            continue
+        if canonical in _FIELD_NAME_LISTS and isinstance(item, (list, tuple)):
+            safe_names = []
+            for name in item:
+                if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,63}", name):
+                    continue
+                if _is_sensitive_field(name):
+                    continue
+                if name not in safe_names:
+                    safe_names.append(name)
+                if len(safe_names) >= 8:
+                    break
+            if safe_names:
+                result.setdefault(canonical, ",".join(safe_names))
+            if len(result) >= _MAX_DIAGNOSTIC_FIELDS:
+                break
             continue
         if not isinstance(item, (str, int, float, bool)):
             continue
@@ -157,7 +223,10 @@ def diagnostic_fields(
         text = str(item).strip()
         if not text:
             continue
-        text = _relation_token(text) if _is_correlation_field(canonical) else anonymize_text(text)
+        if canonical in _VERSION_ONLY_IDENTIFIER_FIELDS:
+            text = _key_version(text) or _relation_token(text)
+        else:
+            text = _relation_token(text) if _is_correlation_field(canonical) else anonymize_text(text)
         result.setdefault(canonical, text[:180 if canonical == "error_message" else 96])
         if len(result) >= _MAX_DIAGNOSTIC_FIELDS:
             break
@@ -180,9 +249,11 @@ def _collect_diagnostic_fields(
             _collect_diagnostic_fields(item, output, path, depth + 1)
             continue
         canonical = _canonical_diagnostic_key(path)
-        if canonical and isinstance(item, (str, int, float, bool)):
+        if canonical in _FIELD_NAME_LISTS and isinstance(item, (list, tuple)):
             output.setdefault(canonical, item)
-        if len(output) >= _MAX_DIAGNOSTIC_FIELDS:
+        elif canonical and isinstance(item, (str, int, float, bool)):
+            output.setdefault(canonical, item)
+        if len(output) >= _MAX_DIAGNOSTIC_CANDIDATES:
             return
 
 
@@ -203,7 +274,15 @@ def _canonical_diagnostic_key(value: str) -> str | None:
 
 
 def _is_correlation_field(value: str) -> bool:
-    return value in _CORRELATION_FIELDS or value.endswith("_id") or value.endswith("id")
+    return value not in _VERSION_ONLY_IDENTIFIER_FIELDS and (
+        value in _CORRELATION_FIELDS or value.endswith("_id") or value.endswith("id")
+    )
+
+
+def _key_version(value: str) -> str | None:
+    """Retain only a public version suffix, never a configured key identifier."""
+    match = re.search(r"(?:^|[-_.])v(?:ersion)?[-_.]?(\d{1,4})$", value, re.I)
+    return "v" + match.group(1) if match else None
 
 
 def _is_sensitive_field(value: str) -> bool:

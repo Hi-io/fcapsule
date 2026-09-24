@@ -196,7 +196,9 @@ def compact_metric_observation(value: Any, *, minimal: bool = False) -> dict[str
     if not minimal:
         condition.update(fields(raw_condition, (("first_match", 40), ("last_match", 40))))
         result.update(fields(value, numbers=("step_seconds",)))
-        source = fields(value.get("source"), (("adapter", 40), ("endpoint", 80), ("captured_at", 40), ("capture_mode", 40)))
+        source = fields(value.get("source"), (("adapter", 40), ("endpoint", 80), ("captured_at", 40),
+                                               ("capture_mode", 40), ("capture_note", 180)),
+                        ("rule_qualifier_count",))
         if source:
             result["source"] = source
     if condition:
@@ -830,8 +832,16 @@ def compact_for_model(
     # important when a realistic incident contains thousands of routine lines.
     source_evidence.sort(key=lambda item: _evidence_priority(item, priority_ids))
     evidence = []
+    primary_incident_id = context.get("primary_incident_id")
     for item in source_evidence[:28]:
         compact_item = _evidence_item(item)
+        provenance = item.get("provenance") if isinstance(item.get("provenance"), list) else []
+        incident_ids = list(dict.fromkeys(
+            row.get("incident_id") for row in provenance
+            if isinstance(row, dict) and isinstance(row.get("incident_id"), str) and row.get("incident_id")
+        ))
+        if primary_incident_id and incident_ids and primary_incident_id not in incident_ids:
+            compact_item["incident_ids"] = incident_ids[:2]
         if compact_item.get("revision_priority") or str(item.get("id")) in priority_ids:
             compact_item["revision_priority"] = True
         evidence.append(compact_item)
@@ -841,9 +851,19 @@ def compact_for_model(
     visible_ids.extend(str(item["id"]) for item in recent if item.get("id") and item.get("status") == "completed")
     alerts = []
     source_alerts = context.get("alerts") or []
-    source_alerts = sorted(source_alerts, key=_alert_time)
-    selected_alerts = (source_alerts if len(source_alerts) <= 12 else
-                       [source_alerts[round(index * (len(source_alerts) - 1) / 11)] for index in range(12)])
+    primary_incident_id = context.get("primary_incident_id")
+    chronological_alerts = sorted(source_alerts, key=_alert_time)
+    primary_alert = next((item for item in chronological_alerts
+                          if item.get("incident_id") == primary_incident_id), None)
+    sibling_alerts = [item for item in chronological_alerts if item is not primary_alert]
+    if len(source_alerts) <= 12:
+        selected_alerts = ([primary_alert] if primary_alert else []) + sibling_alerts
+    else:
+        sibling_limit = 11 if primary_alert else 12
+        sampled_siblings = (sibling_alerts if len(sibling_alerts) <= sibling_limit else
+                            [sibling_alerts[round(index * (len(sibling_alerts) - 1) / (sibling_limit - 1))]
+                             for index in range(sibling_limit)] if sibling_limit > 1 else [sibling_alerts[-1]])
+        selected_alerts = ([primary_alert] if primary_alert else []) + sampled_siblings
     for item in selected_alerts:
         alert = {
             "incident_id": item.get("incident_id"),
@@ -861,8 +881,10 @@ def compact_for_model(
         "live_capture": bool(context.get("live_capture")),
         "evidence": evidence,
         "prior_checks": recent,
-        "constraints": "Evidence is bounded and may be incomplete. Current state is not incident-time state. Time correlation is not causation.",
+        "constraints": "Evidence may be incomplete. Current state is not incident-time state. Time correlation is not causation.",
     }
+    if primary_incident_id:
+        payload["primary_incident_id"] = primary_incident_id
     optional_fields = {
         "scope": _scope(context.get("scope")),
         "recurrence": _recurrence(context.get("recurrence")),
@@ -973,7 +995,10 @@ def compact_for_model(
                                  for item in payload["alerts"]]
         elif len(payload.get("alerts", [])) > 2:
             payload["omitted_alerts"] = payload.get("omitted_alerts", 0) + len(payload["alerts"]) - 2
-            payload["alerts"] = [payload["alerts"][0], payload["alerts"][-1]]
+            primary = next((item for item in payload["alerts"]
+                            if item.get("incident_id") == primary_incident_id), None)
+            other = next((item for item in reversed(payload["alerts"]) if item is not primary), None)
+            payload["alerts"] = ([primary] if primary else [payload["alerts"][0]]) + ([other] if other else [])
         elif len(payload["prior_checks"]) > 1:
             # Prior episodes are comparisons, not replacements for observations
             # of the current episode. Their later query time is not freshness.
@@ -992,11 +1017,11 @@ def compact_for_model(
             visible_ids = refresh_visible_ids()
         elif payload["evidence"] and len(str(payload["evidence"][0].get("summary") or "")) > 60:
             payload["evidence"][0]["summary"] = _short(payload["evidence"][0].get("summary"), 60)
-        elif any(set(item) - {"id", "summary", "metric_observation", "visual_observation", "diagnostic_fields", "diagnostic_examples",
+        elif any(set(item) - {"id", "incident_ids", "summary", "metric_observation", "visual_observation", "diagnostic_fields", "diagnostic_examples",
                               "time_range", "limitation"}
                  for item in payload["evidence"]):
             payload["evidence"] = [{key: item[key] for key in
-                                    ("id", "summary", "metric_observation", "visual_observation", "diagnostic_fields", "diagnostic_examples",
+                                    ("id", "incident_ids", "summary", "metric_observation", "visual_observation", "diagnostic_fields", "diagnostic_examples",
                                      "time_range", "limitation")
                                     if key in item} for item in payload["evidence"]]
             visible_ids = refresh_visible_ids()

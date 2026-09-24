@@ -68,6 +68,74 @@ class ProcessingTests(unittest.TestCase):
             template_for_message("request failed", second_fields),
         )
 
+    def test_contract_diagnostics_are_prioritized_and_schema_field_names_are_safe(self):
+        structured = {f"request_{index}_id": f"request-{index}" for index in range(24)}
+        structured.update({
+            "upstream_status": 200,
+            "consumer_status": 502,
+            "validation_failure": "missing_required_field",
+            "outcome": "contract_shape",
+            "observed_status": "missing",
+            "missing_fields": ["status", "customer_name", "api_key", "observed_fields"],
+            "observed_fields": ["id", "amount", "password"],
+        })
+
+        fields = diagnostic_fields(None, structured)
+
+        self.assertEqual(fields["upstream_status"], "200")
+        self.assertEqual(fields["consumer_status"], "502")
+        self.assertEqual(fields["validation_failure"], "missing_required_field")
+        self.assertEqual(fields["outcome"], "contract_shape")
+        self.assertEqual(fields["observed_status"], "missing")
+        self.assertEqual(fields["missing_fields"], "status,customer_name,observed_fields")
+        self.assertEqual(fields["observed_fields"], "id,amount")
+        self.assertLessEqual(len(fields), 12)
+        self.assertNotIn("api_key", repr(fields))
+        self.assertNotIn("password", repr(fields))
+
+    def test_operational_relationship_facts_are_pseudonymized_and_key_ids_keep_only_versions(self):
+        fields = diagnostic_fields(None, {
+            "pair_id": "deadlock-pair-42",
+            "transaction_id": "transaction-1",
+            "first_sku": "sku-red-widget",
+            "second_sku": "sku-blue-widget",
+            "lock_order": 1,
+            "ownership_match": False,
+            "constraint": "reservation_events.PRIMARY",
+            "acknowledgement": "pending",
+            "consumer_decision": "reject_before_dependency",
+            "request_key_id": "checkout-key-v1",
+            "accepted_key_id": "checkout-key-v2",
+            "private_key": "must-never-appear",
+        })
+
+        self.assertTrue(fields["pair_id"].startswith("<REF:"))
+        self.assertTrue(fields["transaction_id"].startswith("<REF:"))
+        self.assertEqual(fields["lock_order"], "1")
+        self.assertEqual(fields["ownership_match"], "False")
+        self.assertEqual(fields["constraint"], "reservation_events.PRIMARY")
+        self.assertEqual(fields["acknowledgement"], "pending")
+        self.assertEqual(fields["consumer_decision"], "reject_before_dependency")
+        self.assertEqual(fields["request_key_id"], "v1")
+        self.assertEqual(fields["accepted_key_id"], "v2")
+        self.assertTrue(fields["first_sku"].startswith("<REF:"))
+        self.assertTrue(fields["second_sku"].startswith("<REF:"))
+        self.assertNotIn("sku-red-widget", repr(fields))
+        self.assertNotIn("checkout-key", repr(fields))
+        self.assertNotIn("must-never-appear", repr(fields))
+
+    def test_relation_facts_do_not_split_event_templates_by_entity_identity(self):
+        first = template_for_message("deadlock transaction cancelled", {
+            "pair_id": "pair-100", "transaction_id": "tx-a", "lock_order": 1,
+            "first_sku": "sku-red", "second_sku": "sku-blue",
+        })
+        second = template_for_message("deadlock transaction cancelled", {
+            "pair_id": "pair-200", "transaction_id": "tx-b", "lock_order": 1,
+            "first_sku": "sku-blue", "second_sku": "sku-red",
+        })
+
+        self.assertEqual(first, second)
+
     def test_dynamic_measurements_do_not_fragment_templates_but_error_codes_do(self):
         first = template_for_message("request failed duration_ms=35.12", {
             "status_code": 503, "duration_ms": 35.12, "error": {"code": 1205},

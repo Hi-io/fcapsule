@@ -188,6 +188,13 @@ class PrometheusAdapter:
         except UnavailableExpression as exc:
             evidence["reason"] = str(exc)
             return result
+        if evidence.get("capture_mode") == "primary_threshold_series":
+            evidence["source"]["capture_mode"] = "primary_threshold_series"
+            evidence["source"]["rule_qualifier_count"] = evidence.get("rule_qualifier_count", 0)
+            evidence["source"]["capture_note"] = (
+                "Primary threshold series only; the full alert rule includes additional AND conditions "
+                "that are retained as rule metadata but not graphed."
+            )
         step = max(15, math.ceil(duration / (MAX_ALERT_POINTS - 1)))
         evidence["step_seconds"] = step
         try:
