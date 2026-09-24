@@ -292,6 +292,21 @@ def assessment_payload(decision: dict[str, Any], call: dict[str, Any]) -> Any:
     return value
 
 
+def assessment_evidence_refs(value: Any) -> set[str]:
+    """Collect cited observation IDs so a bounded reviewer sees what it must verify."""
+    refs: set[str] = set()
+    if isinstance(value, dict):
+        citations = value.get("evidence_ids")
+        if isinstance(citations, list):
+            refs.update(item for item in citations if isinstance(item, str))
+        for child in value.values():
+            refs.update(assessment_evidence_refs(child))
+    elif isinstance(value, list):
+        for child in value:
+            refs.update(assessment_evidence_refs(child))
+    return refs
+
+
 def review_assessment_payload(decision: dict[str, Any], call: dict[str, Any]) -> Any:
     """Accept the documented review envelope or an unambiguous assessment-only response."""
     if decision.get("action") == "finish":
@@ -311,6 +326,7 @@ _ACTION_REQUERY_VERBS = {
     "gather", "inspect", "look", "measure", "obtain", "observe", "read", "recheck", "review",
     "reread", "retrieve", "sample", "verify",
 }
+_ACTION_CHANGE_VERBS = {"apply", "change", "correct", "edit", "fix", "patch", "replace", "restore", "set", "update"}
 _ACTION_STOP_WORDS = {
     "a", "an", "and", "as", "at", "by", "for", "from", "in", "into", "it", "of", "on",
     "or", "the", "then", "this", "to", "via", "with", "again", "already", "please",
@@ -337,6 +353,10 @@ def repeats_completed_check(next_action: str, checks: list[dict[str, Any]]) -> b
     """Catch read-style next steps that ask for an already completed check again."""
 
     action_words = re.findall(r"[a-z0-9]+", next_action.casefold())
+    # A concrete operator change is not a duplicate source read, even when a
+    # compound action also says to inspect or verify the already captured state.
+    if set(action_words) & _ACTION_CHANGE_VERBS:
+        return False
     if not any(word in _ACTION_REQUERY_VERBS for word in action_words[:5]):
         return False
     if (set(action_words) & {"additional", "another", "following", "future", "later", "new", "next", "subsequent"}
@@ -519,16 +539,37 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
              "investigation_contract": {"optional_model_checks": max_checks, "required_observations": []},
              "source_retention": "unknown", "preservation": "Mutable workload state is checked early; no source expiry is assumed."}
     started = time.monotonic()
-    evidence_ids = {item["id"] for item in context["evidence"]}
+    source_evidence_ids = {item["id"] for item in context["evidence"]}
+    evidence_ids = set(source_evidence_ids)
     seen = set()
     validation_feedback = None
     review_candidate = None
     relationship_repair = False
 
-    def compact_payload(base: dict[str, Any], system: str | None = None) -> tuple[dict[str, Any], list[str]]:
+    def compact_payload(base: dict[str, Any], system: str | None = None,
+                        preserve_refs: set[str] | None = None) -> tuple[dict[str, Any], list[str]]:
         """Fit the entire API request, not only its incident evidence, into the cap."""
 
         system = system or investigation_system(context, state["checks"])
+
+        model_context_source = context
+        model_checks = state["checks"]
+        priority_ids = set(context.get("priority_evidence_ids") or [])
+        if preserve_refs is not None:
+            # The consistency reviewer is not allowed to cite a check that the
+            # compactor silently removed. Focus this bounded pass on the facts
+            # the draft actually used, while keeping the incident scope/alerts.
+            cited_source_ids = preserve_refs & source_evidence_ids
+            check_ids = {item.get("id") for item in state["checks"]}
+            cited_check_ids = preserve_refs & check_ids
+            model_context_source = {
+                **context,
+                "evidence": [item for item in context.get("evidence", [])
+                             if item.get("id") in cited_source_ids],
+                "priority_evidence_ids": sorted(cited_source_ids),
+            }
+            model_checks = [item for item in state["checks"] if item.get("id") in cited_check_ids]
+            priority_ids = cited_source_ids
 
         # ``compact_for_model`` only owns the episode ledger.  The provider sees
         # the system instruction, tools, review draft and citation catalogue too,
@@ -539,10 +580,10 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
         context_limit = max(1, max_prompt_tokens - estimate_tokens(system) - estimate_tokens(request_base))
         for _ in range(8):
             model_context, visible_evidence_ids = compact_for_model(
-                context,
-                state["checks"],
+                model_context_source,
+                model_checks,
                 max_prompt_tokens=context_limit,
-                priority_evidence_ids=context.get("priority_evidence_ids") or [],
+                priority_evidence_ids=priority_ids,
             )
             payload = {
                 **request_base,
@@ -565,10 +606,10 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 "instruction": "Finish using the retained evidence. No further checks are available in this request.",
             })
         model_context, visible_evidence_ids = compact_for_model(
-            context,
-            state["checks"],
+            model_context_source,
+            model_checks,
             max_prompt_tokens=max(1, max_prompt_tokens - estimate_tokens(system) - estimate_tokens(request_base)),
-            priority_evidence_ids=context.get("priority_evidence_ids") or [],
+            priority_evidence_ids=priority_ids,
         )
         payload = {
             **request_base,
@@ -818,7 +859,8 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 review_system += "\n" + REVIEW_DIAGNOSTIC_INSTRUCTION
             if relationship_repair:
                 review_base["available_incident_ids"] = sorted({item["incident_id"] for item in context["alerts"]})
-            payload, visible_evidence_ids = compact_payload(review_base, review_system)
+            draft_refs = assessment_evidence_refs(draft)
+            payload, visible_evidence_ids = compact_payload(review_base, review_system, draft_refs)
             response, call = request_model(payload, "none", "evidence_review", 1200, review_system)
             decision = parse_object(str(response.get("content", "")))
             call["decision"] = scrub(decision, reference_ids=set(visible_evidence_ids))
@@ -853,7 +895,8 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 }
                 if relationship_repair:
                     repair_base["available_incident_ids"] = review_base["available_incident_ids"]
-                payload, visible_evidence_ids = compact_payload(repair_base, review_system)
+                repair_refs = draft_refs | assessment_evidence_refs(decision)
+                payload, visible_evidence_ids = compact_payload(repair_base, review_system, repair_refs)
                 response, repair_call = request_model(payload, "none", "evidence_review_repair", 700, review_system)
                 repair_decision = parse_object(str(response.get("content", "")))
                 repair_call["decision"] = scrub(repair_decision, reference_ids=set(visible_evidence_ids))

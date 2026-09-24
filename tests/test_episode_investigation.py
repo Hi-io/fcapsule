@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import Mock, patch
 
-from fcapsule.episode_investigation import SYSTEM, RELATIONSHIP_REVIEW_SYSTEM, EVIDENCE_REVIEW_SYSTEM, assessment_payload, normalize_evidence_citations, run_investigation, validate_assessment
+from fcapsule.episode_investigation import SYSTEM, RELATIONSHIP_REVIEW_SYSTEM, EVIDENCE_REVIEW_SYSTEM, assessment_payload, normalize_evidence_citations, repeats_completed_check, run_investigation, validate_assessment
 from fcapsule.investigation_tools import InvestigationTools, episode_context, log_patterns, metric_summary, scrub, stamp
 from fcapsule.processing.anonymizer import anonymize_text, template_for_message
 from fcapsule.adapters.kubernetes_adapter import KubernetesInventory
@@ -474,6 +474,74 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(client.requests[-1].reasoning_effort, "none")
         self.assertEqual(state["calls"][-1]["phase"], "evidence_review_repair")
         self.assertIn("validation_error", state["calls"][-2])
+
+    def test_review_preserves_all_cited_checks_and_does_not_reject_a_concrete_fix(self):
+        self.context.update({
+            "live_capture": True,
+            "scope": {"namespace": "fcapsule-lab", "pod": "orders-api-abc"},
+            "alerts": [{"incident_id": "one", "labels": {"target_service": "lab-app-metrics"}}],
+            "evidence": [{"id": "E-config", "domain": "configuration",
+                          "title": "ConfigMap runtime", "summary": "Runtime settings were retained."}],
+        })
+        self.kit.execute.side_effect = [
+            {"observations": [{"kind": "PodSpec", "ready": True,
+                               "container_states": [{"restart_count": 0}]}]},
+            {"observed_at": "2026-09-24T17:28:04Z",
+             "discovery_targets": {"target_service": "lab-app-metrics", "target_workload": "orders-api"},
+             "dropped_targets": [{"service": "lab-app-metrics", "state": "dropped",
+                 "scrape_pool": "serviceMonitor/fcapsule-lab/applications/0",
+                 "labels": {"__meta_kubernetes_service_label_fcapsule_io_app_metrics": "ture"}}],
+             "monitor_selection": [{
+                "monitor": {"kind": "ServiceMonitor", "name": "applications", "namespace": "fcapsule-lab",
+                            "match_labels": {"fcapsule.io/app-metrics": "true"}},
+                "evaluated_services": [{"name": "lab-app-metrics", "namespace": "fcapsule-lab",
+                    "labels": {"fcapsule.io/app-metrics": "ture"},
+                    "selector_evaluation": {"status": "not_matched", "requirements": [{
+                        "key": "fcapsule.io/app-metrics", "operator": "Equals", "expected": "true",
+                        "observed": "ture", "matches": False}]},
+                    "target_relevance": "alert_target_service"}],
+             }]},
+        ]
+        draft = {
+            "summary": "The orders-api metrics target was dropped while the workload remained ready.",
+            "likely_mechanism": "The ServiceMonitor expects app-metrics=true, but lab-app-metrics currently has ture.",
+            "next_action": "Inspect and correct the lab-app-metrics label from 'ture' to 'true', then verify the target is active.",
+            "expected_finding": "The selector should match and Prometheus should list the target as active.",
+            "uncertainty": "The selector mismatch was observed during the firing interval; its exact onset is not captured.",
+            "evidence_ids": ["Q002", "E-config"],
+            "hypotheses": [
+                {"explanation": "ServiceMonitor selector mismatch", "status": "supported",
+                 "reason": "Q002 shows the required value true, observed ture, and a dropped target.",
+                 "evidence_ids": ["Q002"]},
+                {"explanation": "The workload itself was unhealthy", "status": "weakened",
+                 "reason": "The captured pod was ready with no restart activity.", "evidence_ids": ["Q001", "Q002"]},
+            ],
+            "connections": [],
+        }
+
+        state, client = self.run_case([{"action": "finish", "assessment": draft}],
+                                      max_checks=0, max_prompt_tokens=3200)
+
+        self.assertEqual(state["status"], "ready")
+        self.assertFalse(any("Next action repeats" in str(call.get("validation_error"))
+                             for call in state["calls"]))
+        review_payload = json.loads(client.requests[-1].messages[1]["content"])
+        self.assertEqual(set(("Q001", "Q002", "E-config")) & set(review_payload["available_evidence_ids"]),
+                         {"Q001", "Q002", "E-config"})
+        serialized_episode = json.dumps(review_payload["episode"])
+        self.assertIn("ready", serialized_episode)
+        self.assertIn("restart_count", serialized_episode)
+        self.assertIn("ture", serialized_episode)
+        self.assertIn("dropped", serialized_episode)
+        self.assertLessEqual(sum(estimate_tokens(message["content"]) for message in client.requests[-1].messages), 3200)
+
+    def test_completed_check_guard_still_rejects_read_only_repetition(self):
+        checks = [{"id": "Q002", "tool": "scrape_discovery", "status": "completed",
+                   "question": "Which monitoring selector and target state explain the missing telemetry?",
+                   "distinguishes": "A selector or target-discovery failure versus an unhealthy application workload."}]
+        self.assertTrue(repeats_completed_check("Inspect the monitoring selector and target discovery again.", checks))
+        self.assertFalse(repeats_completed_check(
+            "Inspect and correct the Service label to match the selector, then verify the target is active.", checks))
 
     def test_reserved_review_can_repair_excess_known_citations_without_more_calls(self):
         refs = [f"E{index}" for index in range(10)]
