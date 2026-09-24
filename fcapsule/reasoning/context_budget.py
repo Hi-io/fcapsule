@@ -265,13 +265,13 @@ def _evidence_priority(item: dict[str, Any], priority_ids: set[str]) -> tuple[in
         1,
         0 if str(item.get("id")) in priority_ids else 1,
         -int(item.get("signal_origin") == "alert_rule" and bool(item.get("metric_observation"))),
-        -int(any(marker in text for marker in failure_markers)),
-        -int(any(marker in text for marker in diagnostic_markers)),
+        -int(_has_marker(text, failure_markers)),
+        -int(_has_marker(text, diagnostic_markers)),
         -int(domain == "log_template"),
     )
 
 
-def _pattern_priority(item: dict[str, Any]) -> tuple[int, int, int, int]:
+def _pattern_priority(item: dict[str, Any]) -> tuple[int, int, int, int, int, int]:
     """Promote failure signatures above frequent healthy heartbeat templates."""
 
     text = json.dumps(item, ensure_ascii=True, default=str).casefold()
@@ -290,12 +290,20 @@ def _pattern_priority(item: dict[str, Any]) -> tuple[int, int, int, int]:
         count = int(item.get("count", 0))
     except (TypeError, ValueError):
         count = 0
+    has_varying_diagnostics = bool(item.get("diagnostic_ranges"))
     return (
-        int(any(marker in text for marker in failure_markers)),
-        int(any(marker in text for marker in diagnostic_markers)),
+        int(_has_marker(text, failure_markers)),
+        int(bool(item.get("alert_correlated")) and has_varying_diagnostics),
+        int(has_varying_diagnostics),
+        int(_has_marker(text, diagnostic_markers)),
         int(bool(item.get("fields"))),
         count,
     )
+
+
+def _has_marker(text: str, markers: tuple[str, ...]) -> bool:
+    return any(re.search(r"(?<![a-z0-9])" + re.escape(marker) + r"s?(?![a-z0-9])", text)
+               for marker in markers)
 
 
 def _log_example(item: dict[str, Any]) -> dict[str, Any] | str | None:

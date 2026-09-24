@@ -146,6 +146,13 @@ _SENSITIVE_FIELD_PARTS = (
 _MAX_DIAGNOSTIC_FIELDS = 12
 _MAX_DIAGNOSTIC_CANDIDATES = 96
 _FIELD_NAME_LISTS = {"missing_fields", "observed_fields", "expected_fields", "changed_fields"}
+_NUMERIC_METRIC_PARTS = (
+    "count", "total", "current", "active", "used", "checkedout", "connected", "connection",
+    "session", "capacity", "limit", "maximum", "max", "ratio", "rate", "utilization",
+    "percent", "bytes", "duration", "latency", "size", "depth", "lag", "retry", "error",
+    "failure", "queue", "pending", "available", "free", "reserved", "target", "inflight",
+    "cpu", "memory",
+)
 _SAFE_CONSTRAINT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$.-]{0,95}$")
 _DIAGNOSTIC_FIELD_PRIORITY = {
     name: index for index, name in enumerate((
@@ -222,10 +229,12 @@ def diagnostic_fields(
 
     result: dict[str, str] = {}
     ordered_candidates = sorted(enumerate(candidates.items()), key=lambda pair: (
-        _DIAGNOSTIC_FIELD_PRIORITY.get(_canonical_diagnostic_key(pair[1][0]) or "", 100), pair[0]
+        _DIAGNOSTIC_FIELD_PRIORITY.get(
+            _canonical_diagnostic_key(pair[1][0]) or _numeric_metric_key(pair[1][0], pair[1][1]) or "", 100
+        ), pair[0]
     ))
     for _, (raw_key, item) in ordered_candidates:
-        canonical = _canonical_diagnostic_key(raw_key)
+        canonical = _canonical_diagnostic_key(raw_key) or _numeric_metric_key(raw_key, item)
         if not canonical or _is_sensitive_field(raw_key):
             continue
         if canonical in _FIELD_NAME_LISTS and isinstance(item, (list, tuple)):
@@ -278,7 +287,7 @@ def _collect_diagnostic_fields(
         if isinstance(item, dict):
             _collect_diagnostic_fields(item, output, path, depth + 1)
             continue
-        canonical = _canonical_diagnostic_key(path)
+        canonical = _canonical_diagnostic_key(path) or _numeric_metric_key(path, item)
         if canonical in _FIELD_NAME_LISTS and isinstance(item, (list, tuple)):
             output.setdefault(canonical, item)
         elif canonical and isinstance(item, (str, int, float, bool)):
@@ -303,6 +312,28 @@ def _canonical_diagnostic_key(value: str) -> str | None:
     if leaf.endswith("id") and leaf not in {"kubernetesid", "containerid", "hostid", "agentid"}:
         return re.sub(r"[^a-z0-9]+", "_", value.casefold()).strip("_")[:64]
     return None
+
+
+def _numeric_metric_key(value: str, item: object) -> str | None:
+    """Retain numeric operational measurements without copying arbitrary payload fields."""
+    if isinstance(item, bool):
+        return None
+    if isinstance(item, str):
+        text = item.strip()
+        if not re.fullmatch(r"[-+]?\d+(?:\.\d+)?", text):
+            return None
+        item = float(text)
+    if not isinstance(item, (int, float)) or (isinstance(item, float) and not (float("-inf") < item < float("inf"))):
+        return None
+    if _is_sensitive_field(value):
+        return None
+    key = re.sub(r"[^a-z0-9]+", "_", value.casefold()).strip("_")[:64]
+    compact = key.replace("_", "")
+    if any(part in compact for part in ("payload", "body", "content", "raw")):
+        return None
+    if not key or not any(part in compact for part in _NUMERIC_METRIC_PARTS):
+        return None
+    return key
 
 
 def _is_correlation_field(value: str) -> bool:

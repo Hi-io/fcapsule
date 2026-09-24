@@ -1259,6 +1259,53 @@ class InvestigationToolTests(unittest.TestCase):
         groups = log_patterns([{"message": '{"mysql_error_code":1054}'}, {"message": '{"mysql_error_code":1205}'}])
         self.assertEqual(groups["matching_patterns"], 2)
 
+    def test_alert_correlated_structured_samples_surface_diagnostic_peak(self):
+        focus = stamp("2026-09-20T12:04:00Z")
+        def sample(timestamp, connected, checked_out):
+            return {"@timestamp": timestamp, "message": json.dumps({
+                "level": "INFO", "message": "service capacity sample",
+                "active_sessions": connected, "session_capacity": 40,
+                "pool_checked_out": checked_out, "utilization": connected / 40,
+            })}
+
+        rows = [
+            sample("2026-09-20T12:00:00Z", 1, 0),
+            {"@timestamp": "2026-09-20T12:03:00Z", "message": json.dumps({
+                "level": "INFO", "message": "session pressure bounded with headroom",
+                "checked_out_target": 34, "observed_capacity": 40, "reserved_connections": 6,
+            })},
+            sample("2026-09-20T12:04:10Z", 35, 34),
+            sample("2026-09-20T12:04:15Z", 36, 34),
+        ]
+
+        result = log_patterns(rows, focus=focus)
+        pattern = result["patterns"][0]
+        compacted = _check_item({"id": "Q002", "tool": "search_logs", "status": "completed",
+                                 "result": result}, latest=True)["observation"]
+
+        self.assertIn("service capacity sample", pattern["pattern"])
+        self.assertEqual(pattern["count"], 3)
+        self.assertEqual(pattern["fields"]["active_sessions"], "36")
+        self.assertEqual(pattern["fields"]["pool_checked_out"], "34")
+        self.assertEqual(pattern["diagnostic_ranges"]["active_sessions"],
+                         {"min": "1", "max": "36", "samples": "3"})
+        self.assertEqual(pattern["examples"][0]["timestamp"], "2026-09-20T12:04:15Z")
+        self.assertTrue(pattern["alert_correlated"])
+        self.assertEqual(compacted["fields"]["active_sessions"], "36")
+        self.assertEqual(compacted["top_signal"]["active_sessions"], "36")
+
+    def test_unlisted_numeric_operational_fields_are_bounded_and_sensitive_names_stay_excluded(self):
+        groups = log_patterns([{"message": json.dumps({
+            "message": "pool snapshot", "checked_out_target": 34, "observed_capacity": 40,
+            "authorization_attempt_count": 7, "arbitrary_payload_size": 100,
+        })}])
+
+        fields = groups["patterns"][0]["fields"]
+        self.assertEqual(fields["checked_out_target"], "34")
+        self.assertEqual(fields["observed_capacity"], "40")
+        self.assertNotIn("authorization_attempt_count", fields)
+        self.assertNotIn("arbitrary_payload_size", fields)
+
     def test_structured_request_ids_remain_linkable_without_fragmenting_log_patterns(self):
         rows = [
             {"message": "reservation rejected", "diagnostic_fields": {

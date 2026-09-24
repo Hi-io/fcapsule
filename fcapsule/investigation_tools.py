@@ -93,8 +93,13 @@ def metric_summary(
     return result
 
 
-def log_patterns(logs: list[dict[str, Any]], terms: list[str] | None = None) -> dict[str, Any]:
+def log_patterns(
+    logs: list[dict[str, Any]], terms: list[str] | None = None, focus: datetime | None = None,
+) -> dict[str, Any]:
+    if focus:
+        focus = focus.replace(tzinfo=timezone.utc) if focus.tzinfo is None else focus.astimezone(timezone.utc)
     groups: dict[str, dict[str, Any]] = {}
+    grouped_examples: dict[str, list[dict[str, Any]]] = {}
     for row in logs:
         raw_message = row.get("message", "")
         message = json.dumps(raw_message, ensure_ascii=True, sort_keys=True, separators=(",", ":")) \
@@ -114,9 +119,126 @@ def log_patterns(logs: list[dict[str, Any]], terms: list[str] | None = None) -> 
             group["examples"].append(example)
         else:
             group["examples"][-1] = example
-    ranked = sorted(groups.values(), key=lambda item: (-bool(item["fields"]), -item["count"]))
+        grouped_examples.setdefault(pattern, []).append(example)
+
+    ranked = []
+    for pattern, group in groups.items():
+        examples = grouped_examples[pattern]
+        primary, peak, ranges = _diagnostic_log_representatives(examples, focus)
+        group["fields"] = primary.get("diagnostic_fields", {})
+        group["examples"] = _unique_log_examples([primary, peak, examples[0], examples[-1]])
+        if ranges:
+            group["diagnostic_ranges"] = ranges
+        if focus:
+            group["alert_correlated"] = any(
+                _log_timestamp(item.get("timestamp")) is not None
+                and _log_timestamp(item.get("timestamp")) >= focus
+                and bool(item.get("diagnostic_fields"))
+                for item in examples
+            )
+        ranked.append(group)
+
+    ranked.sort(key=lambda item: (
+        bool(item.get("alert_correlated")) and bool(item.get("diagnostic_ranges")),
+        len(item.get("diagnostic_ranges", {})),
+        bool(item["fields"]),
+        item["count"],
+    ), reverse=True)
     return {"scanned_lines": len(logs), "matching_patterns": len(groups), "patterns": ranked[:12],
             "limitation": "Bounded sample; no matches does not prove the event did not occur."}
+
+
+_LOG_METRIC_KEY_PARTS = (
+    "count", "total", "current", "active", "used", "checkedout", "connected", "connection",
+    "session", "capacity", "limit", "maximum", "max", "ratio", "rate", "utilization",
+    "percent", "bytes", "duration", "latency", "size", "depth", "lag", "retry", "error",
+    "failure", "queue", "pending", "available", "free", "reserved", "target", "inflight",
+    "cpu", "memory",
+)
+
+
+def _diagnostic_log_representatives(
+    examples: list[dict[str, Any]], focus: datetime | None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, dict[str, str]]]:
+    measurements: dict[str, list[tuple[dict[str, Any], float]]] = {}
+    for example in examples:
+        fields = example.get("diagnostic_fields", {})
+        if not isinstance(fields, dict):
+            continue
+        for key, value in fields.items():
+            normalized = str(key).casefold().replace("_", "")
+            if not any(part in normalized for part in _LOG_METRIC_KEY_PARTS):
+                continue
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(number):
+                measurements.setdefault(str(key), []).append((example, number))
+
+    ranges: dict[str, dict[str, str]] = {}
+    varying_fields: dict[str, tuple[float, float]] = {}
+    for key, values in measurements.items():
+        low = min(value for _, value in values)
+        high = max(value for _, value in values)
+        if low == high:
+            continue
+        varying_fields[key] = (low, high)
+        ranges[key] = {"min": _format_metric_value(low), "max": _format_metric_value(high),
+                       "samples": str(len(values))}
+
+    timestamped = [(example, _log_timestamp(example.get("timestamp"))) for example in examples]
+    incident_examples = [example for example, timestamp in timestamped
+                         if focus and timestamp is not None and timestamp >= focus
+                         and example.get("diagnostic_fields")]
+    candidates = incident_examples or examples
+
+    def score(example: dict[str, Any]) -> float:
+        if not varying_fields:
+            return 0.0
+        fields = example.get("diagnostic_fields", {})
+        values = []
+        for key, (low, high) in varying_fields.items():
+            try:
+                number = float(fields.get(key))
+            except (TypeError, ValueError):
+                continue
+            values.append((number - low) / (high - low))
+        return sum(values) / len(values) if values else -1.0
+
+    primary = max(candidates, key=lambda example: (score(example),
+                    _log_timestamp(example.get("timestamp")) or datetime.min.replace(tzinfo=timezone.utc)))
+    peak = max(examples, key=lambda example: (score(example),
+                 _log_timestamp(example.get("timestamp")) or datetime.min.replace(tzinfo=timezone.utc)))
+    return primary, peak, ranges
+
+
+def _unique_log_examples(examples: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result = []
+    seen = set()
+    for example in examples:
+        fields = example.get("diagnostic_fields", {})
+        key = (example.get("timestamp"), example.get("message"),
+               tuple(sorted(fields.items())) if isinstance(fields, dict) else ())
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(example)
+    return result[:4]
+
+
+def _log_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = stamp(value)
+        return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _format_metric_value(value: float) -> str:
+    return str(int(value)) if value.is_integer() else str(value)
 
 
 def _selector_observation(labels: dict[str, Any], monitor: dict[str, Any], namespace_status: str) -> dict[str, Any]:
@@ -964,7 +1086,11 @@ class InvestigationTools:
                 result["provenance"].append({"source": "Kubernetes API Pod", "resource": f"Pod/{self.namespace}/{target['name']}",
                                              "observed_at": _observed_at()})
                 for source, collect in (
-                    ("OpenSearch", lambda: log_patterns(opensearch.collect_logs(self.namespace, target["name"], self.window_start, self.window_end, limit=200, terms=terms, focus=self.focus_time))),
+                    ("OpenSearch", lambda: log_patterns(
+                        opensearch.collect_logs(self.namespace, target["name"], self.window_start, self.window_end,
+                                                limit=200, terms=terms, focus=self.focus_time),
+                        terms=terms, focus=self.focus_time,
+                    )),
                     ("Prometheus", lambda: {"observations": metric_summary(prometheus.collect_pod_metrics(self.namespace, target["name"], self.window_start, self.window_end), self.focus_time)}),
                     ("Kubernetes", lambda: {"observations": kubernetes.configuration_snapshot(target)[:8]}),
                 ):
@@ -1001,7 +1127,7 @@ class InvestigationTools:
             logs = opensearch.collect_logs(self.namespace, pod, self.window_start, self.window_end, limit=300, terms=terms, focus=self.focus_time)
             return scrub({"source": "OpenSearch", "pod": pod, "window": [self.window_start.isoformat(), self.window_end.isoformat()],
                          "latest_alert_at": self.focus_time.isoformat(), "sampling": "Up to one quarter before the latest alert; remaining budget at or after it. Bounded matching samples, not complete event counts.",
-                         **log_patterns(logs)})
+                         **log_patterns(logs, focus=self.focus_time)})
         if name == "compare_baseline":
             peers = [item for item in kubernetes.list_pods({self.namespace})
                      if item.get("workload") == self.workload and item["name"] not in self.pods and item.get("ready")]
