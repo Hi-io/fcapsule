@@ -362,6 +362,42 @@ class LiveSourceTests(unittest.TestCase):
         self.assertGreater(capture["collection_omitted_hits"], 0)
         self.assertTrue(any(item.get("message_truncated") for item in logs))
 
+    def test_aggregate_budget_retains_incident_signal_before_recent_baseline(self):
+        class CrowdedBaselineTransport:
+            def request(self, path, method="GET", body=None, max_response_bytes=None):
+                order = body["sort"][0]["@timestamp"]
+                if order == "desc":
+                    return {"hits": {"hits": [{
+                        "_id": f"baseline-{index}",
+                        "_source": {
+                            "@timestamp": f"2026-09-20T00:04:{index:02d}Z",
+                            "message": "baseline evidence " + "x" * 500,
+                            "kubernetes": {"namespace": "shop", "pod": {"name": "api-1"}},
+                        },
+                    } for index in range(20)]}}
+                return {"hits": {"hits": [{
+                    "_id": "incident-failure",
+                    "_source": {
+                        "@timestamp": "2026-09-20T00:05:01Z",
+                        "message": "incident failure ECONNREFUSED",
+                        "error": {"code": "ECONNREFUSED"},
+                        "kubernetes": {"namespace": "shop", "pod": {"name": "api-1"}},
+                    },
+                }]}}
+
+        adapter = OpenSearchAdapter("http://opensearch", max_collection_bytes=4096)
+        adapter.transport = CrowdedBaselineTransport()
+        start = datetime(2026, 9, 20, tzinfo=timezone.utc)
+
+        logs, capture = adapter.collect_logs_with_info(
+            "shop", "api-1", start, start + timedelta(minutes=10), limit=200, focus=start + timedelta(minutes=5)
+        )
+
+        self.assertIn("incident failure ECONNREFUSED", [item["message"] for item in logs])
+        self.assertTrue(any(item["message"].startswith("baseline evidence") for item in logs))
+        self.assertEqual(logs, sorted(logs, key=lambda item: item["@timestamp"]))
+        self.assertLessEqual(capture["retained_compact_bytes"], adapter.max_collection_bytes)
+
     def test_oversized_opensearch_segment_is_marked_unavailable_without_losing_other_segment(self):
         class PartiallyOversizedTransport:
             def __init__(self):

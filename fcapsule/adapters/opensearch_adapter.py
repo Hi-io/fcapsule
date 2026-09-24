@@ -108,7 +108,9 @@ class OpenSearchAdapter:
         query_limit_reached = False
         successful_queries = 0
 
-        def query(segment: str, segment_start: datetime, segment_end: datetime, size: int, order: str) -> list[dict[str, Any]]:
+        def query(
+            segment: str, segment_start: datetime, segment_end: datetime, size: int, order: str
+        ) -> list[tuple[str, dict[str, Any]]]:
             nonlocal query_limit_reached, successful_queries
             try:
                 segment_hits, hit_limit_reached = self._log_hits(
@@ -119,7 +121,7 @@ class OpenSearchAdapter:
                 return []
             successful_queries += 1
             query_limit_reached = query_limit_reached or hit_limit_reached
-            return segment_hits
+            return [(segment, hit) for hit in segment_hits]
 
         if focus and start < focus < end:
             baseline_size = min(max(1, limit // 4), limit - 1) if limit > 1 else 0
@@ -130,8 +132,8 @@ class OpenSearchAdapter:
         else:
             hits = query("window", start, end, limit, "desc")
 
-        unique_hits: dict[tuple[Any, ...], dict[str, Any]] = {}
-        for hit in hits:
+        unique_hits: dict[tuple[Any, ...], tuple[str, dict[str, Any]]] = {}
+        for segment, hit in hits:
             source = hit.get("_source", {})
             if hit.get("_id") is not None:
                 key = ("id", str(hit["_id"]))
@@ -140,10 +142,12 @@ class OpenSearchAdapter:
                 if not isinstance(message_value, str):
                     message_value = source.get("log")
                 key = ("fallback", source.get("@timestamp"), message_value if isinstance(message_value, str) else id(hit))
-            unique_hits.setdefault(key, hit)
+            existing = unique_hits.get(key)
+            if existing is None or segment == "incident":
+                unique_hits[key] = (segment, hit)
 
-        candidates: list[dict[str, Any]] = []
-        for hit in unique_hits.values():
+        candidates: list[tuple[str, dict[str, Any]]] = []
+        for segment, hit in unique_hits.values():
             source = dict(hit.get("_source", {}))
             kubernetes = source.get("kubernetes", {}) if isinstance(source.get("kubernetes"), dict) else {}
             pod_data = kubernetes.get("pod", {}) if isinstance(kubernetes.get("pod"), dict) else {}
@@ -172,27 +176,14 @@ class OpenSearchAdapter:
                     "message_truncation_reasons": ["message_byte_limit"],
                     "message_limit_bytes": self.max_message_bytes,
                 })
-            candidates.append(log)
+            candidates.append((segment, log))
 
-        candidates.sort(key=lambda item: str(item["@timestamp"]))
-        logs: list[dict[str, Any]] = []
-        retained_bytes = 2  # Opening and closing brackets of the compact JSON array.
-        collection_omitted = 0
-        for candidate_index, candidate in enumerate(candidates):
-            item_bytes = _compact_json_bytes(candidate)
-            separator_bytes = 1 if logs else 0
-            if retained_bytes + separator_bytes + item_bytes <= self.max_collection_bytes:
-                logs.append(candidate)
-                retained_bytes += separator_bytes + item_bytes
-                continue
-
-            available = self.max_collection_bytes - retained_bytes - separator_bytes
-            partial = _truncate_log_to_fit(candidate, available, self.max_message_bytes)
-            if partial is not None:
-                logs.append(partial)
-                retained_bytes += separator_bytes + _compact_json_bytes(partial)
-            else:
-                collection_omitted += 1
+        logs, retained_bytes, collection_omitted = _select_bounded_logs(
+            candidates,
+            self.max_collection_bytes,
+            max_message_bytes=self.max_message_bytes,
+            reserve_baseline=bool(focus and start < focus < end),
+        )
 
         unavailable_segments = [
             {"segment": segment, "reason": "response_byte_limit", "limit_bytes": self.max_response_bytes}
@@ -281,6 +272,73 @@ def _truncate_utf8(value: str, max_bytes: int) -> tuple[str, bool]:
 
 def _compact_json_bytes(value: Any) -> int:
     return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+def _select_bounded_logs(
+    candidates: list[tuple[str, dict[str, Any]]],
+    max_bytes: int,
+    *,
+    max_message_bytes: int,
+    reserve_baseline: bool,
+) -> tuple[list[dict[str, Any]], int, int]:
+    if reserve_baseline:
+        incidents = sorted(
+            ((index, log) for index, (segment, log) in enumerate(candidates) if segment == "incident"),
+            key=lambda pair: str(pair[1]["@timestamp"]),
+        )
+        baselines = sorted(
+            ((index, log) for index, (segment, log) in enumerate(candidates) if segment == "baseline"),
+            key=lambda pair: str(pair[1]["@timestamp"]), reverse=True,
+        )
+        windows = [(index, log) for index, (segment, log) in enumerate(candidates) if segment == "window"]
+    else:
+        incidents = []
+        baselines = []
+        windows = sorted(
+            ((index, log) for index, (_, log) in enumerate(candidates)),
+            key=lambda pair: str(pair[1]["@timestamp"]),
+        )
+
+    selected: dict[int, dict[str, Any]] = {}
+    used_bytes = 2  # Opening and closing brackets of the compact JSON array.
+
+    def take(group: list[tuple[int, dict[str, Any]]], share_bytes: int | None) -> None:
+        nonlocal used_bytes
+        share_used = 0
+        for index, log in group:
+            if index in selected:
+                continue
+            separator_bytes = 1 if selected else 0
+            global_available = max_bytes - used_bytes - separator_bytes
+            share_available = max_bytes if share_bytes is None else share_bytes - share_used
+            available = min(global_available, share_available)
+            item_bytes = _compact_json_bytes(log)
+            if item_bytes <= available:
+                selected[index] = log
+                used_bytes += separator_bytes + item_bytes
+                share_used += separator_bytes + item_bytes
+                continue
+            partial = _truncate_log_to_fit(log, available, max_message_bytes)
+            if partial is not None:
+                size = _compact_json_bytes(partial)
+                selected[index] = partial
+                used_bytes += separator_bytes + size
+                share_used += separator_bytes + size
+
+    if incidents and baselines:
+        incident_share = max_bytes * 3 // 4
+        take(incidents, incident_share)
+        take(baselines, max_bytes - incident_share)
+    elif incidents:
+        take(incidents, max_bytes)
+    elif baselines:
+        take(baselines, max_bytes)
+    take(windows, None)
+    take(incidents, None)
+    take(baselines, None)
+
+    logs = sorted(selected.values(), key=lambda item: str(item["@timestamp"]))
+    return logs, used_bytes, len(candidates) - len(selected)
 
 
 def _truncate_log_to_fit(log: dict[str, Any], budget: int, message_limit: int) -> dict[str, Any] | None:
