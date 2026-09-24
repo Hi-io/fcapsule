@@ -1,9 +1,20 @@
 import unittest
 
-from fcapsule.episode_investigation import EVIDENCE_REVIEW_SYSTEM
+from fcapsule.episode_investigation import EVIDENCE_REVIEW_SYSTEM, SYSTEM
 
 
 class EpisodeReviewPromptContractTests(unittest.TestCase):
+    def test_investigation_prompt_surfaces_same_item_redelivery_without_overclaiming(self):
+        for requirement in (
+            "repeated same-ID logs",
+            "is_redelivery, delivery_attempt, and acknowledgement",
+            "sampled observations",
+            "not proof of payload source",
+            "Do not infer unsampled peaks or causal links",
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, SYSTEM)
+
     def test_evidence_review_requires_a_resource_scoped_discriminating_mechanism(self):
         for requirement in (
             "Reject an alert-name or symptom restatement as a mechanism",

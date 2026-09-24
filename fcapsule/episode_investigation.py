@@ -317,6 +317,7 @@ failed checks are limitations. Do not infer unsampled peaks or causal links.
 Name the affected pod/resource and namespace from scope, with an alert-time or capture-window qualifier. Respect resource.kind;
 collection scope is not impact. Separate the
 observed symptom from a supported or tentative mechanism; explain why cited facts discriminate, not just paraphrase the alert.
+On repeated same-ID logs, report is_redelivery, delivery_attempt, and acknowledgement as sampled observations, not proof of payload source.
 Optional basis (<=500 characters) states those facts and why they support/weaken the mechanism, using the same assessment
 evidence_ids, with no uncited new claims. State the specific missing discriminator, not generic uncertainty boilerplate.
 Keep fields normally <=280 characters and hypotheses <=180. A mechanism may remain unresolved; no required diagnosis.

@@ -1,3 +1,4 @@
+import json
 import unittest
 from dataclasses import replace
 
@@ -216,6 +217,52 @@ class ProcessingTests(unittest.TestCase):
         self.assertNotEqual(first["diagnostic_fields"]["request_id"], second["diagnostic_fields"]["request_id"])
         self.assertNotIn(identifier_one, repr(template))
         self.assertNotIn(identifier_two, repr(template))
+
+    def test_redelivery_attempts_are_visible_without_splitting_each_attempt(self):
+        base = {
+            "message": "Import decoder rejected document",
+            "job_id": 2,
+            "owner_run_id": "owner-run-7",
+            "acknowledgement": "pending",
+        }
+        events = []
+        for timestamp, attempt in (
+            ("2026-09-24T13:19:46Z", 1),
+            ("2026-09-24T13:19:51Z", 2),
+            ("2026-09-24T13:21:06Z", 17),
+        ):
+            message = {**base, "delivery_attempt": attempt, "is_redelivery": attempt > 1}
+            events.append({
+                "@timestamp": timestamp,
+                "level": "ERROR",
+                "message": json.dumps(message),
+            })
+        bundle = replace(
+            self.bundle,
+            alerts=[{"startsAt": "2026-09-24T13:21:06Z"}],
+            logs=events,
+        )
+        templates = reduce_logs(bundle)
+
+        initial = next(item for item in templates if item["count"] == 1)
+        redeliveries = next(item for item in templates if item["count"] == 2)
+        observed = redeliveries["representative_events"]
+
+        self.assertEqual(
+            [item["diagnostic_fields"]["delivery_attempt"] for item in observed], ["2", "17"],
+        )
+        self.assertEqual([item["diagnostic_fields"]["is_redelivery"] for item in observed], ["True", "True"])
+        self.assertEqual([item["diagnostic_fields"]["acknowledgement"] for item in observed], ["pending", "pending"])
+        self.assertEqual(
+            len({item["diagnostic_fields"]["job_id"] for item in observed}), 1,
+        )
+        self.assertEqual(
+            len({item["diagnostic_fields"]["owner_run_id"] for item in observed}), 1,
+        )
+        self.assertEqual(initial["representative_events"][0]["diagnostic_fields"]["is_redelivery"], "False")
+        self.assertNotEqual(initial["template"], redeliveries["template"])
+        self.assertTrue(observed[0]["diagnostic_fields"]["job_id"].startswith("<REF:"))
+        self.assertNotEqual(observed[0]["diagnostic_fields"]["job_id"], "2")
 
     def test_log_reducer_groups_repeated_failures(self):
         templates = reduce_logs(self.bundle)

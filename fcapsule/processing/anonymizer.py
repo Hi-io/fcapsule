@@ -74,8 +74,10 @@ _DIAGNOSTIC_ALIASES = {
     "bufferedpages": "buffered_pages",
     "pagebytes": "page_bytes",
     "delivery": "delivery",
+    "deliveryattempt": "delivery_attempt",
     "acknowledgement": "acknowledgement",
     "ack": "acknowledgement",
+    "isredelivery": "is_redelivery",
     "consumerdecision": "consumer_decision",
     "ownershipmatch": "ownership_match",
     "constraint": "constraint",
@@ -135,7 +137,7 @@ _GROUPING_DIAGNOSTIC_FIELDS = {
     "delivery", "kdf", "rounds", "mode", "expected_schema", "response_schema",
     "schema_version", "query_revision", "endpoint", "host", "port", "validation_failure", "outcome",
     "missing_fields", "observed_fields", "expected_fields", "changed_fields",
-    "acknowledgement", "consumer_decision", "ownership_match", "constraint", "lock_order",
+    "acknowledgement", "is_redelivery", "consumer_decision", "ownership_match", "constraint", "lock_order",
 }
 _SENSITIVE_FIELD_PARTS = (
     "password", "secret", "token", "credential", "private", "certificate",
@@ -152,6 +154,7 @@ _DIAGNOSTIC_FIELD_PRIORITY = {
         "sqlstate", "missing_fields",
         "observed_fields", "expected_fields", "changed_fields", "response_schema", "expected_schema",
         "schema_version", "ownership_match", "constraint", "lock_order", "acknowledgement",
+        "is_redelivery", "delivery_attempt",
         "consumer_decision", "request_key_id", "accepted_key_id", "signing_key_id", "pair_id",
         "first_sku", "second_sku", "owner_ref", "order_ref", "existing_order_ref",
         "reason", "disposition", "timeout_ms", "timeout_seconds", "dependency_timeout_ms",
