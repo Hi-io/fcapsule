@@ -264,6 +264,23 @@ class FCAPSuleStore:
                     PRIMARY KEY (correlation_key, episode_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS atlas_outbox (
+                    outbox_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    instance_id TEXT NOT NULL,
+                    episode_id TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    fingerprint TEXT NOT NULL,
+                    payload_digest TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    next_attempt_at TEXT NOT NULL,
+                    last_error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(instance_id, episode_id, payload_digest)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_incidents_app_time
                     ON incidents(app_id, started_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_capsules_app_time
@@ -280,6 +297,8 @@ class FCAPSuleStore:
                     ON source_disconnected_reviews(episode_id, created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_related_group_members_episode
                     ON related_group_members(episode_id);
+                CREATE INDEX IF NOT EXISTS idx_atlas_outbox_due
+                    ON atlas_outbox(status, next_attempt_at, created_at);
                 """
             )
             incident_columns = {
@@ -1475,6 +1494,139 @@ class FCAPSuleStore:
                 """,
                 (setting_key, setting_value, utc_now()),
             )
+
+    def enqueue_atlas_publication(self, payload: dict[str, Any], pending_limit: int = 1000) -> dict[str, Any]:
+        """Persist a compact, already-projected case before any network attempt."""
+        envelope = dict(payload)
+        envelope.pop("revision", None)
+        serialized = _json(envelope)
+        digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+        instance_id = str(envelope.get("instance_id") or "")
+        episode_id = str(envelope.get("episode_id") or "")
+        fingerprint = str(envelope.get("fingerprint") or "")
+        if not instance_id or not episode_id or not fingerprint:
+            raise ValueError("Atlas outbox payload needs instance_id, episode_id, and fingerprint")
+        if len(serialized.encode("utf-8")) > 24 * 1024:
+            raise ValueError("Atlas outbox payload exceeds 24 KiB")
+        now = utc_now()
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat().replace("+00:00", "Z")
+        with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM atlas_outbox WHERE status != 'pending' AND created_at < ?", (cutoff,)
+            )
+            existing = connection.execute(
+                "SELECT * FROM atlas_outbox WHERE instance_id = ? AND episode_id = ? AND payload_digest = ?",
+                (instance_id, episode_id, digest),
+            ).fetchone()
+            if existing:
+                return {**dict(existing), "payload": _decode(existing["payload"], {}), "is_new": False}
+            pending = int(connection.execute(
+                "SELECT COUNT(*) FROM atlas_outbox WHERE status = 'pending'"
+            ).fetchone()[0])
+            if pending >= max(1, pending_limit):
+                self.set_setting("atlas_outbox_quota_error", "Pending Atlas outbox quota reached")
+                return {"accepted": False, "reason": "quota_exceeded", "pending_count": pending}
+            row = connection.execute(
+                "SELECT COALESCE(MAX(revision), 0) AS revision FROM atlas_outbox WHERE instance_id = ? AND episode_id = ?",
+                (instance_id, episode_id),
+            ).fetchone()
+            revision = int(row["revision"]) + 1
+            envelope["revision"] = revision
+            connection.execute(
+                """
+                INSERT INTO atlas_outbox
+                    (instance_id, episode_id, revision, fingerprint, payload_digest, payload,
+                     status, attempts, next_attempt_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)
+                """,
+                (instance_id, episode_id, revision, fingerprint, digest, _json(envelope), now, now, now),
+            )
+            connection.execute(
+                """
+                DELETE FROM atlas_outbox WHERE status != 'pending' AND outbox_id NOT IN
+                    (SELECT outbox_id FROM atlas_outbox WHERE status != 'pending'
+                     ORDER BY updated_at DESC, outbox_id DESC LIMIT 5000)
+                """
+            )
+            result = connection.execute(
+                "SELECT * FROM atlas_outbox WHERE instance_id = ? AND episode_id = ? AND payload_digest = ?",
+                (instance_id, episode_id, digest),
+            ).fetchone()
+            connection.execute("DELETE FROM settings WHERE setting_key = 'atlas_outbox_quota_error'")
+            return {**dict(result), "payload": _decode(result["payload"], {}), "is_new": True}
+
+    def due_atlas_publications(self, limit: int = 10) -> list[dict[str, Any]]:
+        now = utc_now()
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM atlas_outbox
+                WHERE status = 'pending' AND next_attempt_at <= ?
+                ORDER BY created_at, outbox_id LIMIT ?
+                """,
+                (now, max(1, min(50, int(limit)))),
+            ).fetchall()
+        return [{**dict(row), "payload": _decode(row["payload"], {})} for row in rows]
+
+    def complete_atlas_publication(self, outbox_id: int) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE atlas_outbox SET status = 'sent', last_error = NULL, updated_at = ? WHERE outbox_id = ?",
+                (utc_now(), int(outbox_id)),
+            )
+
+    def defer_atlas_publication(
+        self, outbox_id: int, error: str, delay_seconds: int, *, permanent: bool = False,
+    ) -> None:
+        now = utc_now()
+        next_at = (datetime.now(timezone.utc) + timedelta(seconds=max(1, min(3600, delay_seconds)))).isoformat().replace("+00:00", "Z")
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE atlas_outbox SET status = ?, attempts = attempts + 1, next_attempt_at = ?,
+                    last_error = ?, updated_at = ? WHERE outbox_id = ?
+                """,
+                ("failed" if permanent else "pending", next_at, str(error)[:240], now, int(outbox_id)),
+            )
+
+    def retry_failed_atlas_publications(self, limit: int = 100, auth_only: bool = False) -> int:
+        limit = max(1, min(500, int(limit)))
+        now = utc_now()
+        filter_sql = "AND (last_error LIKE 'Atlas returned HTTP 401%' OR last_error LIKE 'Atlas returned HTTP 403%')" if auth_only else ""
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT outbox_id FROM atlas_outbox WHERE status = 'failed' {filter_sql} "
+                "ORDER BY updated_at, outbox_id LIMIT ?",
+                (limit,),
+            ).fetchall()
+            ids = [int(row["outbox_id"]) for row in rows]
+            if not ids:
+                return 0
+            connection.executemany(
+                "UPDATE atlas_outbox SET status = 'pending', attempts = 0, next_attempt_at = ?, "
+                "last_error = NULL, updated_at = ? WHERE outbox_id = ?",
+                [(now, now, outbox_id) for outbox_id in ids],
+            )
+        return len(ids)
+
+    def atlas_outbox_status(self) -> dict[str, Any]:
+        with self._connect() as connection:
+            counts = connection.execute(
+                "SELECT status, COUNT(*) AS count FROM atlas_outbox GROUP BY status"
+            ).fetchall()
+            row = connection.execute(
+                "SELECT last_error FROM atlas_outbox WHERE last_error IS NOT NULL ORDER BY updated_at DESC LIMIT 1"
+            ).fetchone()
+            pending = int(connection.execute(
+                "SELECT COUNT(*) FROM atlas_outbox WHERE status = 'pending'"
+            ).fetchone()[0])
+            failed = int(connection.execute(
+                "SELECT COUNT(*) FROM atlas_outbox WHERE status = 'failed'"
+            ).fetchone()[0])
+        quota_error = self.get_setting("atlas_outbox_quota_error")
+        return {"pending_count": pending, "failed_count": failed,
+                "last_error": (str(row["last_error"]) if row else None) or quota_error,
+                "counts": {str(item["status"]): int(item["count"]) for item in counts}}
 
     def overview(self) -> dict[str, Any]:
         applications = self.list_applications()
