@@ -21,6 +21,8 @@ from fcapsule.store import _alert_family
 MAX_EPISODE_MEMBERS = 12
 MAX_PRIMARY_CAPSULE_BYTES = 8 * 1024 * 1024
 MAX_ATLAS_CASES = 3
+ATLAS_SEARCH_LIMIT = 10
+ATLAS_MIN_SCORE = 0.65
 _SAFE_ATLAS_REFERENCE = re.compile(r"^[A-Za-z0-9._:-]{1,160}$")
 
 
@@ -51,6 +53,12 @@ def _atlas_reference(value: Any) -> str | None:
         return None
     reference = value.strip()
     return reference if _SAFE_ATLAS_REFERENCE.fullmatch(reference) else None
+
+
+def _atlas_normalize_term(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    return "_".join(re.findall(r"[a-z0-9]+", value.casefold()))
 
 
 def _atlas_observation(value: Any, case_time: str, known_references: set[str]) -> tuple[dict[str, Any] | None, str | None]:
@@ -476,33 +484,71 @@ class InvestigationService:
         return candidates
 
     @staticmethod
-    def _atlas_search_query(context: dict[str, Any]) -> str:
-        scope = context.get("scope") if isinstance(context.get("scope"), dict) else {}
-        pieces = []
-        service = scope.get("service")
-        resource = scope.get("resource") if isinstance(scope.get("resource"), dict) else {}
-        if isinstance(service, str) and service.strip():
-            pieces.append(service.strip())
-        if isinstance(resource.get("kind"), str) and resource["kind"].strip():
-            pieces.append(resource["kind"].strip())
-        for alert in (context.get("alerts") or [])[:4]:
-            if not isinstance(alert, dict):
-                continue
-            for key in ("alert_identity", "alertname", "name", "summary"):
-                value = alert.get(key)
-                if isinstance(value, str) and value.strip():
-                    pieces.append(value.strip())
-                    break
-        for item in (context.get("evidence") or [])[:8]:
+    def _atlas_search_profile(context: dict[str, Any]) -> tuple[str, str, list[str]]:
+        alerts = context.get("alerts") if isinstance(context.get("alerts"), list) else []
+        primary_alert = next((item for item in alerts if isinstance(item, dict)), {})
+        alert_family = next((primary_alert.get(key) for key in ("alert_identity", "alertname", "name")
+                             if isinstance(primary_alert.get(key), str) and primary_alert[key].strip()), "")
+        if not alert_family:
+            return "", "", []
+
+        diagnostic_keys = []
+        evidence = context.get("evidence") if isinstance(context.get("evidence"), list) else []
+        for item in evidence[:16]:
             if not isinstance(item, dict):
                 continue
             metric = item.get("metric_observation") if isinstance(item.get("metric_observation"), dict) else {}
-            condition = metric.get("condition") if isinstance(metric.get("condition"), dict) else {}
-            for value in (item.get("title"), item.get("summary"), metric.get("metric"), condition.get("status")):
-                if isinstance(value, str) and value.strip():
-                    pieces.append(value.strip())
-        unique = list(dict.fromkeys(pieces))
-        return scrub(" ".join(unique), reference_ids=set())[:500]
+            metric_name = metric.get("metric")
+            if isinstance(metric_name, str) and metric_name.strip():
+                diagnostic_keys.append(metric_name.strip())
+            fields = item.get("diagnostic_fields") if isinstance(item.get("diagnostic_fields"), dict) else {}
+            for example in item.get("examples", [])[:3] if isinstance(item.get("examples"), list) else []:
+                if isinstance(example, dict) and isinstance(example.get("diagnostic_fields"), dict):
+                    fields = {**fields, **example["diagnostic_fields"]}
+            for key in fields:
+                if isinstance(key, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{2,63}", key):
+                    diagnostic_keys.append(key)
+        diagnostic_keys = list(dict.fromkeys(diagnostic_keys))[:2]
+        if not diagnostic_keys:
+            return "", alert_family, []
+        # Atlas search is token-OR, so keep its terms focused on the exact alert
+        # family and structured diagnostic identities; free-form summaries and
+        # service names cause unrelated cross-instance matches.
+        query = scrub(" ".join([alert_family, *diagnostic_keys]), reference_ids=set())[:500]
+        return query, alert_family, diagnostic_keys
+
+    @staticmethod
+    def _atlas_candidate_relevant(candidate: Any, alert_family: str, diagnostic_keys: list[str]) -> bool:
+        if not isinstance(candidate, dict):
+            return False
+        score = candidate.get("score")
+        if type(score) in {int, float} and math.isfinite(score) and score >= ATLAS_MIN_SCORE:
+            return True
+        if not alert_family or not diagnostic_keys:
+            return False
+        observations = candidate.get("observations") if isinstance(candidate.get("observations"), list) else []
+        normalized_alert = _atlas_normalize_term(alert_family)
+        observed_alert = False
+        observed_keys = set()
+        for item in observations:
+            if not isinstance(item, dict):
+                continue
+            key = _atlas_normalize_term(item.get("key"))
+            value = _atlas_normalize_term(item.get("value"))
+            if key in {"alert_family", "alertname", "alert_identity"} and value == normalized_alert:
+                observed_alert = True
+            if key.startswith("diagnostic_"):
+                key = key[len("diagnostic_"):]
+            if key:
+                observed_keys.add(key)
+        summary = _atlas_normalize_term(candidate.get("summary"))
+        observed_alert = observed_alert or bool(normalized_alert and
+                                                f"_{normalized_alert}_" in f"_{summary}_")
+        diagnostic_overlap = any(
+            _atlas_normalize_term(key).removeprefix("diagnostic_") in observed_keys
+            for key in diagnostic_keys
+        )
+        return observed_alert and diagnostic_overlap
 
     def _atlas_retrieval(self, context: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         limitation = "Atlas retrieval is optional; retained local evidence remains the investigation source of truth."
@@ -522,18 +568,18 @@ class InvestigationService:
         if before is None:
             return [], {"status": "skipped_no_time", "case_count": 0,
                         "limitation": "Atlas retrieval was skipped because no reliable alert time was available; future cases are excluded."}
-        query = self._atlas_search_query(context)
+        query, alert_family, diagnostic_keys = self._atlas_search_profile(context)
         if not query:
-            return [], {"status": "skipped_no_query", "case_count": 0,
+            return [], {"status": "skipped_no_diagnostics", "case_count": 0,
                         "observed_before": before.isoformat().replace("+00:00", "Z"),
-                        "limitation": "Atlas retrieval was skipped because the retained episode had no safe search terms."}
+                        "limitation": "Atlas retrieval was skipped because the primary alert lacked structured diagnostic keys; local evidence continues."}
         observed_before = before.isoformat().replace("+00:00", "Z")
         # Atlas scope accepts deployment identity fields, not Kubernetes resource
         # kinds. Query text carries the target/alert signal without excluding
         # useful cases from another cluster or installation.
         atlas_scope: dict[str, Any] = {}
         try:
-            response = client.search(atlas_scope, query, limit=MAX_ATLAS_CASES, before=observed_before)
+            response = client.search(atlas_scope, query, limit=ATLAS_SEARCH_LIMIT, before=observed_before)
         except Exception:
             return [], {"status": "unavailable", "case_count": 0, "observed_before": observed_before,
                         "limitation": "Atlas retrieval was unavailable; the local evidence investigation continues."}
@@ -542,16 +588,22 @@ class InvestigationService:
             return [], {"status": "unavailable", "case_count": 0, "observed_before": observed_before,
                         "limitation": "Atlas returned no usable retrieval response; the local evidence investigation continues."}
         cases = []
-        for raw in raw_cases[:MAX_ATLAS_CASES * 3]:
+        rejected = 0
+        for raw in raw_cases[:ATLAS_SEARCH_LIMIT]:
+            if not self._atlas_candidate_relevant(raw, alert_family, diagnostic_keys):
+                rejected += 1
+                continue
             candidate = _atlas_case(raw, before)
             if candidate:
                 cases.append(candidate)
             if len(cases) == MAX_ATLAS_CASES:
                 break
-        status = "matched" if cases else "no_matches"
+        status = "matched" if cases else "no_relevant_matches" if rejected else "no_matches"
         return cases, {"status": status, "case_count": len(cases), "observed_before": observed_before,
                        "limitation": limitation if cases else
-                       "No prior Atlas cases met the strict alert-time cutoff; local evidence investigation continues."}
+                       ("No prior Atlas cases met the alert-time and relevance gates; local evidence investigation continues."
+                        if rejected else
+                        "No prior Atlas cases met the strict alert-time cutoff; local evidence investigation continues.")}
 
     @staticmethod
     def _same_live_workload_alert_other_pod(current: dict[str, Any], prior: dict[str, Any], app_id: Any) -> bool:
