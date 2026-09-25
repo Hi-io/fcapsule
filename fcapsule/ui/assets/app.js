@@ -1597,7 +1597,7 @@ function atlasPatternLink(item) {
   const title = item.title || item.name || item.summary || observation || item.pattern_id || id;
   const cases = item.case_count ?? item.total_cases ?? item.occurrence_count ?? item.match_count;
   const instances = item.instance_count ?? item.instances_count;
-  const meta = [cases == null ? '' : `${safe(cases)} cases`, instances == null ? '' : `${safe(instances)} instances`].filter(Boolean).join(' · ');
+  const meta = [cases == null ? '' : `${safe(cases)} ${Number(cases) === 1 ? 'case' : 'cases'}`, instances == null ? '' : `${safe(instances)} ${Number(instances) === 1 ? 'instance' : 'instances'}`].filter(Boolean).join(' · ');
   return `<a class="atlas-pattern-link" href="${safe(atlasUrl('pattern', id))}"><span><strong>${safe(title)}</strong><small>${safe(meta || id)}</small></span>${icon('chevron-right')}</a>`;
 }
 function atlasProvenance(record) {
@@ -1633,7 +1633,7 @@ function atlasPatternDetail(data) {
   const title = pattern.title || pattern.name || pattern.summary || observation || id;
   const caseCount = pattern.case_count ?? pattern.total_cases ?? pattern.occurrence_count ?? pattern.match_count;
   const instanceCount = pattern.instance_count ?? pattern.instances_count;
-  const counts = [caseCount == null ? '' : `Seen in ${safe(caseCount)} cases`, instanceCount == null ? '' : `across ${safe(instanceCount)} instances`].filter(Boolean).join(' ');
+  const counts = [caseCount == null ? '' : `Seen in ${safe(caseCount)} ${Number(caseCount) === 1 ? 'case' : 'cases'}`, instanceCount == null ? '' : `across ${safe(instanceCount)} ${Number(instanceCount) === 1 ? 'instance' : 'instances'}`].filter(Boolean).join(' ');
   const time = [pattern.first_seen_at || pattern.first_seen ? `First seen ${formatDate(pattern.first_seen_at || pattern.first_seen)}` : '', pattern.last_seen_at || pattern.last_seen ? `Last seen ${formatDate(pattern.last_seen_at || pattern.last_seen)}` : ''].filter(Boolean).join(' · ');
   return `<div class="atlas-detail-head"><a href="${safe(atlasUrl())}">${icon('chevron-right')}Back to Estima</a><div class="eyebrow">Similarity pattern</div><h2>${safe(title)}</h2><p>${safe(counts || `${cases.length} linked case${cases.length === 1 ? '' : 's'} returned`)}${time ? ' · ' + safe(time) : ''}</p><code>${safe(id)}</code></div><p class="atlas-pattern-note">${safe(pattern.interpretation || 'Repeated observation across cases; this does not establish a shared cause.')}</p><section class="atlas-record-section atlas-case-list"><h3>Linked cases <span class="queue-note">${cases.length} returned</span></h3>${cases.length ? cases.map(item => atlasCaseLink(item)).join('') : '<p class="queue-note">No cases were returned with this pattern.</p>'}</section>`;
 }

@@ -518,7 +518,7 @@ tbody tr:hover { background:#fafbfe; }
   .page-head h1 { font-size:26px; }
   .product-bar { padding:16px; }
   nav { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:2px; min-width:0; }
-  nav a { justify-content:center; min-width:0; padding:9px 3px; gap:4px; font-size:11px; white-space:nowrap; }
+  nav a { justify-content:center; flex-direction:column; min-width:0; min-height:52px; padding:7px 2px; gap:4px; font-size:11px; white-space:nowrap; }
   nav a .ui-icon { width:14px; height:14px; flex-basis:14px; }
   .episode-expander > summary { padding:16px 12px; gap:10px; }
   .episode-summary { grid-template-columns:1fr; gap:10px; }
@@ -573,6 +573,11 @@ tbody tr:hover { background:#fafbfe; }
   .history-comparison > div:last-child { justify-items:start; }
   .pattern-stats { grid-template-columns:1fr; gap:10px; }
   .pattern-stats div { padding:0; border-left:0; }
+}
+@media (max-width:380px) {
+  nav { display:flex; flex-wrap:wrap; gap:2px; }
+  nav a { flex:1 1 calc(33.333% - 4px); }
+  nav a:nth-last-child(-n+2) { flex-basis:calc(50% - 4px); }
 }
 @media (prefers-reduced-motion:reduce) { summary::after { transition:none; } }
 .media-observation-meta { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 16px; }

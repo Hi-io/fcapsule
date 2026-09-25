@@ -38,6 +38,13 @@ test('pattern detail presents recurrence as similarity, with linked cases and ty
   assert.match(html, /not evidence of a shared cause/);
 });
 
+test('single-case patterns use singular labels in lists and details', () => {
+  const link = render('atlasPatternLink', `atlasPatternLink({id:'pattern/one',key:'pod_ready',value:0,case_count:1,instance_count:1})`);
+  const detail = render('atlasPatternDetail', `atlasPatternDetail({pattern:{id:'pattern/one',key:'pod_ready',value:0,case_count:1,instance_count:1},cases:[]})`);
+  assert.match(link, /1 case · 1 instance/);
+  assert.match(detail, /Seen in 1 case across 1 instance/);
+});
+
 test('case detail separates observations and hypotheses and shows source provenance safely', () => {
   const html = render('atlasCaseDetail', `atlasCaseDetail({case:{
     id:'case/one',instance_id:'edge-north',episode_id:'episode-7',observed_at:'2026-09-12T03:00:00Z',
