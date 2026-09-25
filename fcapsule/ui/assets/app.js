@@ -1664,71 +1664,14 @@ function relatedAtlasCases(run) {
   return messages[state] ? `<p class="atlas-retrieval-note" role="status">${safe(messages[state])}</p>` : '';
 }
 function atlasRender() {
-  const focusedId = document.activeElement?.id;
-  const hasDetail = Boolean(atlasSelectedPattern || atlasSelectedCase);
-  const patterns = atlasPatterns.map(item => atlasPatternLink(item)).join('');
-  const cases = atlasCases.map(item => atlasCaseLink(item)).join('');
-  const query = safe(atlasQuery);
-  const detail = atlasSelectedPattern ? (atlasDetail ? atlasPatternDetail(atlasDetail) : atlasDetailStatus === 'pending' ? '<div class="empty">Loading pattern detail...</div>' : `<p class="target-error" role="alert">${safe(atlasMessage)}</p>`) : atlasSelectedCase ? (atlasDetail ? atlasCaseDetail(atlasDetail) : atlasDetailStatus === 'pending' ? '<div class="empty">Loading case detail...</div>' : `<p class="target-error" role="alert">${safe(atlasMessage)}</p>`) : '';
-  const connection = atlasResultStatus === 'ready' ? 'Connected' : atlasResultStatus === 'pending' ? 'Connecting' : 'Unavailable';
-  app.innerHTML = `<div class="page-head"><div><div class="eyebrow">Cross-instance memory</div><h1>Estima</h1>${hasDetail ? '' : '<p>Browse patterns and retained records shared by connected FCAPSule instances.</p>'}</div><div class="actions"><span class="status ${atlasResultStatus === 'ready' ? 'healthy' : atlasResultStatus === 'pending' ? 'running' : 'error'}" role="status">${connection}</span><button type="button" class="secondary" id="atlas-refresh" title="Refresh Estima records">${icon('refresh-cw')}Refresh</button></div></div>
-    ${hasDetail ? '' : '<aside class="atlas-caveat" role="note"><strong>Similarity is not causation.</strong> Patterns help retrieve comparable records; retained observations are shown separately from unverified hypotheses. Estima does not verify root cause.</aside>'}
-    ${hasDetail ? '' : `<form class="atlas-search" id="atlas-search-form"><div class="field"><label for="atlas-query">Search patterns and records</label><input id="atlas-query" type="search" value="${query}" placeholder="Service timeout, rollout, error text" autocomplete="off"></div><div class="field"><label for="atlas-scope">Cluster <span class="queue-note">optional</span></label><input id="atlas-scope" value="${safe(atlasScope)}" placeholder="Cluster name" autocomplete="off"></div><button type="submit">Search Estima</button></form>`}
-    <div class="atlas-status" role="status" aria-live="polite">${atlasMessage ? safe(atlasMessage) : atlasResultStatus === 'pending' ? 'Loading Estima records...' : ''}</div>
-    ${detail ? `<section class="atlas-detail sheet">${detail}</section>` : `<div class="atlas-results"><section class="sheet"><div class="sheet-head"><h2>Similarity patterns</h2><span class="queue-note">${atlasPatterns.length} returned</span></div><div class="atlas-result-list">${atlasPatternError ? `<p class="target-error" role="alert">${safe(atlasPatternError)}</p>` : atlasResultStatus === 'pending' ? '<div class="empty">Loading patterns...</div>' : patterns || `<div class="empty">${atlasQuery ? 'No matching patterns were returned. Search records below can still find first-occurrence observations.' : 'No Estima patterns were returned. Records may not be indexed yet.'}</div>`}</div></section><section class="sheet"><div class="sheet-head"><h2>${atlasQuery ? 'Matching records' : 'Records'}</h2><span class="queue-note">${atlasCases.length} returned</span></div><div class="atlas-result-list">${atlasCaseError ? `<p class="target-error" role="alert">${safe(atlasCaseError)}</p>` : atlasQuery && atlasResultStatus === 'pending' ? '<div class="empty">Searching records...</div>' : atlasQuery ? cases || '<div class="empty">No matching records were returned for this query and scope.</div>' : '<div class="empty">Search to find individual records, including observations without an established repeat pattern.</div>'}</div></section></div>`}`;
-  if (focusedId) document.getElementById(focusedId)?.focus({preventScroll:true});
-  document.querySelector('#atlas-search-form')?.addEventListener('submit', event => {
-    event.preventDefault();
-    atlasQuery = document.querySelector('#atlas-query').value.trim();
-    atlasScope = document.querySelector('#atlas-scope').value.trim();
-    atlasSelectedPattern = ''; atlasSelectedCase = ''; atlasDetail = null;
-    const params = new URLSearchParams(); if (atlasQuery) params.set('q', atlasQuery); if (atlasScope) params.set('scope', atlasScope);
-    history.replaceState(null, '', '/estima' + (params.size ? '?' + params.toString() : ''));
-    loadAtlas();
+  return EstimaExplorer.start(app, {
+    query:atlasQuery, scope:atlasScope,
+    selectedPattern:atlasSelectedPattern, selectedCase:atlasSelectedCase,
+    icon, url:atlasUrl,
+    setSearch(query, scope) { atlasQuery = query; atlasScope = scope; },
   });
-  document.querySelector('#atlas-refresh')?.addEventListener('click', loadAtlas);
 }
-let atlasDetailStatus = 'pending';
-async function loadAtlas() {
-  const sequence = ++atlasRequestSequence;
-  atlasMessage = ''; atlasPatternError = ''; atlasCaseError = '';
-  if (atlasSelectedPattern || atlasSelectedCase) {
-    atlasDetail = null; atlasDetailStatus = 'pending'; atlasResultStatus = 'pending'; atlasRender();
-    const kind = atlasSelectedPattern ? 'patterns' : 'cases';
-    const id = atlasSelectedPattern || atlasSelectedCase;
-    try {
-      const response = await fetch(`/api/estima/${kind}/${encodeURIComponent(id)}`, {cache:'no-store'});
-      const result = await response.json();
-      if (!response.ok) throw Object.assign(new Error(atlasFailureText(result.error, result.status)), {serviceStatus:result.status});
-      if (sequence !== atlasRequestSequence) return;
-      atlasDetail = result; atlasDetailStatus = 'ready'; atlasResultStatus = 'ready';
-    } catch (error) {
-      if (sequence !== atlasRequestSequence) return;
-      atlasDetailStatus = 'error'; atlasResultStatus = 'error'; atlasMessage = error.message || 'Estima record unavailable.';
-    }
-    atlasRender(); return;
-  }
-  atlasResultStatus = 'pending'; atlasCasesSearched = Boolean(atlasQuery); atlasPatterns = []; atlasCases = []; atlasRender();
-  const params = new URLSearchParams(); if (atlasQuery) params.set('query', atlasQuery); if (atlasScope) params.set('scope', atlasScope); params.set('limit', '20');
-  const patternsPromise = fetch('/api/estima/patterns?' + params.toString(), {cache:'no-store'}).then(async response => {
-    const result = await response.json();
-    if (!response.ok) throw Object.assign(new Error(atlasFailureText(result.error, result.status)), {serviceStatus:result.status});
-    if (sequence !== atlasRequestSequence) return;
-    atlasPatterns = atlasRecords(result.patterns);
-  }).catch(error => { if (sequence === atlasRequestSequence) atlasPatternError = error.message || 'Estima patterns are unavailable.'; });
-  const casesPromise = atlasQuery ? fetch('/api/estima/search', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:atlasQuery,scope:atlasScope ? {cluster:atlasScope} : null,limit:10})}).then(async response => {
-    const result = await response.json();
-    if (!response.ok) throw Object.assign(new Error(atlasFailureText(result.error, result.status)), {serviceStatus:result.status});
-    if (sequence !== atlasRequestSequence) return;
-    atlasCases = atlasRecords(result.cases);
-  }).catch(error => { if (sequence === atlasRequestSequence) atlasCaseError = error.message || 'Estima records are unavailable.'; }) : Promise.resolve();
-  await Promise.all([patternsPromise, casesPromise]);
-  if (sequence !== atlasRequestSequence) return;
-  atlasResultStatus = atlasPatternError && (!atlasQuery || atlasCaseError) ? 'error' : 'ready';
-  atlasMessage = atlasResultStatus === 'error' ? 'Estima records are unavailable. Check connection settings or try again.' : atlasPatternError ? 'Record search returned; pattern retrieval is unavailable.' : atlasCaseError ? 'Patterns returned; record search is unavailable.' : '';
-  atlasRender();
-}
-
+async function loadAtlas() { return atlasRender(); }
 async function refresh() {
   if (refreshing || document.hidden) return;
   refreshing = true;
@@ -1762,7 +1705,7 @@ async function refresh() {
       }
       if (!reportLoading && consoleSignature(state) !== lastConsoleSignature) renderPreservingFocus(() => renderConsole(state));
     } else if (!previous) {
-      view === 'targets' ? renderTargets(state) : view === 'patterns' ? renderPatterns(state) : view === 'estima' ? (atlasRender(), loadAtlas()) : renderSettings(state);
+      view === 'targets' ? renderTargets(state) : view === 'patterns' ? renderPatterns(state) : view === 'estima' ? loadAtlas() : renderSettings(state);
     } else if (view === 'targets') {
       // Refresh inventory without replacing editable connection settings.
       document.querySelector('#discovery-time').textContent = formatDate(state.sources.last_sync_at);

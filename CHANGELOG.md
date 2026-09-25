@@ -4,6 +4,11 @@
 
 ### Changed
 
+- Replaced the Estima catalogue-first page with an interactive collective-memory
+  map, contextual record inspector, map/list views, event-time and instance
+  filters, and shareable record links. Connections reflect exact retained
+  observations; visible counts describe the bounded loaded selection. No model
+  calls or changes to shared-memory storage and investigation behavior.
 - Reframed the public documentation around AI investigation and retained incident
   memory, separated current guides from dated design/evaluation records, and
   corrected current model, retention and demo-status boundaries.

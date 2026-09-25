@@ -45,8 +45,8 @@ HTML = """<!doctype html>
 
 
 ASSET_ROOT = Path(__file__).with_name("assets")
-CSS = (ASSET_ROOT / "app.css").read_text(encoding="utf-8") + "\n" + (ASSET_ROOT / "visual.css").read_text(encoding="utf-8")
-JS = (ASSET_ROOT / "app.js").read_text(encoding="utf-8")
+CSS = "\n".join((ASSET_ROOT / name).read_text(encoding="utf-8") for name in ("app.css", "visual.css", "estima.css"))
+JS = "\n".join((ASSET_ROOT / name).read_text(encoding="utf-8") for name in ("estima.js", "app.js"))
 ICONS = {path.name: path.read_text(encoding="utf-8") for path in (ASSET_ROOT / "icons").glob("*.svg")}
 STREAM_CHUNK_BYTES = 128 * 1024
 JSON_SPOOL_MEMORY_BYTES = 1024 * 1024

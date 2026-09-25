@@ -147,6 +147,36 @@ same as "no relevant case found."
 
 ## Operator Workflow
 
+### Explore Collective Memory
+
+The Estima page presents retained knowledge as an interactive map and an
+equivalent list. Larger colored nodes are repeated typed observations; smaller
+nodes are retained cases. An edge means that the case contains the observation's
+same domain, key, typed value and unit. It is not a causal link or an inferred
+root cause. Color groups are presentation categories, not learned clusters.
+
+Selecting a node highlights its neighborhood and opens an adjacent detail panel.
+Cases retain their summaries, observations, separately labeled hypotheses and
+source provenance. Pattern details explain the shared observation and list
+recent members. Direct case and pattern links remain shareable. Zoom, pan,
+keyboard selection and a list alternative support different exploration styles.
+
+The time control filters the **event times of loaded cases**, not when Estima
+learned or ingested them. The instance control isolates contributions visible in
+the loaded records. These controls only change the presentation; they do not
+publish, modify, delete or re-investigate anything, and make no model calls.
+
+The browser requests up to 20 patterns and expands their existing detail
+endpoints with at most three concurrent requests. Each endpoint returns a bounded
+set of recent members. Search can add up to 10 matching cases. Counts explicitly
+refer to the loaded view, except pattern totals labeled across memory. Revisions
+of one producer/episode are deduplicated to the newest loaded revision. Pattern
+totals must not be summed to infer a global incident count. There is no claim that
+the map contains every record stored by Estima. Loading, unavailable, partial
+retrieval and empty states are distinct, with refresh/retry controls.
+
+### Connect Instances
+
 1. Obtain the endpoint and bearer token from the Estima operator. Review who may
    publish and search, what data may leave each instance, and the remote lifecycle.
 2. Configure each FCAPSule instance with the same approved endpoint and token,
