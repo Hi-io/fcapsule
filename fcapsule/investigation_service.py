@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from fcapsule.episode_investigation import now, run_investigation
-from fcapsule.investigation_tools import InvestigationTools, episode_context, historical_episode_result
+from fcapsule.investigation_tools import InvestigationTools, episode_context, historical_episode_result, scrub
 from fcapsule.io.archive_writer import create_archive
 from fcapsule.reasoning.findings import derive_findings
 from fcapsule.reasoning.source_review import run_source_disconnected_review
@@ -18,6 +20,10 @@ from fcapsule.store import _alert_family
 
 MAX_EPISODE_MEMBERS = 12
 MAX_PRIMARY_CAPSULE_BYTES = 8 * 1024 * 1024
+MAX_ATLAS_CASES = 3
+ATLAS_SEARCH_LIMIT = 10
+ATLAS_MIN_SCORE = 0.65
+_SAFE_ATLAS_REFERENCE = re.compile(r"^[A-Za-z0-9._:-]{1,160}$")
 
 
 def _capture_time(value: Any) -> datetime | None:
@@ -30,6 +36,142 @@ def _capture_time(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _aware_capture_time(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.astimezone(timezone.utc) if parsed.tzinfo is not None else None
+
+
+def _atlas_reference(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    reference = value.strip()
+    return reference if _SAFE_ATLAS_REFERENCE.fullmatch(reference) else None
+
+
+def _atlas_normalize_term(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    return "_".join(re.findall(r"[a-z0-9]+", value.casefold()))
+
+
+def _atlas_observation(value: Any, case_time: str, known_references: set[str]) -> tuple[dict[str, Any] | None, str | None]:
+    if not isinstance(value, dict):
+        return None, None
+    row: dict[str, Any] = {}
+    for key in ("kind", "key", "unit", "source"):
+        item = value.get(key)
+        if isinstance(item, str) and item.strip():
+            row[key] = scrub(item.strip(), reference_ids=known_references)[:160]
+    raw_value = value.get("value")
+    if isinstance(raw_value, str):
+        row["value"] = scrub(raw_value, reference_ids=known_references)[:320]
+    elif raw_value is None or isinstance(raw_value, (bool, int)):
+        row["value"] = raw_value
+    elif isinstance(raw_value, float) and math.isfinite(raw_value):
+        row["value"] = raw_value
+    observed_at = value.get("observed_at")
+    if isinstance(observed_at, str) and _aware_capture_time(observed_at):
+        row["observed_at"] = observed_at[:40]
+    else:
+        row["observed_at"] = case_time
+    reference = _atlas_reference(value.get("reference"))
+    if reference:
+        row["reference"] = reference
+    return (row or None), reference
+
+
+def _atlas_hypothesis(value: Any, known_references: set[str]) -> dict[str, Any] | None:
+    if isinstance(value, str):
+        statement = value
+        confidence = None
+        supporting_refs = []
+    elif isinstance(value, dict):
+        statement = value.get("statement")
+        confidence = value.get("confidence")
+        supporting_refs = value.get("supporting_refs") if isinstance(value.get("supporting_refs"), list) else []
+    else:
+        return None
+    if not isinstance(statement, str) or not statement.strip():
+        return None
+    refs = [reference for item in supporting_refs
+            if (reference := _atlas_reference(item)) is not None][:8]
+    result = {
+        "statement": scrub(statement.strip(), reference_ids=known_references)[:320],
+        "provenance": "Prior unverified model hypothesis; not an observed fact or root-cause finding.",
+    }
+    if isinstance(confidence, str) and confidence.casefold() in {"low", "medium", "high"}:
+        result["confidence"] = confidence.casefold()
+    elif type(confidence) in {int, float} and math.isfinite(confidence):
+        result["confidence"] = max(0.0, min(1.0, float(confidence)))
+    if refs:
+        result["supporting_reference_ids"] = refs
+    return result
+
+
+def _atlas_case(value: Any, before: datetime) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    observed_at = value.get("observed_at")
+    observed_time = _aware_capture_time(observed_at)
+    atlas_case_id = _atlas_reference(value.get("id"))
+    if not atlas_case_id or observed_time is None or observed_time > before:
+        return None
+    instance_id = _atlas_reference(value.get("instance_id"))
+    references = {atlas_case_id}
+    if instance_id:
+        references.add(instance_id)
+    observations = []
+    observation_references = []
+    for item in value.get("observations", [])[:8] if isinstance(value.get("observations"), list) else []:
+        row, reference = _atlas_observation(item, observed_at[:40], references)
+        if row:
+            observations.append(row)
+        if reference and reference not in observation_references:
+            observation_references.append(reference)
+            references.add(reference)
+    hypotheses = []
+    hypothesis_references = []
+    for item in value.get("hypotheses", [])[:4] if isinstance(value.get("hypotheses"), list) else []:
+        hypothesis = _atlas_hypothesis(item, references)
+        if hypothesis:
+            hypotheses.append(hypothesis)
+            for reference in hypothesis.get("supporting_reference_ids", []):
+                if reference not in hypothesis_references:
+                    hypothesis_references.append(reference)
+    scope = value.get("scope") if isinstance(value.get("scope"), dict) else {}
+    safe_scope = {
+        str(key)[:60]: scrub(item, reference_ids=references)[:160]
+        for key, item in list(scope.items())[:8]
+        if isinstance(key, str) and isinstance(item, str) and item.strip()
+    }
+    result = {
+        "atlas_case_id": atlas_case_id,
+        "citation": f"Atlas case {atlas_case_id}",
+        "observed_at": observed_at[:40],
+        "relation": scrub(value.get("relation"), reference_ids=references)[:80]
+        if isinstance(value.get("relation"), str) else "historical_analog",
+        "scope": safe_scope,
+        "summary": scrub(value.get("summary"), reference_ids=references)[:420]
+        if isinstance(value.get("summary"), str) else "",
+        "observations": observations,
+        "prior_hypotheses": hypotheses,
+        "factual_reference_ids": observation_references,
+        "hypothesis_reference_ids": hypothesis_references,
+        "limitation": "Prior cross-instance case only. Its captured observations are not evidence for this incident; prior hypotheses are unverified model output, never an RCA. Verify any lead with current scoped observations.",
+    }
+    if instance_id:
+        result["instance_id"] = instance_id
+    score = value.get("score")
+    if type(score) in {int, float} and math.isfinite(score):
+        result["score"] = max(0.0, min(1.0, float(score)))
+    return result
 
 
 class InvestigationService:
@@ -139,6 +281,16 @@ class InvestigationService:
             self.plane._write_briefing_state(root / "investigation_history.json", history)
             self.plane._write_briefing_state(root / "investigation_revisions.json", revisions_export)
             create_archive(root, str(signal["incident_id"]))
+
+    def _notify_atlas_publisher(self, episode_id: str) -> None:
+        try:
+            publisher = getattr(self.plane, "atlas_publisher", None)
+            notify = getattr(publisher, "notify_episode", None)
+            if callable(notify):
+                notify(episode_id)
+        except Exception:
+            # Atlas publication is best-effort and never holds up local results.
+            pass
 
     def for_incident(self, incident_id: str) -> dict[str, Any] | None:
         episode = self.plane.store.episode_for_incident(incident_id)
@@ -330,6 +482,128 @@ class InvestigationService:
                 }
             )
         return candidates
+
+    @staticmethod
+    def _atlas_search_profile(context: dict[str, Any]) -> tuple[str, str, list[str]]:
+        alerts = context.get("alerts") if isinstance(context.get("alerts"), list) else []
+        primary_alert = next((item for item in alerts if isinstance(item, dict)), {})
+        alert_family = next((primary_alert.get(key) for key in ("alert_identity", "alertname", "name")
+                             if isinstance(primary_alert.get(key), str) and primary_alert[key].strip()), "")
+        if not alert_family:
+            return "", "", []
+
+        diagnostic_keys = []
+        evidence = context.get("evidence") if isinstance(context.get("evidence"), list) else []
+        for item in evidence[:16]:
+            if not isinstance(item, dict):
+                continue
+            metric = item.get("metric_observation") if isinstance(item.get("metric_observation"), dict) else {}
+            metric_name = metric.get("metric")
+            if isinstance(metric_name, str) and metric_name.strip():
+                diagnostic_keys.append(metric_name.strip())
+            fields = item.get("diagnostic_fields") if isinstance(item.get("diagnostic_fields"), dict) else {}
+            for example in item.get("examples", [])[:3] if isinstance(item.get("examples"), list) else []:
+                if isinstance(example, dict) and isinstance(example.get("diagnostic_fields"), dict):
+                    fields = {**fields, **example["diagnostic_fields"]}
+            for key in fields:
+                if isinstance(key, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{2,63}", key):
+                    diagnostic_keys.append(key)
+        diagnostic_keys = list(dict.fromkeys(diagnostic_keys))[:2]
+        if not diagnostic_keys:
+            return "", alert_family, []
+        # Atlas search is token-OR, so keep its terms focused on the exact alert
+        # family and structured diagnostic identities; free-form summaries and
+        # service names cause unrelated cross-instance matches.
+        query = scrub(" ".join([alert_family, *diagnostic_keys]), reference_ids=set())[:500]
+        return query, alert_family, diagnostic_keys
+
+    @staticmethod
+    def _atlas_candidate_relevant(candidate: Any, alert_family: str, diagnostic_keys: list[str]) -> bool:
+        if not isinstance(candidate, dict):
+            return False
+        score = candidate.get("score")
+        if type(score) in {int, float} and math.isfinite(score) and score >= ATLAS_MIN_SCORE:
+            return True
+        if not alert_family or not diagnostic_keys:
+            return False
+        observations = candidate.get("observations") if isinstance(candidate.get("observations"), list) else []
+        normalized_alert = _atlas_normalize_term(alert_family)
+        observed_alert = False
+        observed_keys = set()
+        for item in observations:
+            if not isinstance(item, dict):
+                continue
+            key = _atlas_normalize_term(item.get("key"))
+            value = _atlas_normalize_term(item.get("value"))
+            if key in {"alert_family", "alertname", "alert_identity"} and value == normalized_alert:
+                observed_alert = True
+            if key.startswith("diagnostic_"):
+                key = key[len("diagnostic_"):]
+            if key:
+                observed_keys.add(key)
+        summary = _atlas_normalize_term(candidate.get("summary"))
+        observed_alert = observed_alert or bool(normalized_alert and
+                                                f"_{normalized_alert}_" in f"_{summary}_")
+        diagnostic_overlap = any(
+            _atlas_normalize_term(key).removeprefix("diagnostic_") in observed_keys
+            for key in diagnostic_keys
+        )
+        return observed_alert and diagnostic_overlap
+
+    def _atlas_retrieval(self, context: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        limitation = "Atlas retrieval is optional; retained local evidence remains the investigation source of truth."
+        get_client = getattr(self.plane, "atlas_client", None)
+        if not callable(get_client):
+            return [], {"status": "disabled", "case_count": 0, "limitation": limitation}
+        try:
+            client = get_client("read")
+        except Exception:
+            return [], {"status": "unavailable", "case_count": 0,
+                        "limitation": "Atlas retrieval was unavailable; the local evidence investigation continues."}
+        if client is None:
+            return [], {"status": "disabled", "case_count": 0, "limitation": limitation}
+
+        scope = context.get("scope") if isinstance(context.get("scope"), dict) else {}
+        before = _aware_capture_time(scope.get("alert_started_at"))
+        if before is None:
+            return [], {"status": "skipped_no_time", "case_count": 0,
+                        "limitation": "Atlas retrieval was skipped because no reliable alert time was available; future cases are excluded."}
+        query, alert_family, diagnostic_keys = self._atlas_search_profile(context)
+        if not query:
+            return [], {"status": "skipped_no_diagnostics", "case_count": 0,
+                        "observed_before": before.isoformat().replace("+00:00", "Z"),
+                        "limitation": "Atlas retrieval was skipped because the primary alert lacked structured diagnostic keys; local evidence continues."}
+        observed_before = before.isoformat().replace("+00:00", "Z")
+        # Atlas scope accepts deployment identity fields, not Kubernetes resource
+        # kinds. Query text carries the target/alert signal without excluding
+        # useful cases from another cluster or installation.
+        atlas_scope: dict[str, Any] = {}
+        try:
+            response = client.search(atlas_scope, query, limit=ATLAS_SEARCH_LIMIT, before=observed_before)
+        except Exception:
+            return [], {"status": "unavailable", "case_count": 0, "observed_before": observed_before,
+                        "limitation": "Atlas retrieval was unavailable; the local evidence investigation continues."}
+        raw_cases = response.get("cases") if isinstance(response, dict) else None
+        if not isinstance(raw_cases, list):
+            return [], {"status": "unavailable", "case_count": 0, "observed_before": observed_before,
+                        "limitation": "Atlas returned no usable retrieval response; the local evidence investigation continues."}
+        cases = []
+        rejected = 0
+        for raw in raw_cases[:ATLAS_SEARCH_LIMIT]:
+            if not self._atlas_candidate_relevant(raw, alert_family, diagnostic_keys):
+                rejected += 1
+                continue
+            candidate = _atlas_case(raw, before)
+            if candidate:
+                cases.append(candidate)
+            if len(cases) == MAX_ATLAS_CASES:
+                break
+        status = "matched" if cases else "no_relevant_matches" if rejected else "no_matches"
+        return cases, {"status": status, "case_count": len(cases), "observed_before": observed_before,
+                       "limitation": limitation if cases else
+                       ("No prior Atlas cases met the alert-time and relevance gates; local evidence investigation continues."
+                        if rejected else
+                        "No prior Atlas cases met the strict alert-time cutoff; local evidence investigation continues.")}
 
     @staticmethod
     def _same_live_workload_alert_other_pod(current: dict[str, Any], prior: dict[str, Any], app_id: Any) -> bool:
@@ -545,7 +819,9 @@ class InvestigationService:
                 state.update(status="waiting", message="Waiting for the episode's reports to finish.")
             self.plane._write_briefing_state(self.path(episode_id), state)
             self._record_revision(state)
-            if state["status"] == "queued":
+            if state["status"] == "not_configured":
+                self._notify_atlas_publisher(episode_id)
+            elif state["status"] == "queued":
                 self.jobs.add(episode_id)
                 self.plane.briefing_executor.submit(self._run, episode_id, state)
             return state
@@ -620,6 +896,9 @@ class InvestigationService:
                 {key: item.get(key) for key in ("episode_id", "reference", "title", "started_at", "ended_at", "status", "resource")}
                 for item in historical
             ]
+            atlas_cases, atlas_retrieval = self._atlas_retrieval(context)
+            context["atlas_cases"] = atlas_cases
+            context["atlas_retrieval"] = atlas_retrieval
             context["capture_limit"] = "At most 12 latest member reports and 80 initial evidence items; additional members remain individually accessible."
             application = self.plane.store.get_application(episode["app_id"])
             kit = InvestigationTools(
@@ -655,6 +934,7 @@ class InvestigationService:
                     self.plane._write_briefing_state(self.path(episode_id), state)
                     self._record_revision(state)
                     if state["status"] in {"ready", "incomplete", "inconclusive"}:
+                        self._notify_atlas_publisher(episode_id)
                         for entry in entries:
                             root = Path(entry["record"]["output_dir"])
                             self.plane._write_briefing_state(root / "episode_investigation.json", state)

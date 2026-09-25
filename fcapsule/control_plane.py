@@ -8,12 +8,15 @@ import os
 import shutil
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from fcapsule.env import load_env_file, write_env_value
+from fcapsule.atlas_client import atlas_client_from_config, atlas_settings_from_env, validate_atlas_url
+from fcapsule.atlas_publisher import AtlasPublisher
 from fcapsule.evidence_service import EvidenceService
 from fcapsule.incident_report import build_incident_report
 from fcapsule.io.archive_writer import create_archive
@@ -157,6 +160,8 @@ class ControlPlane:
         self.source_stop = threading.Event()
         self.source_monitor: threading.Thread | None = None
         self.pending_webhook_sync = False
+        self._atlas_config_lock = threading.RLock()
+        self.atlas_settings_path = self.state_dir / "atlas-settings.json"
         load_env_file(self.state_dir / ".env")
         load_env_file()
         self.source_state["configuration"] = self.live_sources.configuration()
@@ -182,6 +187,128 @@ class ControlPlane:
             if evaluation_path.is_file():
                 self.live["evaluation"] = json.loads(evaluation_path.read_text(encoding="utf-8"))
                 self.live["selected_evidence"] = capsule_record["selected_evidence"]
+        self.atlas_publisher = AtlasPublisher(self)
+        if self._effective_atlas_settings().get("publish_enabled"):
+            self.atlas_publisher.start()
+
+    def _read_atlas_settings(self) -> dict[str, Any]:
+        try:
+            value = json.loads(self.atlas_settings_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    def _write_atlas_settings(self, value: dict[str, Any]) -> None:
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        temporary = self.atlas_settings_path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(value, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+        try:
+            temporary.chmod(0o600)
+        except OSError:
+            pass
+        os.replace(temporary, self.atlas_settings_path)
+        try:
+            self.atlas_settings_path.chmod(0o600)
+        except OSError:
+            pass
+
+    def _effective_atlas_settings(self) -> dict[str, Any]:
+        with self._atlas_config_lock:
+            config = atlas_settings_from_env()
+            stored = self._read_atlas_settings()
+            for key in ("url", "token", "instance_id", "read_enabled", "publish_enabled"):
+                if key in stored:
+                    if key == "instance_id" and config.get("instance_id") and stored.get("instance_id_auto"):
+                        continue
+                    config[key] = stored[key]
+            if not config.get("instance_id"):
+                config["instance_id"] = "fcapsule-" + str(uuid.uuid4())
+                stored["instance_id"] = config["instance_id"]
+                stored["instance_id_auto"] = True
+                self._write_atlas_settings(stored)
+            return config
+
+    def atlas_client(self, operation: str):
+        """Return the shared runtime-configured Atlas client when that mode is enabled."""
+        try:
+            return atlas_client_from_config(self._effective_atlas_settings(), operation)
+        except ValueError as error:
+            self.store.set_setting("atlas_client_config_error", str(error)[:160])
+            return None
+
+    def atlas_configuration(self) -> dict[str, Any]:
+        config = self._effective_atlas_settings()
+        status = self.store.atlas_outbox_status()
+        return {
+            "url": str(config.get("url") or ""),
+            "instance_id": str(config.get("instance_id") or ""),
+            "token_configured": bool(str(config.get("token") or "").strip()),
+            "read_enabled": bool(config.get("read_enabled")),
+            "publish_enabled": bool(config.get("publish_enabled")),
+            "pending_count": status["pending_count"],
+            "failed_count": status["failed_count"],
+            "last_error": status["last_error"] or self.store.get_setting("atlas_projection_last_error")
+                          or self.store.get_setting("atlas_client_config_error"),
+        }
+
+    def update_atlas_configuration(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("Atlas settings must be an object")
+        with self._atlas_config_lock:
+            stored = self._read_atlas_settings()
+            env = atlas_settings_from_env()
+            current = {**env, **stored}
+            old_url = str(current.get("url") or "")
+            old_token = str(current.get("token") or "")
+            url = str(payload.get("url", current.get("url") or "")).strip()
+            if payload.get("clear_url") is True:
+                stored.pop("url", None)
+            elif url:
+                validate_atlas_url(url)
+                stored["url"] = url
+            instance_id = str(payload.get("instance_id", current.get("instance_id") or "")).strip()
+            if not instance_id:
+                raise ValueError("Atlas instance ID must be non-empty")
+            if len(instance_id) > 96 or not all(character.isalnum() or character in "._:-" for character in instance_id):
+                raise ValueError("Atlas instance ID contains unsupported characters")
+            stored["instance_id"] = instance_id
+            stored["instance_id_auto"] = False
+            if payload.get("clear_token") is True:
+                stored["token"] = ""
+            elif isinstance(payload.get("token"), str) and payload["token"].strip():
+                token = payload["token"].strip()
+                if len(token) > 4096 or "\n" in token or "\r" in token:
+                    raise ValueError("Atlas token is invalid")
+                stored["token"] = token
+            for key in ("read_enabled", "publish_enabled"):
+                if key in payload:
+                    value = payload[key]
+                    if isinstance(value, bool):
+                        stored[key] = value
+                    elif isinstance(value, str) and value.strip().lower() in {"true", "false", "1", "0", "on", "off"}:
+                        stored[key] = value.strip().lower() in {"true", "1", "on"}
+                    else:
+                        raise ValueError(f"{key} must be a boolean")
+            self._write_atlas_settings(stored)
+        updated = self._effective_atlas_settings()
+        if str(updated.get("url") or "") != old_url or str(updated.get("token") or "") != old_token:
+            self.store.retry_failed_atlas_publications(auth_only=True)
+        if updated.get("publish_enabled"):
+            self.atlas_publisher.start()
+            self.atlas_publisher.request_full_scan()
+        else:
+            self.atlas_publisher.shutdown(drain=False)
+        return self.atlas_configuration()
+
+    def process_atlas_outbox_once(self, limit: int = 4, client=None) -> dict[str, int]:
+        return self.atlas_publisher.process_once(limit=limit, client=client, scan_all=True)
+
+    def retry_atlas_publications(self, limit: int = 100) -> int:
+        retried = self.store.retry_failed_atlas_publications(limit=limit)
+        if retried and self._effective_atlas_settings().get("publish_enabled"):
+            self.atlas_publisher.start()
+            self.atlas_publisher.wake()
+        return retried
 
     def _refresh_existing_identities(self) -> None:
         """Backfill retained cases when new target identity fields are introduced."""

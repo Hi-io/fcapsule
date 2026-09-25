@@ -1,0 +1,140 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: atlas
+  labels:
+    app.kubernetes.io/part-of: fcapsule-atlas-test
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: atlas
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: atlas
+  labels:
+    app.kubernetes.io/name: atlas
+    app.kubernetes.io/part-of: fcapsule-atlas-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: atlas
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: atlas
+        app.kubernetes.io/part-of: fcapsule-atlas-test
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: worker-1
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      initContainers:
+        - name: install-source
+          image: python:3.12-slim
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-ec"]
+          args:
+            - >-
+              python -m pip install --no-cache-dir --target /opt/atlas
+              "https://github.com/Hi-io/fcapsule/archive/${FCAPSULE_SOURCE_REF}.zip#subdirectory=atlas"
+          envFrom:
+            - configMapRef:
+                name: fcapsule-atlas-test-source
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: source
+              mountPath: /opt/atlas
+            - name: tmp
+              mountPath: /tmp
+      containers:
+        - name: atlas
+          image: python:3.12-slim
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "uvicorn", "atlas.app:app", "--host", "0.0.0.0", "--port", "8080"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: PYTHONPATH
+              value: /opt/atlas
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: PORT
+              value: "8080"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: fcapsule-atlas-runtime
+                  key: DATABASE_URL
+            - name: ATLAS_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: fcapsule-atlas-runtime
+                  key: ATLAS_API_TOKEN
+          startupProbe:
+            exec:
+              command: ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command: ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: source
+              mountPath: /opt/atlas
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: source
+          emptyDir:
+            sizeLimit: 512Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi

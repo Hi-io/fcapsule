@@ -26,13 +26,21 @@ For the full product narrative, see [Observability With Memory](docs/product_val
 2. A firing alert opens a bounded capture. FCAPSule preserves selected fault, performance, log and configuration evidence and builds a report even if the model provider is unavailable.
 3. **Operations** presents the episode, affected resource, observed impact and AI investigation. Follow citations into the captured evidence or the investigator's checks; add evidence or export the report when needed.
 4. **Patterns** shows recurring issues and links back to separate episodes. An eligible earlier capsule can become bounded context for a new investigation.
-5. **Settings** controls FCAPSule incident retention and model configuration. Offline model comparisons remain an evaluation workflow, not an operator dashboard.
+5. Optionally connect **Atlas** in Settings. Its separate service stores minimized, versioned cases from participating instances; the Atlas view lets engineers inspect repeated observations and prior case provenance without treating similarity as a verified cause.
+6. **Settings** also controls FCAPSule incident retention and model configuration. Offline model comparisons remain an evaluation workflow, not an operator dashboard.
 
 ![Investigation activity with diagnostic checks and retained-history comparison](docs/assets/product/ai-investigation-lab.png)
 
 The model's assessment is a supported hypothesis, not a certified root cause or an executed fix. The investigator only uses allowlisted read-only checks; it does not reproduce workloads or remediate systems. See [AI investigation techniques](docs/ai_investigation_techniques.md) for the actual tools, budgets and validation limits.
 
 ## Evidence and Memory
+
+Each FCAPSule instance retains its own capsules and uses conservative same-instance
+history. A separate, opt-in **FCAPSule Atlas** service can share compact cases
+across participating instances; it is disabled by default and does not replace
+local history or turn a similar case into a shared-cause finding. See the
+[FCAPSule Atlas guide](docs/ATLAS.md) for its privacy boundary, current API,
+operator limits and evaluation plan.
 
 | Source | What FCAPSule uses today |
 | --- | --- |
@@ -78,6 +86,13 @@ See [provider operations](docs/llm_provider_operations.md), [evaluation plan](EV
 ## Current Boundaries
 
 FCAPSule is working single-replica software for a trusted environment, not an Internet-facing managed service. The reference HTTP server has no built-in authentication, authorization or TLS; SQLite and in-process workers are not distributed. Masking is heuristic, not a guarantee of anonymization. Historical matching is deliberately conservative and cannot equate every failure across changed workloads. Investigation quality still requires review on real incidents.
+
+Cross-instance case sharing through Atlas is a distinct, optional integration.
+It is disabled by default and requires a separately deployed service. The current
+service uses a single shared bearer token without per-instance authorization, and
+has no remote delete endpoint or automated case-retention policy. Do not treat it
+as a production multi-tenant service. Local incident capture and investigation
+must remain useful when Atlas is unavailable.
 
 The [roadmap](ROADMAP.md) covers production hardening, source scaling, durable workers and broader evaluation. No measured storage-cost reduction, diagnosis accuracy or industry-first claim is implied by the product narrative.
 

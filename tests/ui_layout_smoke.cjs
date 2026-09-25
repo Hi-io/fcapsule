@@ -30,7 +30,7 @@ const widths = [1920, 1366, 1024, 720, 390, 320];
     };
     for (const width of widths) {
       await page.setViewportSize({width,height:width === 1920 ? 1080 : width < 720 ? 844 : 768});
-      for (const view of ['console','patterns','targets','settings']) {
+      for (const view of ['console','patterns','targets','atlas','settings']) {
         await page.goto(base + '/' + view);
         await page.locator('h1').waitFor();
         await capture(view + '-' + width);
@@ -124,6 +124,34 @@ const widths = [1920, 1366, 1024, 720, 390, 320];
           await page.locator('#configure-targets').click();
           await page.locator('.connection-settings').scrollIntoViewIfNeeded();
           await capture('target-settings-' + width);
+        } else if (view === 'atlas') {
+          assert.ok(await page.getByRole('note').filter({hasText:'Similarity is not causation'}).count(), 'Atlas page must qualify similarity patterns');
+          await page.getByLabel('Search patterns and cases').fill('timeout');
+          await page.getByLabel('Search patterns and cases').press('Enter');
+          await page.waitForFunction(()=>!document.querySelector('.atlas-status')?.textContent.includes('Loading Atlas records'));
+          const hasPattern = await page.locator('.atlas-pattern-link').count();
+          if (hasPattern) {
+            await page.locator('.atlas-pattern-link').first().click();
+            await page.locator('.atlas-detail-head').waitFor();
+            const caseLink = page.locator('.atlas-case-list .atlas-case-link').first();
+            if (await caseLink.count()) {
+              await caseLink.click();
+              await page.getByText('Retained case',{exact:true}).waitFor();
+              await page.getByRole('heading',{name:'Provenance'}).waitFor();
+            }
+            await page.goto(base + '/atlas');
+            await page.locator('h1').waitFor();
+          } else {
+            const caseLink = page.locator('.atlas-case-link').first();
+            if (await caseLink.count()) {
+              await caseLink.click();
+              await page.getByText('Retained case',{exact:true}).waitFor();
+              await page.getByRole('heading',{name:'Provenance'}).waitFor();
+              await page.goto(base + '/atlas');
+              await page.locator('h1').waitFor();
+            }
+          }
+          await capture('atlas-search-' + width);
         } else {
           await page.locator('#evidence-models').scrollIntoViewIfNeeded();
           await capture('evidence-settings-' + width);
