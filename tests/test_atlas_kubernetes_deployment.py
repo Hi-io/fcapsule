@@ -1,3 +1,6 @@
+import os
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -122,6 +125,64 @@ class AtlasKubernetesDeploymentTests(unittest.TestCase):
         apply_script = (ATLAS_SERVICE / "apply.sh").read_text()
         self.assertIn("SOURCE_REF", apply_script)
         self.assertIn("storageClassName: replace-with-storage-class", (ATLAS_SERVICE / "storage.yaml").read_text())
+
+    def test_test_apply_script_uses_pinned_sha_without_editing_manifests(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            kubectl = fake_bin / "kubectl"
+            kubectl.write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$KUBECTL_LOG\"\n")
+            kubectl.chmod(0o755)
+            log_path = root / "kubectl.log"
+            source_ref = "a" * 40
+            env = {
+                **os.environ,
+                "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                "KUBECTL_LOG": str(log_path),
+                "SOURCE_REF": source_ref,
+            }
+            result = subprocess.run(
+                [str(OVERLAY / "apply.sh")],
+                cwd=OVERLAY.parents[2],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            commands = log_path.read_text().splitlines()
+            self.assertTrue(any("--from-literal=FCAPSULE_SOURCE_REF=" + source_ref in line for line in commands))
+            self.assertTrue(any("apply -k " + str(OVERLAY) in line for line in commands))
+            restart = next(i for i, command in enumerate(commands) if "rollout restart" in command)
+            self.assertTrue(any("rollout status deployment/fcapsule-dev-b" in line for line in commands[restart + 1 :]))
+
+    def test_test_apply_script_rejects_unpinned_source_before_kubectl(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            kubectl = fake_bin / "kubectl"
+            kubectl.write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$KUBECTL_LOG\"\n")
+            kubectl.chmod(0o755)
+            log_path = root / "kubectl.log"
+            env = {
+                **os.environ,
+                "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                "KUBECTL_LOG": str(log_path),
+                "SOURCE_REF": "master",
+            }
+            result = subprocess.run(
+                [str(OVERLAY / "apply.sh")],
+                cwd=OVERLAY.parents[2],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("40-character-commit-sha", result.stderr)
+            self.assertFalse(log_path.exists())
 
 
 if __name__ == "__main__":
