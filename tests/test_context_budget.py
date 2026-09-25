@@ -315,6 +315,22 @@ class ContextBudgetTests(unittest.TestCase):
         self.assertEqual(observation["top_signal"]["delivery"], "buffered")
         self.assertEqual(observation["top_signal"]["buffered_bytes"], "141432000")
 
+    def test_log_observation_contrasts_captured_replicas_and_route_ports(self):
+        observation = _log_observation({"matching_patterns": 2, "pod_samples": [
+            {"pod": "edge-a", "sampled_lines": 75}, {"pod": "edge-b", "sampled_lines": 75},
+        ], "patterns": [
+            {"count": 70, "examples": [{"pod": "edge-a", "level": "ERROR",
+                "message": '{"pod":"edge-a","message":"Inventory dependency probe failed","dependency_port":8099,"mode":"route-drift"}'}]},
+            {"count": 10, "examples": [{"pod": "edge-b", "level": "INFO",
+                "message": '{"pod":"edge-b","message":"Inventory dependency probe succeeded","dependency_port":8081}'}]},
+        ]})
+
+        self.assertEqual(observation["top_signal"]["pod"], "edge-a")
+        self.assertEqual(observation["top_signal"]["dependency_port"], "8099")
+        self.assertEqual(observation["other_diagnostic_patterns"][0]["top_signal"]["pod"], "edge-b")
+        self.assertEqual(observation["other_diagnostic_patterns"][0]["top_signal"]["dependency_port"], "8081")
+        self.assertEqual(len(observation["pod_samples"]), 2)
+
     def test_log_check_compaction_preserves_numeric_range_and_secondary_bound_signal(self):
         result = {"matching_patterns": 3, "patterns": [
             {"pattern": "Retained export page", "count": 36,

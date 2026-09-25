@@ -114,6 +114,7 @@ def log_patterns(
         group["count"] += 1
         group["last_seen"] = row.get("@timestamp")
         example = {"timestamp": row.get("@timestamp"), "level": row.get("level"),
+                   "pod": row.get("pod"),
                    "message": anonymize_text(message)[:1000], "diagnostic_fields": fields}
         if len(group["examples"]) < 2:
             group["examples"].append(example)
@@ -1129,9 +1130,22 @@ class InvestigationTools:
                     "pod_memory_limit_bytes": "Configured pod-summed limit, not measured memory peak. Multi-container attribution needs individual limits/termination state."},
                 "limitation": "Historical samples may be missing or miss short peaks; no source TTL was inferred."})
         if name == "search_logs":
-            logs = opensearch.collect_logs(self.namespace, pod, self.window_start, self.window_end, limit=300, terms=terms, focus=self.focus_time)
-            return scrub({"source": "OpenSearch", "pod": pod, "window": [self.window_start.isoformat(), self.window_end.isoformat()],
-                         "latest_alert_at": self.focus_time.isoformat(), "sampling": "Up to one quarter before the latest alert; remaining budget at or after it. Bounded matching samples, not complete event counts.",
+            queried_pods = [pod] if arguments.get("pod") else self.pods[:4]
+            if not queried_pods:
+                raise ValueError("No captured pod is available for scoped log search")
+            limit_per_pod = 300 // len(queried_pods)
+            logs = []
+            pod_samples = []
+            for scoped_pod in queried_pods:
+                sample = opensearch.collect_logs(
+                    self.namespace, scoped_pod, self.window_start, self.window_end,
+                    limit=limit_per_pod, terms=terms, focus=self.focus_time,
+                )
+                logs.extend(sample)
+                pod_samples.append({"pod": scoped_pod, "sampled_lines": len(sample)})
+            return scrub({"source": "OpenSearch", "pods": queried_pods, "pod_samples": pod_samples,
+                         "window": [self.window_start.isoformat(), self.window_end.isoformat()],
+                         "latest_alert_at": self.focus_time.isoformat(), "sampling": "Up to one quarter of each pod's sample before the latest alert; remaining budget at or after it. At most 300 matching lines across captured pods, not complete event counts.",
                          **log_patterns(logs, focus=self.focus_time)})
         if name == "compare_baseline":
             peers = [item for item in kubernetes.list_pods({self.namespace})

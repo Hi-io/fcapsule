@@ -1046,6 +1046,26 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertEqual(self.logs.collect_logs.call_args.kwargs, {"limit": 300, "terms": ["decoder"], "focus": self.kit.focus_time})
         self.assertEqual(self.logs.collect_logs.call_args.args[:2], ("ns", "worker-1"))
 
+    def test_cnfc_log_search_samples_each_captured_pod_without_crossing_scope(self):
+        self.kit.pods = ["edge-a", "edge-b"]
+        self.logs.collect_logs.side_effect = [
+            [{"@timestamp": "2026-09-20T12:02:00Z", "level": "ERROR", "pod": "edge-a",
+              "message": '{"message":"Inventory dependency probe failed","dependency_port":8099}'}],
+            [{"@timestamp": "2026-09-20T12:02:00Z", "level": "INFO", "pod": "edge-b",
+              "message": '{"message":"Inventory dependency probe succeeded","dependency_port":8081}'}],
+        ]
+
+        result = self.kit.execute("search_logs", {})
+
+        self.assertEqual(result["pods"], ["edge-a", "edge-b"])
+        self.assertEqual(result["pod_samples"], [
+            {"pod": "edge-a", "sampled_lines": 1}, {"pod": "edge-b", "sampled_lines": 1},
+        ])
+        self.assertEqual([call.kwargs["limit"] for call in self.logs.collect_logs.call_args_list], [150, 150])
+        self.assertEqual([call.args[1] for call in self.logs.collect_logs.call_args_list], ["edge-a", "edge-b"])
+        self.assertEqual(result["matching_patterns"], 2)
+        self.assertEqual({item["examples"][0]["pod"] for item in result["patterns"]}, {"edge-a", "edge-b"})
+
     def test_live_query_scope_uses_requested_primary_incident_not_latest_sibling(self):
         older = copy.deepcopy(self.entries[0])
         older["incident"].update(incident_id="primary", started_at="2026-09-20T12:02:00Z")

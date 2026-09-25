@@ -328,6 +328,7 @@ def _log_example(item: dict[str, Any]) -> dict[str, Any] | str | None:
             "sqlstate", "mysql_error_code", "status_code", "disposition", "payload_encoding",
             "buffered_bytes", "page_bytes", "delivery", "rows", "kdf", "rounds", "mode",
             "timeout_seconds", "expected_schema", "response_schema", "query_revision", "endpoint",
+            "pod", "service", "dependency_host", "dependency_port",
         )}
         result = {key: _short(anonymize_text(str(value)), 180) for key, value in values.items()
                   if value not in (None, "")}
@@ -338,6 +339,8 @@ def _log_example(item: dict[str, Any]) -> dict[str, Any] | str | None:
         }
     result.update({key: _short(value, 180) for key, value in fields.items()
                    if key not in result and value not in (None, "")})
+    if example.get("pod") and "pod" not in result:
+        result["pod"] = _short(anonymize_text(str(example["pod"])), 180)
     return {
         "timestamp": example.get("timestamp"),
         **{key: value for key, value in result.items() if value not in (None, "")},
@@ -365,8 +368,16 @@ def _log_observation(result: dict[str, Any]) -> dict[str, Any]:
     patterns = [item for item in result.get("patterns", []) if isinstance(item, dict)]
     patterns.sort(key=_pattern_priority, reverse=True)
     primary = patterns[0] if patterns else {}
-    other_patterns = [item for item in patterns[1:]
-                      if item.get("fields") or item.get("diagnostic_ranges")][:2]
+    diagnostic = [item for item in patterns[1:] if item.get("fields") or item.get("diagnostic_ranges")]
+    other_patterns = diagnostic[:2]
+    primary_signal = _log_example(primary) if primary else None
+    primary_pod = primary_signal.get("pod") if isinstance(primary_signal, dict) else None
+    if primary_pod and len(other_patterns) < 2:
+        for item in patterns[1:]:
+            signal = _log_example(item)
+            if item not in other_patterns and isinstance(signal, dict) and signal.get("pod") != primary_pod:
+                other_patterns.append(item)
+                break
 
     def pattern_summary(item: dict[str, Any]) -> dict[str, Any]:
         values = {
@@ -381,6 +392,7 @@ def _log_observation(result: dict[str, Any]) -> dict[str, Any]:
 
     values = {
         "matching_patterns": result.get("matching_patterns"),
+        "pod_samples": result.get("pod_samples"),
         "top_signal": _log_example(primary) if primary else None,
         "fields": diagnostic_fields(None, primary.get("fields")) if primary.get("fields") else None,
         "diagnostic_ranges": _diagnostic_ranges(primary.get("diagnostic_ranges")),
@@ -442,6 +454,8 @@ def _workload_observation(result: dict[str, Any]) -> dict[str, Any]:
         state = next((row for row in item.get("container_states", []) if isinstance(row, dict)), {})
         terminated = state.get("last_state", {}).get("terminated", {}) if isinstance(state.get("last_state"), dict) else {}
         workloads.append({
+            "pod": item.get("name"),
+            "node": item.get("node"),
             "ready": item.get("ready"),
             "limits": resource.get("limits"),
             "last_termination": {
@@ -1073,7 +1087,7 @@ def _minimal_check_observation(check: dict[str, Any]) -> Any:
         return observation
     if check.get("tool") == "search_logs" and isinstance(observation, dict):
         return {key: observation[key] for key in
-                ("top_signal", "fields", "diagnostic_ranges", "other_diagnostic_patterns",
+                ("top_signal", "fields", "diagnostic_ranges", "other_diagnostic_patterns", "pod_samples",
                  "first_seen", "last_seen", "occurrences", "sampled") if key in observation}
     if check.get("tool") == "resource_history" and isinstance(observation, dict):
         if observation.get("minimal_resource_history"):
