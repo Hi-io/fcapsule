@@ -12,6 +12,8 @@ const context = {
   safe:value=>String(value ?? '').replace(/[&<>"']/g, char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char])),
   formatDate:value=>String(value ?? ''),
   icon:name=>`<i data-icon="${name}"></i>`,
+  URLSearchParams,
+  atlasQuery:'', atlasScope:'',
   atlasSelectedPattern:'pattern/one', atlasSelectedCase:'case/one',
 };
 
@@ -38,11 +40,14 @@ test('case detail separates observations and hypotheses and shows source provena
   const html = render('atlasCaseDetail', `atlasCaseDetail({case:{
     id:'case/one',instance_id:'edge-north',episode_id:'episode-7',observed_at:'2026-09-12T03:00:00Z',
     scope:{cluster:'north',namespace:'checkout',service:'api'},summary:'Repeated 503 response',
-    observations:[{kind:'http',key:'status',value:503,source:'prometheus',observed_at:'2026-09-12T02:55:00Z',reference:'E-12'}],
+    observations:[{kind:'fm',key:'alert_family',value:'CheckoutErrors'},
+      {kind:'http',key:'status',value:503,source:'prometheus',observed_at:'2026-09-12T02:55:00Z',reference:'E-12'}],
     hypotheses:[{statement:'<script>dependency failure</script>',confidence:0.4,supporting_refs:['E-12']}]
   }})`);
   assert.match(html, /Retained observations \(facts\)/);
   assert.match(html, /status: 503/);
+  assert.match(html, /<h2>CheckoutErrors · api<\/h2>/);
+  assert.match(html, /atlas-case-summary/);
   assert.match(html, /Source: prometheus/);
   assert.match(html, /Observed: 2026-09-12T02:55:00Z/);
   assert.match(html, /Reference: E-12/);
@@ -67,8 +72,16 @@ test('Atlas retrieval trail links case IDs without treating them as FCAPSule evi
   }]}});
   assert.match(html, /href="\/atlas\?case=prior-case"/);
   assert.match(html, /not FCAPSule evidence citations/);
-  assert.match(html, /fingerprint match/);
+  assert.match(html, /Fingerprint match/);
   assert.equal(renderTrail({context:{atlas_cases:[]}}), '');
+});
+
+test('Atlas links preserve search context without exposing a misleading similarity percentage', () => {
+  const html = render('atlasCaseLink', `atlasCaseLink({id:'case/one',score:1,relation:'lexical_similarity',instance_id:'west'})`,
+    {atlasQuery:'queue timeout',atlasScope:'cluster-a'});
+  assert.match(html, /case%2Fone&amp;q=queue\+timeout&amp;scope=cluster-a/);
+  assert.match(html, /Text match/);
+  assert.doesNotMatch(html, /100% similarity/);
 });
 
 test('Atlas retrieval shows no-match, pending and unavailable states without inventing empty success', () => {

@@ -1572,14 +1572,21 @@ function atlasFactSection(title, values, emptyText) {
   }).filter(Boolean);
   return `<section class="atlas-record-section"><h3>${safe(title)}</h3>${items.length ? `<ul>${items.join('')}</ul>` : `<p class="queue-note">${safe(emptyText)}</p>`}</section>`;
 }
+function atlasUrl(kind = '', id = '') {
+  const params = new URLSearchParams();
+  if (kind && id) params.set(kind, id);
+  if (atlasQuery) params.set('q', atlasQuery);
+  if (atlasScope) params.set('scope', atlasScope);
+  return '/atlas' + (params.size ? '?' + params.toString() : '');
+}
 function atlasCaseLink(item, label = '') {
   const id = atlasId(item);
   if (!id) return '';
   const title = item.title || item.summary || item.case_id || id;
   const instance = item.instance_id || item.instance || '';
   const date = item.observed_at || item.created_at || item.occurred_at || '';
-  const score = typeof item.score === 'number' ? ` · ${Math.round(item.score * 100)}% similarity` : '';
-  return `<a class="atlas-case-link" href="/atlas?case=${encodeURIComponent(id)}"><span><strong>${safe(label || title)}</strong><small>${safe([item.relation && item.relation.replaceAll('_',' '), instance, date && formatDate(date)].filter(Boolean).join(' · ') + score || id)}</small></span>${icon('chevron-right')}</a>`;
+  const relation = item.relation === 'lexical_similarity' ? 'Text match' : item.relation === 'fingerprint_match' ? 'Fingerprint match' : item.relation === 'recent_in_scope' ? 'Recent in scope' : item.relation;
+  return `<a class="atlas-case-link" href="${safe(atlasUrl('case', id))}"><span><strong>${safe(label || title)}</strong><small>${safe([relation, instance, date && formatDate(date)].filter(Boolean).join(' · ') || id)}</small></span>${icon('chevron-right')}</a>`;
 }
 function atlasPatternLink(item) {
   const id = atlasId(item);
@@ -1589,7 +1596,7 @@ function atlasPatternLink(item) {
   const cases = item.case_count ?? item.total_cases ?? item.occurrence_count ?? item.match_count;
   const instances = item.instance_count ?? item.instances_count;
   const meta = [cases == null ? '' : `${safe(cases)} cases`, instances == null ? '' : `${safe(instances)} instances`].filter(Boolean).join(' · ');
-  return `<a class="atlas-pattern-link" href="/atlas?pattern=${encodeURIComponent(id)}"><span><strong>${safe(title)}</strong><small>${safe(meta || id)}</small></span>${icon('chevron-right')}</a>`;
+  return `<a class="atlas-pattern-link" href="${safe(atlasUrl('pattern', id))}"><span><strong>${safe(title)}</strong><small>${safe(meta || id)}</small></span>${icon('chevron-right')}</a>`;
 }
 function atlasProvenance(record) {
   const scope = record.scope && typeof record.scope === 'object' ? Object.entries(record.scope).filter(([,value]) => value != null && String(value) !== '').map(([key,value]) => `${key}: ${value}`).join(' · ') : record.scope;
@@ -1626,15 +1633,17 @@ function atlasPatternDetail(data) {
   const instanceCount = pattern.instance_count ?? pattern.instances_count;
   const counts = [caseCount == null ? '' : `Seen in ${safe(caseCount)} cases`, instanceCount == null ? '' : `across ${safe(instanceCount)} instances`].filter(Boolean).join(' ');
   const time = [pattern.first_seen_at || pattern.first_seen ? `First seen ${formatDate(pattern.first_seen_at || pattern.first_seen)}` : '', pattern.last_seen_at || pattern.last_seen ? `Last seen ${formatDate(pattern.last_seen_at || pattern.last_seen)}` : ''].filter(Boolean).join(' · ');
-  return `<div class="atlas-detail-head"><a href="/atlas">${icon('chevron-right')}Back to Atlas</a><div class="eyebrow">Similarity pattern</div><h2>${safe(title)}</h2><p>${safe(counts || `${cases.length} linked case${cases.length === 1 ? '' : 's'} returned`)}${time ? ' · ' + safe(time) : ''}</p><code>${safe(id)}</code></div>${atlasRecord(pattern)}<section class="atlas-record-section atlas-case-list"><h3>Linked cases <span class="queue-note">${cases.length} returned</span></h3>${cases.length ? cases.map(item => atlasCaseLink(item)).join('') : '<p class="queue-note">No cases were returned with this pattern.</p>'}</section>`;
+  return `<div class="atlas-detail-head"><a href="${safe(atlasUrl())}">${icon('chevron-right')}Back to Atlas</a><div class="eyebrow">Similarity pattern</div><h2>${safe(title)}</h2><p>${safe(counts || `${cases.length} linked case${cases.length === 1 ? '' : 's'} returned`)}${time ? ' · ' + safe(time) : ''}</p><code>${safe(id)}</code></div>${atlasRecord(pattern)}<section class="atlas-record-section atlas-case-list"><h3>Linked cases <span class="queue-note">${cases.length} returned</span></h3>${cases.length ? cases.map(item => atlasCaseLink(item)).join('') : '<p class="queue-note">No cases were returned with this pattern.</p>'}</section>`;
 }
 function atlasCaseDetail(data) {
   const record = data?.case || {};
   const id = atlasId(record) || atlasSelectedCase;
-  const title = record.title || record.summary || record.case_id || id;
   const relations = atlasRecords(record.related_cases || record.relations || record.related_case_ids);
-  const scope = record.scope && typeof record.scope === 'object' ? Object.values(record.scope).filter(value => value != null && String(value) !== '').join(' / ') : record.scope;
-  return `<div class="atlas-detail-head"><a href="/atlas">${icon('chevron-right')}Back to Atlas</a><div class="eyebrow">Retained case</div><h2>${safe(title)}</h2><p>${safe([record.instance_id || record.instance, record.observed_at && formatDate(record.observed_at), scope].filter(Boolean).join(' · ') || 'Case details')}</p><code>${safe(id)}</code></div>${atlasRecord(record)}${relations.length ? `<section class="atlas-record-section atlas-case-list"><h3>Related cases</h3>${relations.map(item => typeof item === 'object' ? atlasCaseLink(item) : atlasCaseLink({case_id:item})).join('')}</section>` : ''}`;
+  const scope = record.scope && typeof record.scope === 'object' ? record.scope : {};
+  const alert = atlasRecords(record.observations).find(item => item?.key === 'alert_family')?.value;
+  const heading = [alert, scope.service || scope.workload].filter(Boolean).join(' · ') || record.title || 'Retained case';
+  const location = [scope.cluster, scope.namespace].filter(Boolean).join(' / ');
+  return `<div class="atlas-detail-head"><a href="${safe(atlasUrl())}">${icon('chevron-right')}Back to Atlas</a><div class="eyebrow">Retained case</div><h2>${safe(heading)}</h2>${record.summary ? `<p class="atlas-case-summary">${safe(record.summary)}</p>` : ''}<p>${safe([record.instance_id || record.instance, record.observed_at && formatDate(record.observed_at), location].filter(Boolean).join(' · ') || 'Case details')}</p><code>${safe(id)}</code></div>${atlasRecord(record)}${relations.length ? `<section class="atlas-record-section atlas-case-list"><h3>Related cases</h3>${relations.map(item => typeof item === 'object' ? atlasCaseLink(item) : atlasCaseLink({case_id:item})).join('')}</section>` : ''}`;
 }
 function atlasFailureText(message, status) {
   if (status === 'not_configured') return 'Atlas is not configured. Add its service URL and enable reads in Settings.';
@@ -1654,14 +1663,15 @@ function relatedAtlasCases(run) {
 }
 function atlasRender() {
   const focusedId = document.activeElement?.id;
+  const hasDetail = Boolean(atlasSelectedPattern || atlasSelectedCase);
   const patterns = atlasPatterns.map(item => atlasPatternLink(item)).join('');
   const cases = atlasCases.map(item => atlasCaseLink(item)).join('');
   const query = safe(atlasQuery);
   const detail = atlasSelectedPattern ? (atlasDetail ? atlasPatternDetail(atlasDetail) : atlasDetailStatus === 'pending' ? '<div class="empty">Loading pattern detail...</div>' : `<p class="target-error" role="alert">${safe(atlasMessage)}</p>`) : atlasSelectedCase ? (atlasDetail ? atlasCaseDetail(atlasDetail) : atlasDetailStatus === 'pending' ? '<div class="empty">Loading case detail...</div>' : `<p class="target-error" role="alert">${safe(atlasMessage)}</p>`) : '';
   const connection = atlasResultStatus === 'ready' ? 'Connected' : atlasResultStatus === 'pending' ? 'Connecting' : 'Unavailable';
-  app.innerHTML = `<div class="page-head"><div><div class="eyebrow">Cross-instance memory</div><h1>Atlas</h1><p>Browse repeated patterns and retained cases from connected FCAPSule instances.</p></div><div class="actions"><span class="status ${atlasResultStatus === 'ready' ? 'healthy' : atlasResultStatus === 'pending' ? 'running' : 'error'}" role="status">${connection}</span><button type="button" class="secondary" id="atlas-refresh" title="Refresh Atlas records">${icon('refresh-cw')}Refresh</button></div></div>
-    <aside class="atlas-caveat" role="note"><strong>Similarity is not causation.</strong> Patterns help retrieve comparable cases; retained observations are shown separately from unverified hypotheses. Atlas records do not verify root cause.</aside>
-    <form class="atlas-search" id="atlas-search-form"><div class="field"><label for="atlas-query">Search patterns and cases</label><input id="atlas-query" type="search" value="${query}" placeholder="Service timeout, rollout, error text" autocomplete="off"></div><div class="field"><label for="atlas-scope">Cluster <span class="queue-note">optional</span></label><input id="atlas-scope" value="${safe(atlasScope)}" placeholder="Cluster name" autocomplete="off"></div><button type="submit">Search Atlas</button></form>
+  app.innerHTML = `<div class="page-head"><div><div class="eyebrow">Cross-instance memory</div><h1>Atlas</h1>${hasDetail ? '' : '<p>Browse repeated patterns and retained cases from connected FCAPSule instances.</p>'}</div><div class="actions"><span class="status ${atlasResultStatus === 'ready' ? 'healthy' : atlasResultStatus === 'pending' ? 'running' : 'error'}" role="status">${connection}</span><button type="button" class="secondary" id="atlas-refresh" title="Refresh Atlas records">${icon('refresh-cw')}Refresh</button></div></div>
+    ${hasDetail ? '' : '<aside class="atlas-caveat" role="note"><strong>Similarity is not causation.</strong> Patterns help retrieve comparable cases; retained observations are shown separately from unverified hypotheses. Atlas records do not verify root cause.</aside>'}
+    ${hasDetail ? '' : `<form class="atlas-search" id="atlas-search-form"><div class="field"><label for="atlas-query">Search patterns and cases</label><input id="atlas-query" type="search" value="${query}" placeholder="Service timeout, rollout, error text" autocomplete="off"></div><div class="field"><label for="atlas-scope">Cluster <span class="queue-note">optional</span></label><input id="atlas-scope" value="${safe(atlasScope)}" placeholder="Cluster name" autocomplete="off"></div><button type="submit">Search Atlas</button></form>`}
     <div class="atlas-status" role="status" aria-live="polite">${atlasMessage ? safe(atlasMessage) : atlasResultStatus === 'pending' ? 'Loading Atlas records...' : ''}</div>
     ${detail ? `<section class="atlas-detail sheet">${detail}</section>` : `<div class="atlas-results"><section class="sheet"><div class="sheet-head"><h2>Similarity patterns</h2><span class="queue-note">${atlasPatterns.length} returned</span></div><div class="atlas-result-list">${atlasPatternError ? `<p class="target-error" role="alert">${safe(atlasPatternError)}</p>` : atlasResultStatus === 'pending' ? '<div class="empty">Loading patterns...</div>' : patterns || `<div class="empty">${atlasQuery ? 'No matching patterns were returned. Search cases below can still find first-occurrence records.' : 'No Atlas patterns were returned. Records may not be indexed yet.'}</div>`}</div></section><section class="sheet"><div class="sheet-head"><h2>${atlasQuery ? 'Matching cases' : 'Cases'}</h2><span class="queue-note">${atlasCases.length} returned</span></div><div class="atlas-result-list">${atlasCaseError ? `<p class="target-error" role="alert">${safe(atlasCaseError)}</p>` : atlasQuery && atlasResultStatus === 'pending' ? '<div class="empty">Searching cases...</div>' : atlasQuery ? cases || '<div class="empty">No matching cases were returned for this query and scope.</div>' : '<div class="empty">Search to find individual cases, including records without an established repeat pattern.</div>'}</div></section></div>`}`;
   if (focusedId) document.getElementById(focusedId)?.focus({preventScroll:true});

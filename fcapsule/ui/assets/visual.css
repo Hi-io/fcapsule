@@ -743,6 +743,7 @@ tbody tr:hover { background:#fafbfe; }
 .atlas-detail-head > a { display:inline-flex; align-items:center; gap:5px; color:var(--blue); text-decoration:none; margin-bottom:14px; }
 .atlas-detail-head > a .ui-icon { transform:rotate(180deg); }
 .atlas-detail-head h2 { margin:2px 0 6px; font-size:20px; overflow-wrap:anywhere; }
+.atlas-detail-head .atlas-case-summary { max-width:860px; margin:8px 0 12px; color:var(--ink); font-size:13px; line-height:1.5; }
 .atlas-detail-head p { margin:0 0 7px; color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
 .atlas-detail-head code { display:block; color:var(--muted); font-size:11px; overflow-wrap:anywhere; }
 .atlas-record { padding:17px 0; }
