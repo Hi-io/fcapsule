@@ -762,6 +762,7 @@ tbody tr:hover { background:#fafbfe; }
 .atlas-related-pattern .atlas-pattern-link { padding:8px 0; }
 .atlas-related-pattern .queue-note { margin:2px 0 0; }
 .atlas-case-list { padding-bottom:0; }
+.atlas-pattern-note { margin:15px 0 3px; padding:10px 12px; border-left:3px solid var(--amber); background:var(--amber-bg); color:#634c30; font-size:12px; line-height:1.5; }
 .atlas-retry-notice { display:flex; justify-content:space-between; align-items:center; gap:12px; margin:12px 0 18px; padding:12px; border-left:3px solid var(--red); background:var(--red-bg); }
 .atlas-retry-notice p { margin:3px 0 0; color:#765252; font-size:12px; }
 .atlas-retry-notice button { display:inline-flex; align-items:center; gap:7px; flex:0 0 auto; }

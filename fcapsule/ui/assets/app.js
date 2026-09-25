@@ -1582,11 +1582,13 @@ function atlasUrl(kind = '', id = '') {
 function atlasCaseLink(item, label = '') {
   const id = atlasId(item);
   if (!id) return '';
-  const title = item.title || item.summary || item.case_id || id;
+  const alert = atlasRecords(item.observations).find(value => value?.key === 'alert_family')?.value;
+  const service = item.scope?.service || item.scope?.workload;
+  const title = label || item.title || [alert, service].filter(Boolean).join(' · ') || item.summary || item.case_id || id;
   const instance = item.instance_id || item.instance || '';
   const date = item.observed_at || item.created_at || item.occurred_at || '';
   const relation = item.relation === 'lexical_similarity' ? 'Text match' : item.relation === 'fingerprint_match' ? 'Fingerprint match' : item.relation === 'recent_in_scope' ? 'Recent in scope' : item.relation;
-  return `<a class="atlas-case-link" href="${safe(atlasUrl('case', id))}"><span><strong>${safe(label || title)}</strong><small>${safe([relation, instance, date && formatDate(date)].filter(Boolean).join(' · ') || id)}</small></span>${icon('chevron-right')}</a>`;
+  return `<a class="atlas-case-link" href="${safe(atlasUrl('case', id))}"${item.summary && title !== item.summary ? ` title="${safe(item.summary)}"` : ''}><span><strong>${safe(title)}</strong><small>${safe([relation, instance, date && formatDate(date)].filter(Boolean).join(' · ') || id)}</small></span>${icon('chevron-right')}</a>`;
 }
 function atlasPatternLink(item) {
   const id = atlasId(item);
@@ -1633,7 +1635,7 @@ function atlasPatternDetail(data) {
   const instanceCount = pattern.instance_count ?? pattern.instances_count;
   const counts = [caseCount == null ? '' : `Seen in ${safe(caseCount)} cases`, instanceCount == null ? '' : `across ${safe(instanceCount)} instances`].filter(Boolean).join(' ');
   const time = [pattern.first_seen_at || pattern.first_seen ? `First seen ${formatDate(pattern.first_seen_at || pattern.first_seen)}` : '', pattern.last_seen_at || pattern.last_seen ? `Last seen ${formatDate(pattern.last_seen_at || pattern.last_seen)}` : ''].filter(Boolean).join(' · ');
-  return `<div class="atlas-detail-head"><a href="${safe(atlasUrl())}">${icon('chevron-right')}Back to Atlas</a><div class="eyebrow">Similarity pattern</div><h2>${safe(title)}</h2><p>${safe(counts || `${cases.length} linked case${cases.length === 1 ? '' : 's'} returned`)}${time ? ' · ' + safe(time) : ''}</p><code>${safe(id)}</code></div>${atlasRecord(pattern)}<section class="atlas-record-section atlas-case-list"><h3>Linked cases <span class="queue-note">${cases.length} returned</span></h3>${cases.length ? cases.map(item => atlasCaseLink(item)).join('') : '<p class="queue-note">No cases were returned with this pattern.</p>'}</section>`;
+  return `<div class="atlas-detail-head"><a href="${safe(atlasUrl())}">${icon('chevron-right')}Back to Atlas</a><div class="eyebrow">Similarity pattern</div><h2>${safe(title)}</h2><p>${safe(counts || `${cases.length} linked case${cases.length === 1 ? '' : 's'} returned`)}${time ? ' · ' + safe(time) : ''}</p><code>${safe(id)}</code></div><p class="atlas-pattern-note">${safe(pattern.interpretation || 'Repeated observation across cases; this does not establish a shared cause.')}</p><section class="atlas-record-section atlas-case-list"><h3>Linked cases <span class="queue-note">${cases.length} returned</span></h3>${cases.length ? cases.map(item => atlasCaseLink(item)).join('') : '<p class="queue-note">No cases were returned with this pattern.</p>'}</section>`;
 }
 function atlasCaseDetail(data) {
   const record = data?.case || {};

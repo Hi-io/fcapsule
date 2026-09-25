@@ -30,10 +30,12 @@ test('pattern detail presents recurrence as similarity, with linked cases and ty
   assert.match(html, /Similarity pattern/);
   assert.match(html, /Seen in 6 cases across 3 instances/);
   assert.match(html, /deployment: release-42/);
-  assert.match(html, /Pattern interpretation \(not causal evidence\)/);
+  assert.match(html, /Observed co-occurrence only; this is not evidence of a shared cause/);
+  assert.doesNotMatch(html, /No structured facts were returned/);
+  assert.doesNotMatch(html, /No provenance details were returned/);
   assert.match(html, /<code>pattern\/one<\/code>/);
   assert.match(html, /case-one/);
-  assert.match(html, /does not establish|not causal|not causal evidence/);
+  assert.match(html, /not evidence of a shared cause/);
 });
 
 test('case detail separates observations and hypotheses and shows source provenance safely', () => {
