@@ -1,6 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: fcapsule-atlas-test
-  labels:
-    app.kubernetes.io/part-of: fcapsule-atlas-test
