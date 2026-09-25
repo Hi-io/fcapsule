@@ -1,9 +1,10 @@
 # FCAPSule Atlas
 
-**Status: integration in progress.** This guide describes the contract being
-implemented between a FCAPSule instance and a separate shared knowledge service. It
-is not a claim that a production Atlas deployment or cross-instance evaluation is
-available. The current API uses PostgreSQL, bearer-token authentication for
+**Status: integrated opt-in development feature; not production-ready.** This guide
+describes the contract between FCAPSule and its separate shared knowledge service.
+A synthetic two-instance smoke test has verified publication, retrieval and browsing;
+it is not a diagnostic-accuracy or production evaluation. The API uses PostgreSQL,
+bearer-token authentication for
 `/v1/*`, `POST /v1/cases` for versioned publication, and `POST /v1/search` for
 candidate retrieval. Production retention, deployment and operational guarantees
 still require verification. For PostgreSQL setup, service startup and the HTTP
@@ -278,10 +279,28 @@ cases. Do not use production incidents or live customer identifiers for the demo
    the demo corpus is no longer reachable. Do not treat this as a production
    deletion or backup-erasure guarantee.
 
-Exact commands depend on the final service deployment/API contract and should be
-added only after they have been tested against two live instances. A mocked API or
-unit test does not demonstrate cross-instance operation, access control, deletion,
-or outage isolation.
+The isolated stack and tested apply commands are in
+[Atlas Kubernetes deployment](atlas_kubernetes_deployment.md). A mocked API or
+unit test alone does not demonstrate cross-instance operation, access control,
+deletion, or outage isolation.
+
+### Verified Synthetic Smoke
+
+On 2026-09-25 UTC, Atlas, PostgreSQL and two independent FCAPSule instances ran
+in the isolated `fcapsule-atlas-test` namespace on `worker-1`. Instance A published
+a synthetic case through its local projection and outbox; instance B retrieved it
+with four normalized FM/PM observations, source references, original observation
+time and a separately marked unverified hypothesis. Deleting only the synthetic
+local episode on A did not remove its Atlas case; B retrieved that case again.
+After B published a second synthetic case, Atlas listed four repeated typed
+observation patterns, each spanning two cases and two instances. Chrome checks
+covered desktop/mobile layout, keyboard focus, case search and an unavailable
+service state. B's investigator retrieved A's earlier case under an alert-time
+cutoff, while a same-alert/different-diagnostic negative control returned no
+relevant case. These checks prove the connected workflow, not production safety,
+retrieval precision on varied incidents, source-system retention savings or
+causal learning. Screenshots and disposable test records remain under ignored
+`local_reports/` rather than in the repository.
 
 ## Evaluation Plan
 
@@ -308,10 +327,10 @@ of raw-source retention. Those claims require separate controlled evaluations.
 
 ## Current FCAPSule Versus Atlas
 
-The current codebase has per-instance capsule retention and conservative historical
-retrieval. It does not imply shared Atlas storage or cross-instance retrieval.
-Atlas's producer, service, UI and deployment are separate integration work; this
-document describes their intended boundary and marks unsettled contract details as
-provisional. Do not describe Atlas as generally available or enabled by default
-until the integrated implementation, privacy/security review, operational guide,
-two-instance demonstration and evaluation are complete.
+FCAPSule still owns capture, local capsules and conservative local-history review.
+Atlas now adds an optional, separately deployed shared case store, publication
+outbox, bounded investigator retrieval and browse UI. Reads and publication are
+off by default outside an explicit test configuration. The synthetic test above
+does not establish diagnostic uplift or justify reducing raw-source retention.
+Production use requires an approved privacy/security model, case retention and
+deletion, backup/restore, access isolation and a representative evaluation.
