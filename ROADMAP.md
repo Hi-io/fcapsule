@@ -1,6 +1,6 @@
 # FCAPSule Roadmap
 
-FCAPSule provides a single-replica Kubernetes control plane, live Prometheus/OpenSearch/Kubernetes adapters, domain-balanced evidence capsules, model profiles, and five operational web views, including the optional Atlas integration. The remaining roadmap focuses on hardening, additional integrations, scale, and broader evaluation.
+FCAPSule provides a single-replica Kubernetes control plane, live Prometheus/OpenSearch/Kubernetes adapters, domain-balanced evidence capsules, model profiles, and five operational web views, including an optional Estima client. The remaining roadmap focuses on hardening, additional integrations, scale, and broader evaluation.
 
 ## 1. Source Hardening and Expansion
 
@@ -78,22 +78,25 @@ described in [AI techniques](docs/ai_investigation_techniques.md). Remaining wor
 - multi-cluster registry;
 - high-availability metadata and artifact storage.
 
-## 8. Shared Incident Knowledge: FCAPSule Atlas
+## 8. Shared Incident Knowledge: Estima
 
-An opt-in integration with an independent shared-case service is in development;
-it is disabled by default and requires a separate Atlas deployment. The producer
-uses a durable local publication outbox so Atlas work is separate from live source
-monitoring and can be retried independently. Atlas case publication is designed
-around versioned, idempotent revisions; bounded cross-instance retrieval must keep
-source provenance and unverified hypotheses distinct from observations.
+Estima is an independent shared-memory service with its own repository, API and
+PostgreSQL database. FCAPSule's client is optional and disabled by default. Each
+FCAPSule instance investigates locally, runs the configured LLM calls, prepares a
+minimized case, and may publish it through a local retryable outbox. Estima stores
+and retrieves versioned cases; it does not run models, need provider keys or
+generate token spend. Any interpretation of retrieved cases happens in the
+requesting FCAPSule instance.
 
-Before recommending production use, verify the service API and authentication
-contract in the integrated deployment, complete case minimization/privacy review,
-establish tenant boundaries and retention/deletion policy, and validate
-independent service deployment, failure isolation,
-two-instance operation, and evaluation of relevance, false matches, latency,
-outages and source expiry. A shared candidate is not a common-cause conclusion or
-causal learning. See the [FCAPSule Atlas guide](docs/ATLAS.md) for current status,
-proposed operator workflow and evaluation criteria.
+The API carries provenance and keeps observations distinct from unverified
+hypotheses. Candidate similarity and repeated observations are retrieval cues,
+not a learned causal model, a verified root cause or an adjudicated outcome.
+
+Before recommending production use, verify the independent service's API and
+authentication contract, complete case minimization/privacy review, establish
+access boundaries and retention/deletion policy, and evaluate relevance, false
+matches, latency, outages and source expiry. Local investigation must remain
+useful when Estima is unavailable. See the [Estima integration guide](docs/estima.md)
+for the client contract, current limits and evaluation criteria.
 
 Autonomous remediation remains outside the core roadmap. FCAPSule may feed downstream AIOps systems, but any action must use a separate approval and safety boundary.

@@ -43,6 +43,11 @@ Prometheus firing alert, optional Grafana webhook, or explicit incident window
        bounded read-only checks -> observations
                        |
        cited assessment + progress + token usage
+                       |
+              optional Estima client
+                / publish  \ retrieve
+               /            \
+              +--------------+---- network ----> Estima API --> PostgreSQL
 ```
 
 ## Control Plane
@@ -62,6 +67,15 @@ Observability systems are the system of record. FCAPSule owns derived evidence a
 - Trace availability and derived findings may be retained; raw spans may not.
 
 Current-format reports are read from retained JSON without loading source files. Legacy reports can be rebuilt from the capsule, but missing raw PM samples cannot be recovered. Background AI investigation is optional and runs once per episode input fingerprint. It preserves workload state early, then accepts bounded model-selected checks and a cited assessment. Observations and token counts are saved incrementally; evidence remains available during queued/running/incomplete states. Deleting a member invalidates shared derived analysis. Citation checking verifies IDs, not truth. Live trace retrieval is future work. See [AI techniques](ai_investigation_techniques.md).
+
+Estima is an independent, optional service in its own repository with a versioned
+API and PostgreSQL database. FCAPSule prepares a bounded case projection and makes
+any configured model calls locally; Estima stores and returns cases without
+running an LLM or receiving provider keys. If a provider interprets retrieved
+context, that model call and token usage belong to the requesting FCAPSule
+instance. Remote candidates remain historical context: observations and
+hypotheses stay distinct, and similarity is not a cause. An Estima timeout,
+unavailable endpoint or empty search does not block local capture or history.
 
 ## Deployment Shape
 
@@ -83,4 +97,11 @@ FCAPSule pod
        `-- future trace backend (query on demand)
 ```
 
-The ClusterRole can get/list/watch pods, ConfigMaps, namespaces, and Services. It cannot read Secrets. The default Service is a NodePort for local-cluster development. Distributed workers, PostgreSQL, object storage, ingress authentication, multi-cluster registration, and queue-backed scheduling are future scaling work; they do not change the normalized case or capsule contracts.
+The Estima service is outside that pod and is deployed from its own repository:
+
+```text
+FCAPSule instance(s) -- optional API connection --> Estima API --> PostgreSQL
+                                                      no LLM runtime or keys
+```
+
+The ClusterRole can get/list/watch pods, ConfigMaps, namespaces, and Services. It cannot read Secrets. The default Service is a NodePort for local-cluster development. Distributed workers, PostgreSQL for FCAPSule metadata, object storage, ingress authentication, multi-cluster registration, and queue-backed scheduling are future scaling work; they do not change the normalized case or capsule contracts. Estima's PostgreSQL database is part of the independent Estima deployment, not the FCAPSule pod or repository. See [Estima Kubernetes integration](estima_kubernetes_integration.md).

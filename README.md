@@ -1,6 +1,6 @@
 # FCAPSule
 
-**An AI investigator for the observability stack you already have, with a memory of past incidents.**
+**FCAPSule investigates; Estima remembers.** An AI investigator for the observability stack you already have, with an optional memory of past incidents.
 
 An alert tells a monitoring team that something is wrong. The explanation is usually scattered across logs, metrics, workload configuration and earlier incidents, often in systems with different retention windows. FCAPSule joins those observations around the incident, lets a bounded AI investigator ask follow-up questions, and preserves the evidence and reasoning in an inspectable capsule.
 
@@ -26,7 +26,7 @@ For the full product narrative, see [Observability With Memory](docs/product_val
 2. A firing alert opens a bounded capture. FCAPSule preserves selected fault, performance, log and configuration evidence and builds a report even if the model provider is unavailable.
 3. **Operations** presents the episode, affected resource, observed impact and AI investigation. Follow citations into the captured evidence or the investigator's checks; add evidence or export the report when needed.
 4. **Patterns** shows recurring issues and links back to separate episodes. An eligible earlier capsule can become bounded context for a new investigation.
-5. Optionally connect **Atlas** in Settings. Its separate service stores minimized, versioned cases from participating instances; the Atlas view lets engineers inspect repeated observations and prior case provenance without treating similarity as a verified cause.
+5. Optionally connect **Estima** in Settings. Its independent API and PostgreSQL store minimized, versioned cases from participating instances; the Estima view lets engineers inspect observations, hypotheses and provenance without treating similarity as a verified cause.
 6. **Settings** also controls FCAPSule incident retention and model configuration. Offline model comparisons remain an evaluation workflow, not an operator dashboard.
 
 ![Investigation activity with diagnostic checks and retained-history comparison](docs/assets/product/ai-investigation-lab.png)
@@ -36,11 +36,13 @@ The model's assessment is a supported hypothesis, not a certified root cause or 
 ## Evidence and Memory
 
 Each FCAPSule instance retains its own capsules and uses conservative same-instance
-history. A separate, opt-in **FCAPSule Atlas** service can share compact cases
-across participating instances; it is disabled by default and does not replace
-local history or turn a similar case into a shared-cause finding. See the
-[FCAPSule Atlas guide](docs/ATLAS.md) for its privacy boundary, current API,
-operator limits and evaluation plan.
+history. An independent, opt-in **Estima** service can share compact cases across
+participating instances; it is disabled by default and does not replace local
+history or turn a similar case into a shared-cause finding. FCAPSule runs the
+models and interprets any retrieved context using its own provider configuration.
+Estima stores and returns cases; it does not run LLMs, receive provider keys or
+incur token charges. See the [Estima integration guide](docs/estima.md) for its
+privacy boundary, API, operator limits and evaluation plan.
 
 | Source | What FCAPSule uses today |
 | --- | --- |
@@ -87,12 +89,14 @@ See [provider operations](docs/llm_provider_operations.md), [evaluation plan](EV
 
 FCAPSule is working single-replica software for a trusted environment, not an Internet-facing managed service. The reference HTTP server has no built-in authentication, authorization or TLS; SQLite and in-process workers are not distributed. Masking is heuristic, not a guarantee of anonymization. Historical matching is deliberately conservative and cannot equate every failure across changed workloads. Investigation quality still requires review on real incidents.
 
-Cross-instance case sharing through Atlas is a distinct, optional integration.
-It is disabled by default and requires a separately deployed service. The current
-service uses a single shared bearer token without per-instance authorization, and
+Cross-instance case sharing through Estima is a distinct, optional integration.
+It is disabled by default and requires the independently deployed Estima service.
+The current API uses a shared bearer token without per-instance authorization, and
 has no remote delete endpoint or automated case-retention policy. Do not treat it
 as a production multi-tenant service. Local incident capture and investigation
-must remain useful when Atlas is unavailable.
+must remain useful when Estima is unavailable. Estima has its own API and
+PostgreSQL lifecycle; it is not an FCAPSule model runtime or source of provider
+credentials.
 
 The [roadmap](ROADMAP.md) covers production hardening, source scaling, durable workers and broader evaluation. No measured storage-cost reduction, diagnosis accuracy or industry-first claim is implied by the product narrative.
 

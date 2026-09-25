@@ -111,6 +111,11 @@ Archiving is separate from retention: it hides an episode from the active queue 
 The optional Evidence models section configures a visual specialist and audio transcription specialist for **operator-supplied** files. It remains disabled until the core investigator and the matching specialist model have passed their bounded validation. A ready file can create a new assessment revision; it never overwrites the earlier assessment. See [optional multimodal evidence](multimodal_evidence.md) for data handling and evaluation scope.
 
 For Kubernetes installation and source prerequisites, use `docs/kubernetes_deployment.md`.
+The optional Estima client is configured in Settings or through
+`FCAPSULE_ESTIMA_*` environment defaults. Its reads and publication are separate
+opt-ins; local capture and same-instance history do not require Estima. See
+[Estima integration](estima.md) for service credentials, provider billing
+boundaries, lifecycle and retrieval limits.
 
 ### Automatic AI Assessment
 
