@@ -3,7 +3,7 @@
 ## Runtime Flow
 
 ```text
-Prometheus firing alert or explicit incident window
+Prometheus firing alert, optional Grafana webhook, or explicit incident window
                   |
                   v
    Kubernetes discovery + application registry
@@ -47,7 +47,9 @@ Prometheus firing alert or explicit incident window
 
 ## Control Plane
 
-`ControlPlane` coordinates source polling and background capsule jobs and exposes an immutable snapshot to the HTTP API. `LiveSourceCoordinator` discovers Kubernetes workloads, correlates pod identity across Prometheus and OpenSearch, polls firing alerts, and captures one bounded normalized case per new alert. `FCAPSuleStore` persists application, incident, capsule metadata, source settings, non-secret model preferences, resource identity and deterministic recurrence keys in SQLite. External sources may also submit a normalized case through the ingestion boundary. An incident report is generated from deterministic evidence before optional AI reasoning. Recurrence preserves separate episodes and can expose up to three earlier retained candidates to the investigator; it never merges incident records or establishes a shared cause by itself.
+`ControlPlane` coordinates source polling and background capsule jobs and exposes an immutable snapshot to the HTTP API. `LiveSourceCoordinator` discovers Kubernetes workloads, maps pod or configured group IDs across Prometheus, OpenSearch and Kubernetes, polls firing Prometheus alerts, and optionally accepts authenticated Grafana notifications. Both inputs use one bounded capture path. `FCAPSuleStore` persists application, incident, capsule metadata, source settings, non-secret model preferences, resource identity and deterministic recurrence keys in SQLite. External sources may also submit a normalized case through the ingestion boundary. An incident report is generated from deterministic evidence before optional AI reasoning. Recurrence preserves separate episodes and can expose up to three earlier retained candidates to the investigator; it never merges incident records or establishes a shared cause by itself.
+
+Live identity resolution prefers an explicit pod. Configured alert-to-pod label mappings (for example CNFC and VNFC) can instead resolve multiple replicas; the retained case records each captured pod and any omitted matches. Cross-application shared IDs become review cues, not asserted common causes. Grafana uses an authenticated, optional webhook and the same bounded capture path; Prometheus remains the metric source.
 
 ## Source Ownership
 
@@ -69,6 +71,7 @@ The current Kubernetes deployment is single-replica:
 FCAPSule pod
   |-- HTTP/API server
   |-- source polling and capsule threads
+  |-- optional authenticated Grafana webhook receiver (disabled by default)
   |-- SQLite + staged captures + derived artifacts on a PVC
   |-- ConfigMap source configuration
   |-- optional Secret model credential

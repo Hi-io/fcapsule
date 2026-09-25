@@ -35,6 +35,16 @@ class RelatedGroupTests(unittest.TestCase):
         ])
         self.assertEqual(groups, [])
 
+    def test_shared_cnfc_is_a_review_cue_across_distinct_applications(self):
+        first = profile("one", "api", "2026-09-22T10:00:00Z", alert="Latency", node="", dependency=None)
+        second = profile("two", "worker", "2026-09-22T10:03:00Z", alert="Restarts", node="", dependency=None)
+        first["identifiers"] = {"cnfc:edge-a"}
+        second["identifiers"] = {"cnfc:edge-a"}
+        groups = derive_related_episode_groups([first, second])
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["episode_ids"], ["one", "two"])
+        self.assertIn("shared_identifier", {item["kind"] for item in groups[0]["basis"]})
+
     def test_profile_uses_retained_configuration_and_topology_not_free_text(self):
         episode = {"episode_id": "one", "reference": "EP-1", "app_id": "api", "status": "active", "severity": "warning", "started_at": "2026-09-22T10:00:00Z", "last_activity_at": "2026-09-22T10:01:00Z"}
         entry = {

@@ -746,6 +746,11 @@ class InvestigationTools:
         if not primary_pod and isinstance(primary_resource, dict) and str(primary_resource.get("kind", "")).casefold() == "pod":
             primary_pod = primary_resource.get("name")
         self.pods = [str(primary_pod)] if isinstance(primary_pod, str) and primary_pod else []
+        if not self.pods and isinstance(primary_case.get("resource_scope"), dict):
+            self.pods = [
+                str(item["name"]) for item in primary_case.get("topology", [])
+                if isinstance(item, dict) and item.get("kind") == "pod" and item.get("name")
+            ][:4]
         captured_window = primary_case.get("window") if isinstance(primary_case.get("window"), dict) else {}
         primary_alert_at = ((chosen or {}).get("incident") or {}).get("started_at") or primary_report_incident.get("started_at")
         try:

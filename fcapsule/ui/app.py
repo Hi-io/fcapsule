@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import hmac
 import mimetypes
+import os
 import tempfile
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -246,6 +248,21 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         try:
+            if path == "/api/webhooks/grafana":
+                config = self.server.control_plane.source_configuration()
+                if not config.get("grafana_webhook_enabled"):
+                    self._json({"error": "Grafana webhook is disabled"}, HTTPStatus.NOT_FOUND)
+                    return
+                token = os.environ.get("FCAPSULE_GRAFANA_WEBHOOK_TOKEN", "")
+                supplied = self.headers.get("Authorization", "")
+                if not token or not hmac.compare_digest(supplied, f"Bearer {token}"):
+                    self._json({"error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                    return
+                if self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
+                    self._json({"error": "Expected application/json"}, HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+                    return
+                self._json(self.server.control_plane.receive_grafana_webhook(self._payload(256 * 1024)), HTTPStatus.ACCEPTED)
+                return
             if path == "/api/capsules":
                 payload = self._payload()
                 if not self.server.control_plane.start_capsule(payload.get("incident_id")):

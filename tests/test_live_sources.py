@@ -10,7 +10,8 @@ from fcapsule.adapters.kubernetes_adapter import KubernetesAdapter, KubernetesIn
 from fcapsule.adapters.opensearch_adapter import OpenSearchAdapter
 from fcapsule.adapters.prometheus_adapter import PrometheusAdapter
 from fcapsule.adapters.transport import ResponseTooLargeError
-from fcapsule.live_sources import LiveSourceCoordinator, _resolve_alert_pod
+from fcapsule.live_sources import LiveSourceCoordinator, _incident_id, _resolve_alert_pod, _resolve_alert_scope
+from fcapsule.adapters.grafana_webhook_adapter import normalize_notification
 from fcapsule.store import FCAPSuleStore
 
 
@@ -69,6 +70,150 @@ class FocusedLogTransport:
 
 
 class LiveSourceTests(unittest.TestCase):
+    def test_existing_prometheus_pod_incident_id_is_stable(self):
+        alert = {"alertname": "PodRestart", "startsAt": "2026-09-25T05:00:00Z"}
+        self.assertEqual(_incident_id(alert, "core", "pod:gw-1"), _incident_id(alert, "core", "gw-1"))
+        self.assertNotEqual(_incident_id({**alert, "source": "grafana_webhook"}, "core", "pod:gw-1"),
+                            _incident_id(alert, "core", "gw-1"))
+
+    def test_group_identity_resolves_all_replicas_without_guessing_a_pod(self):
+        mappings = [
+            {"name": "CNFC", "alert_label": "cnfc", "pod_label": "telecom.example.com/cnfc"},
+            {"name": "VNFC", "alert_label": "vnfc", "pod_label": "telecom.example.com/vnfc"},
+        ]
+        pods = [
+            {"namespace": "core", "name": name, "workload": "gateway", "labels": {
+                "telecom.example.com/cnfc": "edge-a", "telecom.example.com/vnfc": vnfc,
+            }} for name, vnfc in (("gw-1", "blue"), ("gw-2", "blue"), ("gw-3", "green"))
+        ]
+        scope = _resolve_alert_scope(pods, "core", {"cnfc": "edge-a"}, mappings)
+        self.assertEqual(scope["kind"], "cnfc")
+        self.assertEqual([item["name"] for item in scope["pods"]], ["gw-1", "gw-2", "gw-3"])
+        narrower = _resolve_alert_scope(pods, "core", {"cnfc": "edge-a", "vnfc": "blue"}, mappings)
+        self.assertEqual([item["name"] for item in narrower["pods"]], ["gw-1", "gw-2"])
+        exact = _resolve_alert_scope(pods, "core", {"pod": "gw-3", "cnfc": "edge-a"}, mappings)
+        self.assertEqual(exact["kind"], "pod")
+        self.assertEqual([item["name"] for item in exact["pods"]], ["gw-3"])
+        pods[1]["uid"] = "uid-gw-2"
+        by_uid = _resolve_alert_scope(pods, "core", {"pod_uid": "uid-gw-2", "cnfc": "edge-a"}, mappings)
+        self.assertEqual([item["name"] for item in by_uid["pods"]], ["gw-2"])
+        self.assertIsNone(_resolve_alert_scope(pods, "core", {"cnfc": "missing"}, mappings))
+        other = {**pods[0], "namespace": "other", "name": "other-gw"}
+        self.assertIsNone(_resolve_alert_scope(pods + [other], "", {"cnfc": "edge-a"}, mappings))
+
+    def test_grafana_webhook_retains_firing_then_resolves(self):
+        payload = {"status": "firing", "commonLabels": {"namespace": "core"}, "alerts": [{
+            "status": "firing", "fingerprint": "fingerprint-1", "startsAt": "2026-09-25T05:00:00Z",
+            "labels": {"alertname": "GatewayErrors", "cnfc": "edge-a"},
+            "annotations": {"summary": "Gateway error rate increased"},
+        }]}
+        with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"FCAPSULE_GRAFANA_WEBHOOK_TOKEN": "test-token"}):
+            state = Path(directory)
+            coordinator = LiveSourceCoordinator(FCAPSuleStore(state / "state.db"), state)
+            coordinator.update_configuration({"grafana_webhook_enabled": True})
+            self.assertEqual(coordinator.receive_grafana_alerts(payload)["firing"], 1)
+            self.assertEqual(next(iter(coordinator._grafana_alerts().values()))["labels"]["namespace"], "core")
+            payload["alerts"][0]["status"] = "resolved"
+            self.assertEqual(coordinator.receive_grafana_alerts(payload)["firing"], 0)
+            payload["alerts"][0]["status"] = "firing"
+            self.assertEqual(coordinator.receive_grafana_alerts(payload)["firing"], 1)
+            coordinator.update_configuration({"grafana_webhook_enabled": False})
+            self.assertEqual(coordinator._grafana_alerts(), {})
+        payload["alerts"][0]["status"] = "resolved"
+        self.assertEqual(normalize_notification(payload)[0][1], None)
+
+    def test_group_capture_includes_metrics_logs_and_config_for_each_member(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            coordinator = LiveSourceCoordinator(FCAPSuleStore(state / "state.db"), state)
+            config = {"cluster_name": "cluster-a", "incident_window_minutes": 10, "opensearch_index": "logs-*"}
+            pods = [
+                {"name": f"gw-{number}", "namespace": "core", "workload": "gateway",
+                 "node": f"worker-{number}", "ready": number != 2}
+                for number in range(1, 4)
+            ]
+            scope = {"kind": "cnfc", "name": "edge-a", "pods": pods, "identifiers": [
+                {"name": "CNFC", "alert_label": "cnfc", "pod_label": "cnfc", "value": "edge-a"}
+            ]}
+            prometheus, opensearch, kubernetes = Mock(), Mock(), Mock()
+            prometheus.collect_alert_metrics.return_value = {"alert_evidence": {}, "series": []}
+            prometheus.collect_pod_metrics.return_value = []
+            opensearch.collect_logs.return_value = []
+            kubernetes.configuration_snapshot.return_value = []
+            alert = {"alertname": "GatewayErrors", "startsAt": "2026-09-25T05:00:00Z",
+                     "status": "firing", "severity": "warning", "labels": {"cnfc": "edge-a"}, "annotations": {}}
+            path = coordinator._capture_case(config, prometheus, opensearch, kubernetes, alert, pods[0], "incident-group", scope=scope)
+            metadata = __import__("yaml").safe_load((path / "metadata.yaml").read_text())
+            self.assertIsNone(metadata["pod"])
+            self.assertEqual(metadata["resource_scope"]["captured_pods"], 3)
+            self.assertEqual({item["node"] for item in metadata["topology"]}, {"worker-1", "worker-2", "worker-3"})
+            self.assertEqual(prometheus.collect_pod_metrics.call_count, 3)
+            self.assertEqual(opensearch.collect_logs.call_count, 3)
+            self.assertEqual(kubernetes.configuration_snapshot.call_count, 3)
+            crowded = pods + [
+                {"name": f"gw-{number}", "namespace": "core", "workload": "gateway",
+                 "node": f"worker-{number}", "ready": number != 5}
+                for number in (4, 5)
+            ]
+            crowded_scope = {**scope, "pods": crowded}
+            crowded_path = coordinator._capture_case(config, prometheus, opensearch, kubernetes, alert,
+                                                      pods[0], "incident-crowded", scope=crowded_scope)
+            crowded_meta = __import__("yaml").safe_load((crowded_path / "metadata.yaml").read_text())
+            self.assertEqual(crowded_meta["resource_scope"]["omitted_pods"], 1)
+            self.assertEqual(crowded_meta["topology"][0]["name"], "gw-2")
+            self.assertEqual(crowded_meta["topology"][1]["name"], "gw-5")
+
+    def test_synchronize_routes_cnfc_only_alert_to_group_capture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            coordinator = LiveSourceCoordinator(FCAPSuleStore(state / "state.db"), state)
+            coordinator.update_configuration({"namespaces": ["core"]})
+            pods = [{"namespace": "core", "name": f"gw-{number}", "workload": "gateway",
+                     "ready": number != 2, "phase": "Running", "labels": {"cnfc": "edge-a"}}
+                    for number in range(1, 4)]
+            prometheus, opensearch, kubernetes = Mock(), Mock(), Mock()
+            coordinator.adapters = Mock(return_value=(prometheus, opensearch, kubernetes))
+            coordinator.test_connections = Mock(return_value={"targets": {
+                "prometheus": {"ok": True}, "opensearch": {"ok": True}, "kubernetes": {"ok": True}}})
+            kubernetes.list_pods.return_value = pods
+            prometheus.pod_inventory.return_value = {}
+            opensearch.pod_log_counts.return_value = {}
+            prometheus.alert_rules.return_value = {}
+            prometheus.active_alerts.return_value = [{"alertname": "GatewayErrors", "status": "firing",
+                "startsAt": "2026-09-25T05:00:00Z", "labels": {"namespace": "core", "cnfc": "edge-a"}}]
+            with patch.object(coordinator, "_capture_case", return_value=state / "case") as capture:
+                result = coordinator.synchronize()
+            self.assertEqual(len(result["captured"]), 1)
+            self.assertEqual(capture.call_args.kwargs["scope"]["kind"], "cnfc")
+            self.assertEqual(len(capture.call_args.kwargs["scope"]["pods"]), 3)
+            self.assertEqual(result["unmapped_alerts"], [])
+
+    def test_cross_workload_identity_is_not_presented_as_a_discovered_application(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            store = FCAPSuleStore(state / "state.db")
+            coordinator = LiveSourceCoordinator(store, state)
+            coordinator.update_configuration({"namespaces": ["core"]})
+            pods = [{"namespace": "core", "name": "gw-1", "workload": "gateway", "ready": True,
+                     "labels": {"cnfc": "edge-a"}},
+                    {"namespace": "core", "name": "worker-1", "workload": "worker", "ready": True,
+                     "labels": {"cnfc": "edge-a"}}]
+            prometheus, opensearch, kubernetes = Mock(), Mock(), Mock()
+            coordinator.adapters = Mock(return_value=(prometheus, opensearch, kubernetes))
+            coordinator.test_connections = Mock(return_value={"targets": {
+                "prometheus": {"ok": True}, "opensearch": {"ok": True}, "kubernetes": {"ok": True}}})
+            kubernetes.list_pods.return_value = pods
+            prometheus.pod_inventory.return_value = {}
+            opensearch.pod_log_counts.return_value = {}
+            prometheus.alert_rules.return_value = {}
+            prometheus.active_alerts.return_value = [{"alertname": "CNFCDegraded", "status": "firing",
+                "startsAt": "2026-09-25T05:00:00Z", "labels": {"namespace": "core", "cnfc": "edge-a"}}]
+            with patch.object(coordinator, "_capture_case", return_value=state / "case"):
+                result = coordinator.synchronize()
+            captured = result["captured"][0]
+            self.assertEqual(captured["app_name"], "CNFC edge-a")
+            self.assertEqual(store.get_application(captured["app_id"])["status"], "not_observed")
+
     def test_synchronize_does_not_treat_unavailable_pod_inventory_as_empty(self):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory)

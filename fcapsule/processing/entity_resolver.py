@@ -45,6 +45,11 @@ def resolve_entities(bundle: CaseBundle) -> dict[str, Any]:
         if target and dominant and str(target) != dominant:
             warnings.append(f"{key} mismatch: metadata={target!r}, telemetry={dominant!r}")
 
+    resource_scope = bundle.metadata.get("resource_scope") or {}
+    for identity in resource_scope.get("identifiers", []):
+        if isinstance(identity, dict) and identity.get("name") and identity.get("value"):
+            matched_labels[str(identity["name"]).lower()] = str(identity["value"])
+
     return {
         "primary_entity": str(bundle.metadata["service"]),
         "matched_labels": matched_labels,

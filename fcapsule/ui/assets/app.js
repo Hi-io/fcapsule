@@ -117,6 +117,7 @@ function resourceLabel(item, application) {
   if (resource.kind === 'node' && resource.name) return 'Node ' + resource.name;
   if (resource.kind === 'pod' && resource.name) return 'Pod ' + resource.name;
   if (resource.kind === 'workload' && resource.name) return 'Workload ' + resource.name;
+  if (resource.kind && resource.name && !['application','workload','pod','node'].includes(resource.kind)) return resource.kind.toUpperCase() + ' ' + resource.name;
   return application?.name || resource.name || item.app_id;
 }
 function recurrenceLabel(recurrence) {
@@ -332,6 +333,8 @@ function renderTargets(state) {
       <div class="form-pair"><div class="field"><label for="opensearch-index">Log index pattern</label><input id="opensearch-index" value="${safe(config.opensearch_index)}"></div><div class="field"><label for="cluster-name">Cluster name</label><input id="cluster-name" value="${safe(config.cluster_name)}"></div></div>
       <div class="field"><label for="kubernetes-url">Kubernetes API URL</label><input id="kubernetes-url" value="${safe(config.kubernetes_url || '')}" placeholder="In-cluster ServiceAccount"><small>Leave blank inside Kubernetes. FCAPSule uses the mounted ServiceAccount and cluster CA.</small></div>
       <div class="field"><label for="source-namespaces">Observed namespaces</label><input id="source-namespaces" value="${safe(config.namespaces.join(', '))}" placeholder="default, production"><small>Only these namespaces can create incidents. Leave blank to observe all namespaces allowed by RBAC.</small></div>
+      <div class="field"><label>Additional resource IDs</label><small>Match alert labels to Kubernetes pod labels. A shared ID can resolve several replicas; pod names still take priority.</small><div id="identity-labels">${(config.identity_labels || []).map(item => identityLabelRow(item)).join('')}</div><button class="secondary" type="button" id="add-identity-label">Add identifier</button></div>
+      <div class="field"><label>Grafana alert input</label><small>Optional webhook: <code>/api/webhooks/grafana</code>. Configure a Grafana contact point with a Bearer authorization header. Token: ${config.grafana_webhook_token_configured ? 'configured' : 'not configured (set FCAPSULE_GRAFANA_WEBHOOK_TOKEN)'}. ${config.grafana_last_received_at ? 'Last notification: ' + safe(formatDate(config.grafana_last_received_at)) + '.' : 'No notification received yet.'} Prometheus polling remains available.</small><label class="toggle"><input id="grafana-webhook-enabled" type="checkbox" ${config.grafana_webhook_enabled ? 'checked' : ''} ${config.grafana_webhook_token_configured ? '' : 'disabled'}>Accept Grafana webhook alerts</label></div>
       <div class="form-pair"><div class="field"><label for="poll-interval">Poll interval (seconds)</label><input id="poll-interval" type="number" min="10" max="3600" value="${safe(config.poll_interval_seconds)}"></div><div class="field"><label for="window-minutes">Incident window (minutes)</label><input id="window-minutes" type="number" min="2" max="120" value="${safe(config.incident_window_minutes)}"></div></div>
       <label class="toggle"><input id="source-enabled" type="checkbox" ${config.enabled ? 'checked' : ''}>Poll sources and capture new firing alerts automatically</label>
       <label class="toggle" style="margin-top:8px"><input id="auto-reports" type="checkbox" ${config.auto_build_reports ? 'checked' : ''}>Build a responder report after capture</label>
@@ -340,6 +343,7 @@ function renderTargets(state) {
     <section class="sheet discovery-section"><div class="sheet-head"><h2>Discovery</h2><span class="queue-note" id="discovery-time">${state.sources.last_sync_at ? formatDate(state.sources.last_sync_at) : 'Not synchronized'}</span></div><div class="sheet-body">
       <div class="kpis" style="grid-template-columns:repeat(3,1fr);margin:0"><div class="kpi"><span>Pods visible</span><strong id="pods-visible">${state.sources.pods_visible || 0}</strong></div><div class="kpi"><span>Applications</span><strong id="applications-visible">${state.sources.applications_visible || 0}</strong></div><div class="kpi"><span>Active alerts</span><strong id="active-alerts">${state.sources.active_alerts || 0}</strong></div></div>
       ${state.sources.error ? `<p class="target-error">${safe(state.sources.error)}</p>` : '<p class="queue-note" style="margin-top:12px">Discovery maps Kubernetes pods to Prometheus metrics, OpenSearch logs, and referenced configuration.</p>'}
+      ${(state.sources.unmapped_alerts || []).length ? disclosure('unmapped-alerts', (state.sources.unmapped_alerts || []).length + ' alerts could not be mapped', '<div class="pod-list">' + state.sources.unmapped_alerts.map(item=>'<span class="pod-line"><strong>' + safe(item.alertname) + '</strong><small>' + safe([item.namespace,item.source].filter(Boolean).join(' · ')) + '</small></span>').join('') + '</div>') : ''}
     </div></section>
     <section class="sheet coverage-section"><div class="sheet-head"><h2>Application coverage</h2><span class="queue-note" id="coverage-count">${observedApps.length} observed applications</span></div><div id="coverage-content">${applicationTable(observedApps)}</div></section></div>`;
   document.querySelector('.targets-workspace').append(document.querySelector('.connection-settings'));
@@ -351,8 +355,18 @@ function renderTargets(state) {
     settings.querySelector('summary').focus({preventScroll:true});
   });
   document.querySelector('#save-targets').addEventListener('click', saveTargets);
+  document.querySelector('#add-identity-label').addEventListener('click', () => document.querySelector('#identity-labels').insertAdjacentHTML('beforeend', identityLabelRow({name:'',alert_label:'',pod_label:''})));
+  document.querySelector('#identity-labels').addEventListener('click', event => { if (event.target.closest('[data-remove-identity]')) event.target.closest('.identity-label-row').remove(); });
   document.querySelector('#test-targets').addEventListener('click', testTargets);
   document.querySelector('#sync-targets').addEventListener('click', syncTargets);
+}
+
+function identityLabelRow(item) {
+  return `<div class="identity-label-row">
+    <label><small>ID</small><input aria-label="Identifier name" placeholder="CNFC" data-id-name value="${safe(item.name || '')}"></label>
+    <label><small>Alert label</small><input aria-label="Alert label" placeholder="cnfc" data-id-alert value="${safe(item.alert_label || '')}"></label>
+    <label><small>Pod label</small><input aria-label="Pod label" placeholder="telecom.example.com/cnfc" data-id-pod value="${safe(item.pod_label || '')}"></label>
+    <button class="secondary" type="button" data-remove-identity aria-label="Remove identifier" title="Remove identifier">${icon('x')}</button></div>`;
 }
 
 function renderSettings(state) {
@@ -434,12 +448,13 @@ function applicationTable(items) {
     <summary><span class="namespace-heading">${icon('layers')}<span><small>${safe(apps[0].cluster)}</small><strong>${safe(apps[0].namespace)}</strong></span></span><span>${quantity(apps.length, 'app')} · ${quantity(apps.reduce((n,item)=>n+(item.source_config?.pods?.length || 0),0), 'pod')}</span></summary>
     <div class="table-wrap"><table><thead><tr><th>Application</th><th>State</th><th>Pods</th><th>Telemetry</th><th>Latest capture</th></tr></thead><tbody>${apps.map(item => `
     <tr><td><strong>${safe(item.name)}</strong><small class="cell-note">${safe(item.environment)}</small></td><td>${status(item.status)}</td>
-    <td>${disclosure('pods-' + item.app_id, (item.source_config?.pods?.length || 0) + ' observed', `<div class="pod-list">${(item.source_config?.pods || []).map(pod=>`<span class="pod-line"><code>${safe(pod.name)}</code>${status(pod.ready ? 'ready' : pod.phase || 'unknown')}</span>`).join('')}</div>`)}</td>
+    <td>${disclosure('pods-' + item.app_id, (item.source_config?.pods?.length || 0) + ' observed', `<div class="pod-list">${(item.source_config?.pods || []).map(pod=>`<span class="pod-line"><code>${safe(pod.name)}</code>${(pod.identifiers || []).map(id=>`<small>${safe(id.name)} ${safe(id.value)}</small>`).join('')}${status(pod.ready ? 'ready' : pod.phase || 'unknown')}</span>`).join('')}</div>`)}</td>
     <td><div class="source-row">${sources(item.source_config)}</div></td><td>${formatDate(item.last_incident_at)}</td></tr>`).join('')}</tbody></table></div></details>`).join('');
 }
 
 async function saveTargets() {
-  const payload = {prometheus_url:document.querySelector('#prometheus-url').value, opensearch_url:document.querySelector('#opensearch-url').value, opensearch_index:document.querySelector('#opensearch-index').value, kubernetes_url:document.querySelector('#kubernetes-url').value, cluster_name:document.querySelector('#cluster-name').value, namespaces:document.querySelector('#source-namespaces').value, poll_interval_seconds:Number(document.querySelector('#poll-interval').value), incident_window_minutes:Number(document.querySelector('#window-minutes').value), enabled:document.querySelector('#source-enabled').checked, auto_build_reports:document.querySelector('#auto-reports').checked};
+  const identity_labels = [...document.querySelectorAll('.identity-label-row')].map(row => ({name:row.querySelector('[data-id-name]').value,alert_label:row.querySelector('[data-id-alert]').value,pod_label:row.querySelector('[data-id-pod]').value}));
+  const payload = {prometheus_url:document.querySelector('#prometheus-url').value, opensearch_url:document.querySelector('#opensearch-url').value, opensearch_index:document.querySelector('#opensearch-index').value, kubernetes_url:document.querySelector('#kubernetes-url').value, cluster_name:document.querySelector('#cluster-name').value, namespaces:document.querySelector('#source-namespaces').value, poll_interval_seconds:Number(document.querySelector('#poll-interval').value), incident_window_minutes:Number(document.querySelector('#window-minutes').value), enabled:document.querySelector('#source-enabled').checked, auto_build_reports:document.querySelector('#auto-reports').checked, grafana_webhook_enabled:document.querySelector('#grafana-webhook-enabled').checked, identity_labels};
   const response = await fetch('/api/settings/sources', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}); const result = await response.json();
   if (!response.ok) { alert(result.error || 'Unable to save targets'); return; }
   window.targetNotice = 'Target settings saved.'; lastState.sources.configuration = result; renderTargets(lastState);
@@ -1142,9 +1157,11 @@ function investigationReferenceButton(reference, inline = false, suffix = '') {
 
 function investigationScope(payload) {
   const scope = payload.investigation?.context?.scope || {...payload.report?.incident,...payload.incident};
+  const captured = payload.report?.resource_scope || {};
   const resource = scope.pod || scope.resource?.name || scope.service;
   const recurrence = payload.investigation?.context?.recurrence;
   const parts = [[scope.pod ? 'Pod' : scope.resource?.kind || 'Service',resource],['Namespace',scope.namespace]];
+  if (captured.matched_pods > 1) parts.push(['Affected scope', captured.matched_pods + (captured.inventory_complete === false ? ' visible matches' : ' matching pods') + ' · ' + captured.captured_pods + ' captured' + (captured.omitted_pods ? ' · ' + captured.omitted_pods + ' omitted' : '')]);
   if (recurrence?.previous_count > 0) parts.push(['Retained history',recurrence.previous_count + (recurrence.count_capped ? '+' : '') + ' earlier same-signature episode' + (recurrence.previous_count === 1 ? '' : 's')]);
   return '<dl class="assessment-scope">' + parts.filter(([,value])=>value).map(([label,value])=>'<div><dt>' + safe(label) + '</dt><dd>' + safe(value) + '</dd></div>').join('') + '</dl>';
 }
@@ -1364,7 +1381,7 @@ function timelinePanel(report) {
   const signals = (episode?.signals || []).map(signal=>'<li><time>' + formatDate(signal.started_at) + '</time><div><strong>' + safe(signal.summary || signal.scenario) + '</strong><small>' + safe(signal.severity) + ' · ' + safe(signal.status) + (signal.ended_at && signal.status === 'resolved' ? ' ' + formatDate(signal.ended_at) : '') + '</small></div></li>').join('');
   return '<section class="timeline-view"><h3>Episode alerts</h3><ol class="event-timeline">' + signals + '</ol>' +
     disclosure('retained-sequence', 'Captured evidence sequence', '<ol class="event-timeline">' + (report.timeline || []).map(item=>'<li><time>' + formatDate(item.timestamp) + '</time><div><strong>' + safe(item.title) + '</strong><small>' + safe(item.description) + '</small></div></li>').join('') + '</ol>') +
-    (report.topology?.length ? '<p class="queue-note">Dependencies: ' + report.topology.map(item=>safe(item.from) + ' → ' + safe(item.to)).join(' · ') + '</p>' : '') + '</section>';
+    (report.topology?.length ? '<p class="queue-note">' + (report.topology.every(item=>item.kind === 'pod') ? 'Captured pods: ' + report.topology.map(item=>safe(item.name) + (item.node ? ' on ' + safe(item.node) : '')).join(' · ') : 'Dependencies: ' + report.topology.filter(item=>item.from && item.to).map(item=>safe(item.from) + ' → ' + safe(item.to)).join(' · ')) + '</p>' : '') + '</section>';
 }
 function capsuleExport(payload) {
   const capsule = payload.record;

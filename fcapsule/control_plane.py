@@ -72,6 +72,9 @@ def _resource_identity(
     pod = label("pod", "pod_name", "kubernetes_pod_name")
     if pod:
         return {"kind": "pod", "name": pod, "alert_identity": alert_name}
+    scope = alert.get("resolved_scope") if isinstance(alert.get("resolved_scope"), dict) else {}
+    if scope.get("kind") in {"cnfc", "vnfc"} and scope.get("name"):
+        return {"kind": str(scope["kind"]), "name": str(scope["name"]), "alert_identity": alert_name}
     workload = label("deployment", "statefulset", "daemonset", "workload", "service")
     if workload:
         return {"kind": "workload", "name": workload, "alert_identity": alert_name}
@@ -153,8 +156,10 @@ class ControlPlane:
         }
         self.source_stop = threading.Event()
         self.source_monitor: threading.Thread | None = None
+        self.pending_webhook_sync = False
         load_env_file(self.state_dir / ".env")
         load_env_file()
+        self.source_state["configuration"] = self.live_sources.configuration()
         self._persist_ai_settings()
         self._last_retention_check = 0.0
         self.purge_expired_incidents()
@@ -621,6 +626,15 @@ class ControlPlane:
             self.source_state["error"] = None if result["ok"] else "One or more source connections failed"
         return result
 
+    def receive_grafana_webhook(self, payload: dict[str, Any]) -> dict[str, Any]:
+        result = self.live_sources.receive_grafana_alerts(payload)
+        with self.lock:
+            self.source_state["configuration"] = self.live_sources.configuration()
+        if not self.start_source_sync():
+            with self.lock:
+                self.pending_webhook_sync = True
+        return result
+
     def start_live_monitoring(self) -> None:
         if self.source_monitor and self.source_monitor.is_alive():
             return
@@ -768,6 +782,10 @@ class ControlPlane:
                 self.error = str(error)
                 self.events.append({"time": time.time(), "phase": "system", "status": "error", "message": str(error), "details": {}})
             self.events = self.events[-160:]
+            pending_webhook_sync = self.pending_webhook_sync
+            self.pending_webhook_sync = False
+        if pending_webhook_sync:
+            self.start_source_sync()
 
     def _event(
         self,
