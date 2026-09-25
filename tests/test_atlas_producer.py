@@ -88,6 +88,21 @@ class AtlasProjectionTests(unittest.TestCase):
         self.assertEqual(metric["observed_at"], STAMP)
         self.assertEqual(payload["hypotheses"][0]["supporting_refs"], ["Q001"])
 
+    def test_uuid_instance_identity_stays_distinct_without_exposing_unsafe_ids(self):
+        episode, investigation, retained, app = retained_fixture()
+        first_id = "fcapsule-9ddb5d57-d0e2-4f13-88d5-8c8d36f5089c"
+        second_id = "fcapsule-20988638-7f41-44ce-9fad-148d2e85cf23"
+        first = project_atlas_case(first_id, episode, investigation, retained, app)
+        second = project_atlas_case(second_id, episode, investigation, retained, app)
+        self.assertEqual(first["instance_id"], first_id)
+        self.assertEqual(second["instance_id"], second_id)
+        self.assertNotEqual(first["instance_id"], second["instance_id"])
+        self.assertNotEqual(first["episode_id"], second["episode_id"])
+        self.assertEqual(first["observations"], second["observations"])
+        unsafe = project_atlas_case("cluster/a password=hidden", episode, investigation, retained, app)
+        self.assertTrue(unsafe["instance_id"].startswith("fcapsule-"))
+        self.assertNotIn("hidden", json.dumps(unsafe))
+
     def test_normalized_fingerprint_ignores_pod_name_but_tracks_mechanism(self):
         episode_a, investigation_a, retained_a, app = retained_fixture("queue-1", "scrape_health")
         episode_b, investigation_b, retained_b, _ = retained_fixture("queue-99", "scrape_health")

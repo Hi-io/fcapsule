@@ -17,6 +17,7 @@ MAX_CASE_BYTES = 24 * 1024
 _SECRET_KEY = re.compile(r"(?i)(password|passwd|secret|token|credential|api.?key|private.?key|authorization|connection.?string)")
 _SAFE_CONFIG_KEY = re.compile(r"(?i)^(?:[a-z][a-z0-9_.-]{0,63})$")
 _SAFE_CONFIG_VALUE = re.compile(r"^(?:-?\d+(?:\.\d+)?|true|false|enabled|disabled|on|off|v?\d+(?:\.\d+){0,3})$", re.I)
+_SAFE_INSTANCE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}\Z")
 _SAFE_DIAGNOSTICS = {
     "status", "status_code", "upstream_status", "consumer_status", "error_type", "error_code", "errno",
     "sqlstate", "failure_kind", "retryable", "retry_count", "attempt", "attempt_limit", "timeout_ms",
@@ -33,6 +34,13 @@ def _text(value: Any, limit: int = 160) -> str:
     if _SECRET_KEY.search(text):
         return ""
     return text[:limit]
+
+
+def _instance_identity(value: str) -> str:
+    """Keep trusted routing identity stable without treating it as log text."""
+    if _SAFE_INSTANCE_ID.fullmatch(value):
+        return value
+    return "fcapsule-" + hashlib.sha256(value.encode("utf-8")).hexdigest()[:24]
 
 
 def _timestamp(value: Any) -> str | None:
@@ -270,7 +278,7 @@ def project_atlas_case(
                                "confidence": None, "supporting_refs": supporting[:8]})
     payload = {
         "schema_version": 1,
-        "instance_id": _text(instance_id or "fcapsule-default", 96),
+        "instance_id": _instance_identity(instance_id or "fcapsule-default"),
         "episode_id": remote_episode_id,
         "observed_at": observed_at,
         "scope": scope,
