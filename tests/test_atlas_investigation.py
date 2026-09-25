@@ -20,19 +20,25 @@ class AtlasInvestigationTests(unittest.TestCase):
                       "alert_started_at": "2026-09-20T12:00:00Z"},
             "alerts": [{"alert_identity": "PodCrashLooping", "incident_id": "incident-current"}],
             "evidence": [{"id": "E-current", "title": "Container restarted",
-                           "summary": "Crash loop after decoder rejects payload"}],
+                           "summary": "Crash loop after decoder rejects payload",
+                           "diagnostic_fields": {"error_type": "decoder_rejected"}}],
         }
         self.case = {
             "id": "atlas-case-01",
             "instance_id": "atlas-instance-remote",
-            "score": 0.91,
+            "score": 0.3,
             "relation": "fingerprint",
             "observed_at": "2026-09-20T11:55:00Z",
             "scope": {"service": "stock-api", "cluster": "cluster-remote", "namespace": "production"},
-            "summary": "Prior case with repeated decoder errors before a restart.",
-            "observations": [{"kind": "log", "key": "error_template", "value": "base64 decoder rejected payload",
-                              "source": "opensearch", "observed_at": "2026-09-20T11:50:00Z",
-                              "reference": "atlas-fact-21"}],
+            "summary": "PodCrashLooping on stock-api: diagnostic.error_type=decoder_rejected. Cause is unverified.",
+            "observations": [
+                {"kind": "FM", "key": "diagnostic.error_type", "value": "decoder_rejected",
+                 "source": "opensearch", "observed_at": "2026-09-20T11:50:00Z",
+                 "reference": "atlas-fact-21"},
+                {"kind": "FM", "key": "alert_family", "value": "PodCrashLooping",
+                 "source": "prometheus", "observed_at": "2026-09-20T11:50:00Z",
+                 "reference": "atlas-alert-22"},
+            ],
             "hypotheses": [{"statement": "A malformed upstream payload may have triggered retries.",
                             "confidence": "medium", "supporting_refs": ["atlas-fact-21"]}],
             "fingerprint": "must-not-leak",
@@ -58,8 +64,10 @@ class AtlasInvestigationTests(unittest.TestCase):
         self.assertTrue(set(scope).issubset({"environment", "cluster", "namespace", "service", "workload", "cnfc_id", "vnfc_id"}))
         self.assertNotIn("cluster", scope)
         self.assertNotIn("namespace", scope)
-        self.assertIn("inventory-api", query)
         self.assertIn("PodCrashLooping", query)
+        self.assertIn("error_type", query)
+        self.assertNotIn("inventory-api", query)
+        self.assertNotIn("Crash loop", query)
         self.assertEqual(client.search.call_args.kwargs["before"], "2026-09-20T12:00:00Z")
         self.assertEqual(status["status"], "matched")
         self.assertEqual([item["atlas_case_id"] for item in cases], ["atlas-case-01"])
@@ -67,7 +75,7 @@ class AtlasInvestigationTests(unittest.TestCase):
         self.assertEqual(retained["citation"], "Atlas case atlas-case-01")
         self.assertEqual(retained["instance_id"], "atlas-instance-remote")
         self.assertEqual(retained["observations"][0]["reference"], "atlas-fact-21")
-        self.assertEqual(retained["factual_reference_ids"], ["atlas-fact-21"])
+        self.assertEqual(retained["factual_reference_ids"], ["atlas-fact-21", "atlas-alert-22"])
         self.assertEqual(retained["prior_hypotheses"][0]["statement"],
                          "A malformed upstream payload may have triggered retries.")
         self.assertNotIn("must-not-leak", json.dumps(retained))
@@ -86,10 +94,28 @@ class AtlasInvestigationTests(unittest.TestCase):
         self.assertLessEqual(limit, 10)
         self.assertIsNotNone(datetime.fromisoformat(kwargs["before"].replace("Z", "+00:00")).tzinfo)
 
+    def test_shared_alert_with_unrelated_diagnostic_mechanism_is_rejected(self):
+        lookalike = {
+            **self.case,
+            "id": "atlas-lookalike",
+            "summary": "PodCrashLooping on another service: database authentication failed.",
+            "observations": [
+                {"kind": "FM", "key": "alert_family", "value": "PodCrashLooping"},
+                {"kind": "FM", "key": "diagnostic.sqlstate", "value": "28000"},
+            ],
+        }
+        client = Mock()
+        client.search.return_value = {"cases": [lookalike]}
+
+        cases, status = self._service(client)._atlas_retrieval(self.context)
+
+        self.assertEqual(cases, [])
+        self.assertEqual(status["status"], "no_relevant_matches")
+
     def test_past_case_has_hypotheses_separated_from_captured_observations(self):
         candidate = _atlas_case(self.case, self.before)
 
-        self.assertEqual(candidate["observations"][0]["value"], "base64 decoder rejected payload")
+        self.assertEqual(candidate["observations"][0]["value"], "decoder_rejected")
         self.assertNotIn("hypotheses", candidate)
         self.assertEqual(candidate["prior_hypotheses"][0]["provenance"],
                          "Prior unverified model hypothesis; not an observed fact or root-cause finding.")
