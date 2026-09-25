@@ -4,6 +4,9 @@
 
 FCAPSule runs beside an existing observability stack. It does not install or replace Prometheus, OpenSearch, Filebeat, Grafana, or Alertmanager. Its pod reads bounded data from those systems, resolves the affected Kubernetes workload, and retains derived incident evidence on a persistent state volume.
 
+For the separate shared Atlas service and isolated FCAPSule integration profile,
+see [Atlas Kubernetes deployment](atlas_kubernetes_deployment.md).
+
 The state volume also contains bounded raw live captures under `live-cases/` until incident retention/deletion. Protect the whole volume, not just the derived archive. See [storage and privacy](data_privacy.md).
 
 The current live path is:
