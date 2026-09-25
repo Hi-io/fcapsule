@@ -310,11 +310,12 @@ class LiveSourceTests(unittest.TestCase):
             ]
             prometheus.alert_rules.return_value = {}
 
-            with patch.object(coordinator, "_capture_case", return_value=state / "case"):
+            with patch.object(coordinator, "_capture_case", return_value=state / "case") as capture:
                 result = coordinator.synchronize()
 
             kubernetes.service_pods.assert_not_called()
             self.assertEqual(len(result["captured"]), 1)
+            self.assertEqual(capture.call_args.args[6], _incident_id(prometheus.active_alerts.return_value[0], "shop", "orders-1"))
 
     def test_prometheus_adapter_normalizes_inventory_alerts_and_ranges(self):
         adapter = PrometheusAdapter("http://prometheus")
