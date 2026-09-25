@@ -281,6 +281,15 @@ class FCAPSuleStore:
                     UNIQUE(instance_id, episode_id, payload_digest)
                 );
 
+                CREATE TABLE IF NOT EXISTS atlas_publication_heads (
+                    instance_id TEXT NOT NULL,
+                    episode_id TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    payload_digest TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    PRIMARY KEY (instance_id, episode_id)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_incidents_app_time
                     ON incidents(app_id, started_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_capsules_app_time
@@ -1520,17 +1529,27 @@ class FCAPSuleStore:
             ).fetchone()
             if existing:
                 return {**dict(existing), "payload": _decode(existing["payload"], {}), "is_new": False}
+            head = connection.execute(
+                "SELECT revision, payload_digest, status FROM atlas_publication_heads "
+                "WHERE instance_id = ? AND episode_id = ?", (instance_id, episode_id),
+            ).fetchone()
+            if head and head["payload_digest"] == digest and head["status"] == "sent":
+                return {"accepted": True, "is_new": False, "status": "sent", "revision": head["revision"]}
             pending = int(connection.execute(
                 "SELECT COUNT(*) FROM atlas_outbox WHERE status = 'pending'"
             ).fetchone()[0])
             if pending >= max(1, pending_limit):
                 self.set_setting("atlas_outbox_quota_error", "Pending Atlas outbox quota reached")
                 return {"accepted": False, "reason": "quota_exceeded", "pending_count": pending}
-            row = connection.execute(
-                "SELECT COALESCE(MAX(revision), 0) AS revision FROM atlas_outbox WHERE instance_id = ? AND episode_id = ?",
-                (instance_id, episode_id),
-            ).fetchone()
-            revision = int(row["revision"]) + 1
+            if head:
+                revision = int(head["revision"]) + 1
+            else:
+                # Existing installations may have pruned the old outbox. SQLite's
+                # AUTOINCREMENT high-water mark still exceeds every old case revision.
+                sequence = connection.execute(
+                    "SELECT seq FROM sqlite_sequence WHERE name = 'atlas_outbox'"
+                ).fetchone()
+                revision = int(sequence["seq"] if sequence else 0) + 1
             envelope["revision"] = revision
             connection.execute(
                 """
@@ -1540,6 +1559,12 @@ class FCAPSuleStore:
                 VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)
                 """,
                 (instance_id, episode_id, revision, fingerprint, digest, _json(envelope), now, now, now),
+            )
+            connection.execute(
+                "INSERT INTO atlas_publication_heads (instance_id, episode_id, revision, payload_digest, status) "
+                "VALUES (?, ?, ?, ?, 'pending') ON CONFLICT(instance_id, episode_id) DO UPDATE SET "
+                "revision=excluded.revision, payload_digest=excluded.payload_digest, status=excluded.status",
+                (instance_id, episode_id, revision, digest),
             )
             connection.execute(
                 """
@@ -1570,10 +1595,19 @@ class FCAPSuleStore:
 
     def complete_atlas_publication(self, outbox_id: int) -> None:
         with self._connect() as connection:
+            row = connection.execute(
+                "SELECT instance_id, episode_id, revision FROM atlas_outbox WHERE outbox_id = ?", (int(outbox_id),)
+            ).fetchone()
             connection.execute(
                 "UPDATE atlas_outbox SET status = 'sent', last_error = NULL, updated_at = ? WHERE outbox_id = ?",
                 (utc_now(), int(outbox_id)),
             )
+            if row:
+                connection.execute(
+                    "UPDATE atlas_publication_heads SET status = 'sent' "
+                    "WHERE instance_id = ? AND episode_id = ? AND revision = ?",
+                    (row["instance_id"], row["episode_id"], row["revision"]),
+                )
 
     def defer_atlas_publication(
         self, outbox_id: int, error: str, delay_seconds: int, *, permanent: bool = False,

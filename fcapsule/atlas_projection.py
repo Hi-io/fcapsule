@@ -209,7 +209,8 @@ def project_atlas_case(
             if observation:
                 observations.append(observation)
 
-    findings = [item for item in investigation.get("findings", []) if isinstance(item, dict)][:8]
+    findings = [item for item in investigation.get("findings", [])
+                if isinstance(item, dict) and item.get("state") == "observed"][:8]
     for finding in findings:
         category = str(finding.get("category") or "")
         if category and re.fullmatch(r"[a-zA-Z0-9_-]{1,48}", category):

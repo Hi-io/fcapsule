@@ -41,12 +41,12 @@ spec:
       initContainers:
         - name: prepare-data
           image: busybox:1.36
-          command: ["sh", "-c", "chown -R 999:999 /var/lib/postgresql/data && chmod 700 /var/lib/postgresql/data"]
+          command: ["sh", "-c", "chgrp -R 999 /var/lib/postgresql/data && chmod -R g+rwX /var/lib/postgresql/data"]
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-              add: ["CHOWN", "FOWNER"]
+              add: ["CHOWN", "FOWNER", "DAC_OVERRIDE"]
             runAsNonRoot: false
             runAsUser: 0
           resources:

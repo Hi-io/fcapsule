@@ -45,7 +45,7 @@ def retained_fixture(pod: str = "queue-7", category: str = "scrape_health"):
         "status": "ready", "finished_at": STAMP,
         "assessment": {"likely_mechanism": "The queue scrape selection may be misconfigured, but cause is unverified.",
                        "evidence_ids": ["Q001"]},
-        "findings": [{"category": category, "evidence_ids": ["Q001"]}],
+        "findings": [{"state": "observed", "category": category, "evidence_ids": ["Q001"]}],
     }
     app = {"name": "queue-worker", "namespace": "jobs", "cluster": "cluster-1", "environment": "prod"}
     return episode, investigation, [{"capsule": capsule, "report": {"pm_signals": [
@@ -103,6 +103,19 @@ class AtlasProjectionTests(unittest.TestCase):
         episode, investigation, retained, app = retained_fixture()
         episode["last_activity_at"] = "2026-09-26T03:00:00"
         self.assertIsNone(project_atlas_case("instance-a", episode, investigation, retained, app))
+
+    def test_model_assessment_never_becomes_a_fact_or_fingerprint_input(self):
+        episode, investigation, retained, app = retained_fixture()
+        baseline = project_atlas_case("instance-a", episode, investigation, retained, app)
+        investigation["findings"].append({
+            "state": "likely_explanation", "category": "investigator_assessment",
+            "evidence_ids": ["Q001"],
+        })
+        projected = project_atlas_case("instance-a", episode, investigation, retained, app)
+        self.assertEqual(projected["fingerprint"], baseline["fingerprint"])
+        self.assertFalse(any(item["value"] == "investigator_assessment"
+                             for item in projected["observations"]))
+        self.assertTrue(projected["hypotheses"])
 
 
 class AtlasClientTests(unittest.TestCase):
@@ -193,6 +206,30 @@ class AtlasOutboxTests(unittest.TestCase):
         other = ControlPlane(Path(self.directory.name) / "other")
         self.addCleanup(lambda: other.atlas_publisher.shutdown(drain=False))
         self.assertNotEqual(one, other.atlas_configuration()["instance_id"])
+
+    def test_revision_survives_pruned_sent_outbox_row(self):
+        episode, investigation, retained, app = retained_fixture()
+        payload = project_atlas_case("instance-a", episode, investigation, retained, app)
+        first = self.plane.store.enqueue_atlas_publication(payload)
+        self.assertEqual(first["revision"], 1)
+        self.plane.store.complete_atlas_publication(first["outbox_id"])
+        with self.plane.store._connect() as connection:
+            connection.execute("DELETE FROM atlas_outbox WHERE outbox_id = ?", (first["outbox_id"],))
+        self.assertFalse(self.plane.store.enqueue_atlas_publication(payload)["is_new"])
+        changed = {**payload, "summary": payload["summary"] + " Updated observation."}
+        second = self.plane.store.enqueue_atlas_publication(changed)
+        self.assertEqual(second["revision"], 2)
+        self.assertTrue(second["is_new"])
+
+    def test_pre_ledger_upgrade_uses_global_outbox_high_water(self):
+        episode, investigation, retained, app = retained_fixture()
+        payload = project_atlas_case("instance-a", episode, investigation, retained, app)
+        first = self.plane.store.enqueue_atlas_publication(payload)
+        with self.plane.store._connect() as connection:
+            connection.execute("DELETE FROM atlas_outbox WHERE outbox_id = ?", (first["outbox_id"],))
+            connection.execute("DELETE FROM atlas_publication_heads")
+        changed = {**payload, "summary": payload["summary"] + " New fact."}
+        self.assertGreater(self.plane.store.enqueue_atlas_publication(changed)["revision"], first["revision"])
 
     def test_runtime_settings_mask_token_and_manual_drain_publishes_queued_projection(self):
         with patch.object(self.plane.atlas_publisher, "start"):

@@ -221,7 +221,8 @@ rejected and an error is reported. The HTTP client defaults to a two-second requ
 timeout, caps it at ten seconds, and rejects responses above 512 KiB. This provides
 bounded, retryable delivery, not a guarantee of publication: monitor
 `pending_count`, `failed_count` and `last_error`. The queue shares the local FCAPSule
-state lifecycle. Atlas requires PostgreSQL; service migrations run at application
+state lifecycle. A small local revision ledger survives sent-row pruning so a changed
+case cannot reuse an earlier Atlas revision. Atlas requires PostgreSQL; migrations run at application
 startup.
 
 ## Failure and Operational Limits
