@@ -5,10 +5,11 @@ import yaml
 
 
 OVERLAY = Path(__file__).resolve().parents[1] / "deploy" / "kubernetes" / "atlas-test"
+ATLAS_SERVICE = Path(__file__).resolve().parents[1] / "deploy" / "kubernetes" / "atlas"
 
 
-def load_resources(filename):
-    return [resource for resource in yaml.safe_load_all((OVERLAY / filename).read_text()) if resource]
+def load_resources(filename, overlay=OVERLAY):
+    return [resource for resource in yaml.safe_load_all((overlay / filename).read_text()) if resource]
 
 
 class AtlasKubernetesDeploymentTests(unittest.TestCase):
@@ -61,11 +62,23 @@ class AtlasKubernetesDeploymentTests(unittest.TestCase):
             source_volume = next(v for v in pod_spec["volumes"] if v["name"] == "source")
             self.assertIn("emptyDir", source_volume)
             self.assertTrue(any(init["name"] == "install-source" for init in pod_spec["initContainers"]))
+            install_source = next(init for init in pod_spec["initContainers"] if init["name"] == "install-source")
+            self.assertIn(
+                "fcapsule-atlas-test-source",
+                [entry["configMapRef"]["name"] for entry in install_source["envFrom"]],
+            )
             self.assertTrue(pod_spec["containers"][0]["readinessProbe"])
 
         self.assertEqual(state_claims, {"fcapsule-dev-a-state", "fcapsule-dev-b-state"})
         self.assertEqual(instance_ids, {"atlas-dev-a", "atlas-dev-b"})
         self.assertEqual(atlas_urls, {"http://atlas.fcapsule-atlas-test.svc.cluster.local:8080"})
+        atlas_deployment = next(resource for resource in load_resources("atlas.yaml") if resource["kind"] == "Deployment")
+        atlas_source = next(
+            init for init in atlas_deployment["spec"]["template"]["spec"]["initContainers"]
+            if init["name"] == "install-source"
+        )
+        self.assertIn("#subdirectory=atlas", atlas_source["args"][0])
+        self.assertEqual(atlas_source["envFrom"][0]["configMapRef"]["name"], "fcapsule-atlas-test-source")
 
     def test_database_and_atlas_credentials_are_external_secret_references(self):
         postgres = next(
@@ -83,6 +96,32 @@ class AtlasKubernetesDeploymentTests(unittest.TestCase):
             self.assertIn("valueFrom", atlas_env[key])
             self.assertEqual(atlas_env[key]["valueFrom"]["secretKeyRef"]["name"], "fcapsule-atlas-runtime")
         self.assertEqual(atlas_env["ATLAS_API_TOKEN"]["valueFrom"]["secretKeyRef"]["key"], "ATLAS_API_TOKEN")
+
+    def test_portable_atlas_profile_uses_durable_pvc_and_no_node_local_assumptions(self):
+        resources = []
+        for filename in ("postgres.yaml", "atlas.yaml", "storage.yaml"):
+            resources.extend(load_resources(filename, ATLAS_SERVICE))
+        services = [resource for resource in resources if resource["kind"] == "Service"]
+        deployments = [resource for resource in resources if resource["kind"] == "Deployment"]
+        claim = next(resource for resource in resources if resource["kind"] == "PersistentVolumeClaim")
+
+        self.assertTrue(all(service["spec"]["type"] == "ClusterIP" for service in services))
+        self.assertEqual(claim["spec"]["storageClassName"], "replace-with-storage-class")
+        self.assertEqual(claim["spec"]["resources"]["requests"]["storage"], "10Gi")
+        for deployment in deployments:
+            pod_spec = deployment["spec"]["template"]["spec"]
+            self.assertNotIn("nodeSelector", pod_spec)
+            self.assertFalse(any("hostPath" in volume for volume in pod_spec["volumes"]))
+            self.assertEqual(deployment["spec"]["replicas"], 1)
+
+        atlas = next(resource for resource in deployments if resource["metadata"]["name"] == "atlas")
+        source = next(init for init in atlas["spec"]["template"]["spec"]["initContainers"] if init["name"] == "install-source")
+        self.assertIn("#subdirectory=atlas", source["args"][0])
+        self.assertEqual(source["envFrom"][0]["configMapRef"]["name"], "atlas-source")
+
+        apply_script = (ATLAS_SERVICE / "apply.sh").read_text()
+        self.assertIn("SOURCE_REF", apply_script)
+        self.assertIn("storageClassName: replace-with-storage-class", (ATLAS_SERVICE / "storage.yaml").read_text())
 
 
 if __name__ == "__main__":

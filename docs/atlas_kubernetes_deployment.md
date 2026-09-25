@@ -12,9 +12,7 @@ services are `ClusterIP` only; use loopback port-forwarding for local access.
 The checked-in overlay is specific to the current single-node test cluster:
 
 - a schedulable node whose `kubernetes.io/hostname` label is `worker-1`;
-- an administrator-approved container image loader on `worker-1`;
-- outbound HTTPS from FCAPSule init containers to GitHub for the chosen source
-  archive;
+- outbound HTTPS from init containers to GitHub and the Python package index;
 - 2 GiB for PostgreSQL and 1 GiB per FCAPSule state volume at
   `/var/lib/fcapsule-atlas-test/` on `worker-1`.
 
@@ -57,33 +55,28 @@ Protect and delete the source files after use. Kubernetes Secret data is not
 automatically encrypted at rest unless the cluster enables encryption; RBAC
 and etcd encryption still matter.
 
-## Build And Apply
+## Apply And Update
 
-Build the Atlas image from the integrated repository revision. The cluster
-node must have the image locally because the development Deployment deliberately
-uses `imagePullPolicy: Never` rather than pulling an unverified public image:
+The Atlas and FCAPSule pods use `python:3.12-slim`; each has a source init
+container that downloads the same immutable repository archive. Atlas installs
+the `atlas/` package and its requirements into its own `emptyDir`; each
+FCAPSule pod independently installs the root package into another private
+`emptyDir`. No custom image build or node-level image import is required. The
+chosen commit must be reachable from `Hi-io/fcapsule` so GitHub can serve its
+archive.
 
-```bash
-docker build -f atlas/Dockerfile -t fcapsule-atlas:dev .
-docker save fcapsule-atlas:dev | ssh worker-1 'sudo k3s ctr images import -'
-```
-
-If `worker-1` uses a different runtime, import the saved image into that
-runtime's Kubernetes image namespace. Do not enable pulling for the local tag.
-
-Set `FCAPSULE_SOURCE_REF` in
-`deploy/kubernetes/atlas-test/config.yaml` to the full 40-character FCAPSule
-commit SHA that contains the Atlas client integration. The `master` value in
-the checked-in sample is intentionally rejected by `apply.sh`; an immutable
-commit makes the source init container repeatable. The two development pods
-independently install that archive into their own ephemeral `emptyDir`.
-
-Then apply and wait for all readiness checks:
+Create the external Secrets first, then apply with the commit SHA that contains
+both the Atlas package and FCAPSule client integration:
 
 ```bash
-deploy/kubernetes/atlas-test/apply.sh
+SOURCE_REF="$(git rev-parse HEAD)" deploy/kubernetes/atlas-test/apply.sh
 kubectl get pods,svc,pvc -n fcapsule-atlas-test
 ```
+
+`apply.sh` rejects mutable branch names and non-SHA values. It materializes the
+source SHA in a runtime ConfigMap, applies the Kustomize overlay, restarts the
+deployments so environment-based config is refreshed, then waits for rollout.
+The same source revision is used by Atlas and both FCAPSule instances.
 
 The Atlas `/healthz` readiness probe includes a PostgreSQL check. FCAPSule
 readiness uses `/healthz`. Probes run against loopback from inside each pod. The
@@ -119,18 +112,54 @@ Choose `fcapsule-dev-b` to inspect the second isolated state. Atlas can be
 checked separately with `kubectl -n fcapsule-atlas-test port-forward
 service/atlas 8080:8080` and `curl http://127.0.0.1:8080/healthz`.
 
-To update FCAPSule, change `FCAPSULE_SOURCE_REF` to a different immutable
-commit SHA and run `apply.sh` again. To update Atlas, rebuild/import the image
-with the approved worker image loader, then run:
+To update Atlas and FCAPSule together, pass a different immutable commit SHA
+and run `apply.sh` again:
 
 ```bash
-kubectl -n fcapsule-atlas-test rollout restart deployment/atlas
-kubectl -n fcapsule-atlas-test rollout status deployment/atlas --timeout=180s
+SOURCE_REF=<commit-sha> deploy/kubernetes/atlas-test/apply.sh
 ```
 
 Changes to either Secret require a rollout restart of the consuming
 Deployments. The Atlas API token is consumed by Atlas and both FCAPSule pods;
 rotate the shared value together and avoid logging request headers.
+
+## Long-Lived Atlas Service
+
+`deploy/kubernetes/atlas/` is the Atlas-only profile for a shared service in the
+separate `fcapsule-atlas` namespace. It has no worker selector or `hostPath`;
+PostgreSQL uses a 10 GiB PVC. Before use, replace the
+`replace-with-storage-class` value in `storage.yaml` with the cluster's
+approved durable StorageClass. Its `apply.sh` refuses to proceed while the
+placeholder remains.
+
+Create namespace-scoped Secrets in `fcapsule-atlas` through the approved secret
+manager, or from protected env files outside the repository:
+
+```bash
+kubectl apply -f deploy/kubernetes/atlas/namespace.yaml
+kubectl -n fcapsule-atlas create secret generic atlas-runtime \
+  --from-env-file=/secure/path/atlas-runtime.env
+kubectl -n fcapsule-atlas create secret generic atlas-postgres \
+  --from-env-file=/secure/path/atlas-postgres.env
+```
+
+Use the keys `DATABASE_URL` and `ATLAS_API_TOKEN` in `atlas-runtime.env`, and
+`POSTGRES_PASSWORD` in `atlas-postgres.env`. The database URL should use
+`atlas-postgres.fcapsule-atlas.svc.cluster.local:5432/atlas` and the matching
+URL-encoded password. Apply a reachable immutable source commit:
+
+```bash
+SOURCE_REF=<commit-sha> deploy/kubernetes/atlas/apply.sh
+```
+
+FCAPSule instances in other namespaces can use
+`http://atlas.fcapsule-atlas.svc.cluster.local:8080` and the same Atlas bearer
+token. This service remains a single Atlas and PostgreSQL replica. Services are
+`ClusterIP`; it is not TLS termination or user authentication for the FCAPSule
+UI. Add cluster-appropriate NetworkPolicy and authenticated TLS ingress only
+after validating the network and identity controls. Use
+`deploy/kubernetes/atlas/cleanup-runtime.sh` to stop the processes while keeping
+the database PVC and data.
 
 ## Cleanup And Limits
 

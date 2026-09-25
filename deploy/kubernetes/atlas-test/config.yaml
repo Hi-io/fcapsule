@@ -9,4 +9,3 @@ data:
   FCAPSULE_ATLAS_URL: "http://atlas.fcapsule-atlas-test.svc.cluster.local:8080"
   FCAPSULE_ATLAS_READ: "true"
   FCAPSULE_ATLAS_PUBLISH: "true"
-  FCAPSULE_SOURCE_REF: "master"

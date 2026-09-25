@@ -91,6 +91,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: fcapsule-atlas-test-runtime
+            - configMapRef:
+                name: fcapsule-atlas-test-source
           resources:
             requests:
               cpu: 50m
@@ -245,6 +247,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: fcapsule-atlas-test-runtime
+            - configMapRef:
+                name: fcapsule-atlas-test-source
           resources:
             requests:
               cpu: 50m

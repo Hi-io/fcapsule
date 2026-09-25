@@ -3,7 +3,7 @@ kind: Service
 metadata:
   name: atlas
   labels:
-    app.kubernetes.io/part-of: fcapsule-atlas-test
+    app.kubernetes.io/part-of: fcapsule-atlas
 spec:
   type: ClusterIP
   selector:
@@ -19,7 +19,7 @@ metadata:
   name: atlas
   labels:
     app.kubernetes.io/name: atlas
-    app.kubernetes.io/part-of: fcapsule-atlas-test
+    app.kubernetes.io/part-of: fcapsule-atlas
 spec:
   replicas: 1
   selector:
@@ -29,10 +29,8 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: atlas
-        app.kubernetes.io/part-of: fcapsule-atlas-test
+        app.kubernetes.io/part-of: fcapsule-atlas
     spec:
-      nodeSelector:
-        kubernetes.io/hostname: worker-1
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -49,7 +47,7 @@ spec:
               "https://github.com/Hi-io/fcapsule/archive/${FCAPSULE_SOURCE_REF}.zip#subdirectory=atlas"
           envFrom:
             - configMapRef:
-                name: fcapsule-atlas-test-source
+                name: atlas-source
           resources:
             requests:
               cpu: 50m
@@ -88,12 +86,12 @@ spec:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: fcapsule-atlas-runtime
+                  name: atlas-runtime
                   key: DATABASE_URL
             - name: ATLAS_API_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: fcapsule-atlas-runtime
+                  name: atlas-runtime
                   key: ATLAS_API_TOKEN
           startupProbe:
             exec:
