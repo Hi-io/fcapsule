@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fcapsule-atlas-test-runtime
+  labels:
+    app.kubernetes.io/part-of: fcapsule-atlas-test
+data:
+  FCAPSULE_LIVE_ENABLED: "false"
+  FCAPSULE_ATLAS_URL: "http://atlas.fcapsule-atlas-test.svc.cluster.local:8080"
+  FCAPSULE_ATLAS_READ: "true"
+  FCAPSULE_ATLAS_PUBLISH: "true"
+  FCAPSULE_SOURCE_REF: "master"
