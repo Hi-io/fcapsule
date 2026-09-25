@@ -26,7 +26,8 @@ For the full product narrative, see [Observability With Memory](docs/product_val
 2. A firing alert opens a bounded capture. FCAPSule preserves selected fault, performance, log and configuration evidence and builds a report even if the model provider is unavailable.
 3. **Operations** presents the episode, affected resource, observed impact and AI investigation. Follow citations into the captured evidence or the investigator's checks; add evidence or export the report when needed.
 4. **Patterns** shows recurring issues and links back to separate episodes. An eligible earlier capsule can become bounded context for a new investigation.
-5. **Settings** controls FCAPSule incident retention and model configuration. Offline model comparisons remain an evaluation workflow, not an operator dashboard.
+5. Optionally connect **Atlas** in Settings. Its separate service stores minimized, versioned cases from participating instances; the Atlas view lets engineers inspect repeated observations and prior case provenance without treating similarity as a verified cause.
+6. **Settings** also controls FCAPSule incident retention and model configuration. Offline model comparisons remain an evaluation workflow, not an operator dashboard.
 
 ![Investigation activity with diagnostic checks and retained-history comparison](docs/assets/product/ai-investigation-lab.png)
 

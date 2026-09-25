@@ -1,6 +1,6 @@
 # FCAPSule Roadmap
 
-FCAPSule provides a single-replica Kubernetes control plane, live Prometheus/OpenSearch/Kubernetes adapters, domain-balanced evidence capsules, model profiles, and four operational web views. The remaining roadmap focuses on hardening, additional integrations, scale, and broader evaluation.
+FCAPSule provides a single-replica Kubernetes control plane, live Prometheus/OpenSearch/Kubernetes adapters, domain-balanced evidence capsules, model profiles, and five operational web views, including the optional Atlas integration. The remaining roadmap focuses on hardening, additional integrations, scale, and broader evaluation.
 
 ## 1. Source Hardening and Expansion
 
