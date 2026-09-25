@@ -735,3 +735,9 @@ tbody tr:hover { background:#fafbfe; }
   .metric-preview-heading { flex-wrap:wrap; }
   .metric-preview .chart-times { font-size:9px; }
 }
+.identity-label-row { display:grid; grid-template-columns:minmax(80px,1fr) minmax(110px,1.3fr) minmax(140px,1.8fr) 40px; gap:8px; margin:8px 0; align-items:center; }
+.identity-label-row input { min-width:0; }
+.identity-label-row label { display:block; min-width:0; }
+.identity-label-row label small { display:block; margin-bottom:4px; color:var(--muted, #596579); font-size:11px; }
+.identity-label-row button { align-self:end; }
+@media (max-width:680px) { .identity-label-row { grid-template-columns:minmax(0,1fr) minmax(0,1fr) 40px; } .identity-label-row label:first-child { grid-column:1 / -1; } .identity-label-row label:nth-child(3) { grid-column:1 / 3; } }

@@ -9,10 +9,10 @@ The state volume also contains bounded raw live captures under `live-cases/` unt
 The current live path is:
 
 ```text
-Prometheus firing alert
+Prometheus firing alert or optional Grafana webhook
         |
         v
-namespace + pod identity
+pod, workload, Service selector, or configured ID labels
         |
         +-- Prometheus range queries -> PM series
         +-- OpenSearch bounded search -> application logs
@@ -110,6 +110,12 @@ The base ConfigMap defines:
 
 The same non-secret values can be changed in **Targets**. UI changes persist on the state volume and override environment defaults after first save. Leaving Kubernetes API URL blank uses the mounted ServiceAccount token and cluster CA.
 
+**Additional resource IDs** in Targets map an alert label to a Kubernetes pod label. The default mappings are `cnfc -> cnfc` and `vnfc -> vnfc`; edit the pod label if the cluster uses a qualified key such as `telecom.example.com/cnfc`. A pod-named alert resolves that exact pod first. Otherwise, configured IDs narrow the Kubernetes inventory (multiple IDs intersect); a matching CNFC can capture several replicas in one bounded incident. Workload and Service scope remain available when no configured ID is present. A namespace-free ID is accepted only if all matches are in one namespace. Missing or ambiguous matches appear as unmapped alerts in Targets, not as guessed incidents. At most four matching pods have per-pod metrics, logs and configuration captured; the retained case records the full match count and any omitted pods.
+
+Grafana is an **optional alert input**, not a telemetry store. Set `FCAPSULE_GRAFANA_WEBHOOK_TOKEN` in the `fcapsule-secrets` Secret, restart FCAPSule, then enable **Accept Grafana webhook alerts** in Targets. Configure a Grafana Alerting webhook contact point with URL `http://fcapsule.fcapsule.svc.cluster.local:8765/api/webhooks/grafana`, HTTP method POST, and Authorization scheme `Bearer` with the same token as credentials. Keep the token out of the URL. The receiver accepts Grafana's standard JSON notification, normalizes each firing alert, and reuses the same Kubernetes/Prometheus/OpenSearch capture path. Resolved notifications remove active alerts. Unresolved webhook state expires after 24 hours if Grafana stops notifying; configure Grafana repeat notifications for long incidents. The receiver is disabled by default. It can be turned off in Targets without deleting prior retained capsules.
+
+Grafana-managed rules are not necessarily available through Prometheus `/api/v1/rules`, so rule-expression evidence may be unavailable for those alerts even when pod metrics are captured. Avoid routing the same rule from both Prometheus polling and Grafana unless two separate source records are desired.
+
 OpenSearch Basic authentication can be supplied through `OPENSEARCH_USERNAME` and `OPENSEARCH_PASSWORD`. Do not place credentials in the ConfigMap.
 
 ## Model Credential
@@ -121,6 +127,7 @@ kubectl create secret generic fcapsule-secrets \
   -n fcapsule \
   --from-literal=DEEPSEEK_API_KEY='<value>' \
   --from-literal=OPENROUTER_API_KEY='<optional-value>' \
+  --from-literal=FCAPSULE_GRAFANA_WEBHOOK_TOKEN='<optional-random-token>' \
   --dry-run=client -o yaml | kubectl apply -f -
 kubectl rollout restart deployment/fcapsule -n fcapsule
 ```

@@ -88,6 +88,16 @@ def _dependencies(entry: dict[str, Any]) -> set[str]:
     return dependencies
 
 
+def _identifiers(entry: dict[str, Any]) -> set[str]:
+    report = entry.get("report") if isinstance(entry.get("report"), dict) else {}
+    values = set()
+    for alert in report.get("fault_alerts", []):
+        for item in alert.get("identifiers") or []:
+            if isinstance(item, dict) and item.get("name") and item.get("value"):
+                values.add(f"{_normalise(item['name'])}:{_normalise(item['value'])}")
+    return values
+
+
 def episode_profile(
     episode: dict[str, Any], application: dict[str, Any] | None, entries: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
@@ -99,12 +109,14 @@ def episode_profile(
     alerts: set[str] = set()
     nodes: set[str] = set()
     dependencies: set[str] = set()
+    identifiers: set[str] = set()
     for entry in entries:
         alerts.update(_alert_families(entry))
         nodes.update(_configuration_nodes(entry))
         dependencies.update(_dependencies(entry))
+        identifiers.update(_identifiers(entry))
     # Alert family and an independent topology/node link are both required.
-    if not alerts or not (nodes or dependencies):
+    if not alerts or not (nodes or dependencies or identifiers):
         return None
     try:
         started = _timestamp(_text(episode.get("started_at")))
@@ -123,6 +135,7 @@ def episode_profile(
         "alerts": alerts,
         "nodes": nodes,
         "dependencies": dependencies,
+        "identifiers": identifiers,
     }
 
 
@@ -182,8 +195,8 @@ def _candidate(
     digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode("utf-8")).hexdigest()[:18]
     relationship = "common condition suspected; verify shared evidence before treating it as a root cause"
     basis = [
-        {"kind": "same_alert_family", "value": alert},
-        {"kind": "same_node" if link_kind == "node" else "shared_dependency", "value": link_value},
+        {"kind": "same_alert_family", "value": alert} if link_kind != "identifier" else {"kind": "shared_identifier", "value": link_value},
+        {"kind": "same_node" if link_kind == "node" else "shared_dependency", "value": link_value} if link_kind != "identifier" else {"kind": "distinct_applications", "value": "2 or more"},
         {"kind": "time_window", "value": "within 15 minutes"},
     ]
     return {
@@ -193,6 +206,7 @@ def _candidate(
         "title": (
             f"Potential shared node condition on {link_value}"
             if link_kind == "node"
+            else f"Potential shared identifier condition: {link_value}" if link_kind == "identifier"
             else f"Potential shared dependency condition involving {link_value}"
         ),
         "status": "active" if any(_normalise(item["status"]) == "active" for item in items) else "resolved",
@@ -217,6 +231,8 @@ def derive_related_episode_groups(profiles: list[dict[str, Any]]) -> list[dict[s
                 buckets[(profile["cluster"], alert, "node", node)].append(profile)
             for dependency in profile["dependencies"]:
                 buckets[(profile["cluster"], alert, "dependency", dependency)].append(profile)
+        for identifier in profile.get("identifiers", set()):
+            buckets[(profile["cluster"], "", "identifier", identifier)].append(profile)
 
     candidates: list[dict[str, Any]] = []
     for (cluster, alert, link_kind, link_value), members in buckets.items():

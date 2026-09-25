@@ -9,6 +9,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from unittest.mock import patch
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 from zipfile import ZipFile
 
 from fcapsule.control_plane import ControlPlane
@@ -27,6 +28,33 @@ def wait_for_idle(control_plane: ControlPlane, timeout: float = 15) -> None:
 
 
 class ControlPlaneTests(unittest.TestCase):
+    def test_grafana_webhook_requires_explicit_enablement_and_bearer_token(self):
+        payload = {"status": "firing", "alerts": [{"status": "firing", "fingerprint": "test-1",
+                   "startsAt": "2026-09-25T05:00:00Z", "labels": {"alertname": "GatewayErrors", "namespace": "core", "cnfc": "edge-a"}}]}
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"FCAPSULE_GRAFANA_WEBHOOK_TOKEN": "test-token"}):
+            server = create_app_server("127.0.0.1", 0, Path(directory) / "state")
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                url = f"http://127.0.0.1:{server.server_port}/api/webhooks/grafana"
+                def post(token):
+                    return urlopen(Request(url, data=json.dumps(payload).encode(), method="POST", headers={
+                        "Content-Type": "application/json", "Authorization": f"Bearer {token}"}), timeout=3)
+                with self.assertRaises(HTTPError) as disabled:
+                    post("test-token")
+                self.assertEqual(disabled.exception.code, 404)
+                server.control_plane.live_sources.update_configuration({"grafana_webhook_enabled": True})
+                with self.assertRaises(HTTPError) as denied:
+                    post("wrong-token")
+                self.assertEqual(denied.exception.code, 401)
+                with post("test-token") as response:
+                    self.assertEqual(response.status, 202)
+                    self.assertEqual(json.loads(response.read())["firing"], 1)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
     def test_capture_window_end_is_not_alert_resolution(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
             plane = ControlPlane(Path(directory) / "state")

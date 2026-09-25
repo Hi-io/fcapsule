@@ -13,7 +13,7 @@ When a related problem returns, the investigator can consult eligible earlier ca
 ## Why It Matters
 
 - **An investigator, not another summary.** After bounded deterministic capture, the model can choose read-only checks, examine their observations, compare explanations and propose a next action with an expected finding. Checks, citations, uncertainty and token use remain reviewable.
-- **Several signals, one incident.** Prometheus alerts and time series, OpenSearch logs, and Kubernetes workload/configuration facts are aligned to the affected resource. Related alerts form an episode without losing their individual reports.
+- **Several signals, one incident.** Prometheus alerts (or optional Grafana webhooks), time series, OpenSearch logs, and Kubernetes workload/configuration facts are aligned to the affected resource. Pod identity is preferred; configured labels such as CNFC/VNFC can scope an alert to several replicas. Related alerts form an episode without losing their individual reports.
 - **A memory an engineer can audit.** Selected evidence, completed checks and provenance survive in a retained capsule. Patterns exposes recurrence; an eligible earlier capsule can inform a later investigation even when its original telemetry is no longer searchable.
 - **A place for the missing clue.** An engineer may add text, an external screenshot or an audio note. Optional vision and transcription models turn supplied media into attributable observations for a reviewed reassessment.
 - **A new retention option to evaluate.** Preserving compact incident evidence can extend investigative context beyond raw-source retention. It does not recover data that was never captured or justify reducing source retention without measuring the result.
@@ -22,7 +22,7 @@ For the full product narrative, see [Observability With Memory](docs/product_val
 
 ## The Operator Workflow
 
-1. Configure and test Prometheus, OpenSearch and Kubernetes access in **Targets**. Coverage shows currently observed workloads by namespace.
+1. Configure and test Prometheus, OpenSearch and Kubernetes access in **Targets**. Coverage shows currently observed workloads by namespace. Optionally map alert IDs to pod labels or enable the authenticated Grafana webhook.
 2. A firing alert opens a bounded capture. FCAPSule preserves selected fault, performance, log and configuration evidence and builds a report even if the model provider is unavailable.
 3. **Operations** presents the episode, affected resource, observed impact and AI investigation. Follow citations into the captured evidence or the investigator's checks; add evidence or export the report when needed.
 4. **Patterns** shows recurring issues and links back to separate episodes. An eligible earlier capsule can become bounded context for a new investigation.

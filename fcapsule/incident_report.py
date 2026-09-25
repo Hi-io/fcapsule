@@ -238,6 +238,7 @@ def _fault_alerts(capsule: dict[str, Any]) -> list[dict[str, Any]]:
                 "timestamp": item.get("startsAt"),
                 "description": item.get("annotations", {}).get("description", "Alert fired."),
                 "service": labels.get("service") or labels.get("component"),
+                "identifiers": (item.get("resolved_scope") or {}).get("identifiers", []),
                 "rule": item.get("rule"),
             }
         )
@@ -396,6 +397,7 @@ def build_incident_report(
         },
         "timeline": sorted(capsule.get("timeline", []), key=lambda item: item.get("timestamp", "")),
         "topology": case.get("topology", []),
+        "resource_scope": case.get("resource_scope", {}),
         "fault_alerts": _fault_alerts(capsule),
         "pm_signals": _pm_signals(source_metrics, anomalies),
         "alert_metric_evidence": [alert.get("metric_evidence") or {

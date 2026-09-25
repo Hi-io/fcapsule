@@ -17,7 +17,7 @@ Use `--host`, `--port`, and `--state-dir` to change the binding or storage locat
 
 ## Operations View
 
-The Operations view treats an incident episode, not an individual alert notification, as the operator's unit of work. Only firing Prometheus alerts open work. Signals for the same application within a 15-minute correlation window join one episode; later signals remain individually auditable and can retain their own reports.
+The Operations view treats an incident episode, not an individual alert notification, as the operator's unit of work. Firing Prometheus alerts and, when enabled, authenticated Grafana webhooks can open work. Signals for the same application within a 15-minute correlation window join one episode; later signals remain individually auditable and can retain their own reports. Alerts can identify one pod or a configured shared resource ID such as CNFC/VNFC; a shared ID is shown as the affected scope, not as an arbitrarily selected replica.
 
 An active episode takes its title and severity from a currently firing signal, not
 an older resolved critical alert. Once resolved, its highest-severity historical
