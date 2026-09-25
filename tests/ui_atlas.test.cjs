@@ -38,12 +38,13 @@ test('case detail separates observations and hypotheses and shows source provena
   const html = render('atlasCaseDetail', `atlasCaseDetail({case:{
     id:'case/one',instance_id:'edge-north',episode_id:'episode-7',observed_at:'2026-09-12T03:00:00Z',
     scope:{cluster:'north',namespace:'checkout',service:'api'},summary:'Repeated 503 response',
-    observations:[{kind:'http',key:'status',value:503,source:'prometheus',reference:'E-12'}],
+    observations:[{kind:'http',key:'status',value:503,source:'prometheus',observed_at:'2026-09-12T02:55:00Z',reference:'E-12'}],
     hypotheses:[{statement:'<script>dependency failure</script>',confidence:0.4,supporting_refs:['E-12']}]
   }})`);
   assert.match(html, /Retained observations \(facts\)/);
   assert.match(html, /status: 503/);
   assert.match(html, /Source: prometheus/);
+  assert.match(html, /Observed: 2026-09-12T02:55:00Z/);
   assert.match(html, /Reference: E-12/);
   assert.match(html, /Unverified hypotheses/);
   assert.match(html, /&lt;script&gt;dependency failure&lt;\/script&gt;/);
@@ -52,6 +53,10 @@ test('case detail separates observations and hypotheses and shows source provena
   assert.match(html, /edge-north/);
   assert.match(html, /Record/);
   assert.match(html, /episode-7/);
+});
+
+test('local deletion warns that an Atlas copy is retained', () => {
+  assert.match(source, /A case already published to Atlas will remain there/);
 });
 
 test('Atlas retrieval trail links case IDs without treating them as FCAPSule evidence', () => {

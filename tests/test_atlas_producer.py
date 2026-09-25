@@ -140,6 +140,15 @@ class AtlasClientTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 422)
         self.assertNotIn("bad", str(raised.exception))
 
+    def test_search_limit_matches_atlas_contract(self):
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read.return_value = b'{"cases":[]}'
+        with patch("fcapsule.atlas_client.urlopen", return_value=response) as open_url:
+            AtlasClient("https://atlas.example").search(None, "timeout", 50)
+        self.assertEqual(json.loads(open_url.call_args.args[0].data)["limit"], 10)
+
 
 class AtlasOutboxTests(unittest.TestCase):
     def setUp(self):

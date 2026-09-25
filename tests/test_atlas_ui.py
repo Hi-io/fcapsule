@@ -103,7 +103,7 @@ class AtlasUIRouteTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(result["cases"][0]["id"], "c-1")
         self.assertEqual(self.plane.client.calls[-1], ("search", {
-            "scope": {"cluster": "west"}, "query": "timeout", "limit": 20, "before": None,
+            "scope": {"cluster": "west"}, "query": "timeout", "limit": 10, "before": None,
         }))
 
     def test_unavailable_read_is_not_an_empty_success(self):
@@ -112,6 +112,11 @@ class AtlasUIRouteTests(unittest.TestCase):
         self.assertEqual(status, 503)
         self.assertEqual(result["status"], "disabled")
         self.assertNotIn("patterns", result)
+
+    def test_search_limit_matches_atlas_contract(self):
+        status, _ = self.request("POST", "/api/atlas/search", {"query": "timeout", "limit": 50})
+        self.assertEqual(status, 200)
+        self.assertEqual(self.plane.client.calls[-1][1]["limit"], 10)
 
     def test_settings_response_never_echoes_bearer_token(self):
         status, result = self.request("POST", "/api/settings/atlas", {

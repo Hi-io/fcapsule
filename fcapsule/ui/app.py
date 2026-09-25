@@ -390,7 +390,7 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
                     self._json({"error": "Enter a search term", "status": "invalid_request"}, HTTPStatus.BAD_REQUEST)
                     return
                 try:
-                    limit = max(1, min(50, int(payload.get("limit", 20))))
+                    limit = max(1, min(10, int(payload.get("limit", 10))))
                 except (TypeError, ValueError):
                     self._json({"error": "limit must be a number", "status": "invalid_request"}, HTTPStatus.BAD_REQUEST)
                     return

@@ -992,7 +992,7 @@ async function changeEpisodeState(id, action) {
 }
 
 async function deleteEpisode(id) {
-  if (!confirm('Permanently delete this episode and every related report and capsule?')) return;
+  if (!confirm('Permanently delete this local episode and its reports and capsule? A case already published to Atlas will remain there.')) return;
   const response = await fetch(`/api/episodes/${encodeURIComponent(id)}`, {method:'DELETE'});
   const result = await response.json();
   if (!response.ok) { alert(result.error || 'Unable to delete episode'); return; }
@@ -1566,7 +1566,7 @@ function atlasFactSection(title, values, emptyText) {
   const items = atlasRecords(values).map(item => {
     const text = atlasText(item);
     const source = item && typeof item === 'object'
-      ? [item.source && `Source: ${atlasText(item.source)}`, item.supporting_refs && `Supporting references: ${atlasText(item.supporting_refs)}`, item.reference && `Reference: ${atlasText(item.reference)}`, item.source_ref && `Reference: ${atlasText(item.source_ref)}`].filter(Boolean).join(' · ')
+      ? [item.source && `Source: ${atlasText(item.source)}`, item.observed_at && `Observed: ${formatDate(item.observed_at)}`, item.supporting_refs && `Supporting references: ${atlasText(item.supporting_refs)}`, item.reference && `Reference: ${atlasText(item.reference)}`, item.source_ref && `Reference: ${atlasText(item.source_ref)}`].filter(Boolean).join(' · ')
       : '';
     return text ? `<li><span>${safe(text)}</span>${source ? `<small>${safe(source)}</small>` : ''}</li>` : '';
   }).filter(Boolean);
@@ -1704,7 +1704,7 @@ async function loadAtlas() {
     if (sequence !== atlasRequestSequence) return;
     atlasPatterns = atlasRecords(result.patterns);
   }).catch(error => { if (sequence === atlasRequestSequence) atlasPatternError = error.message || 'Atlas patterns are unavailable.'; });
-  const casesPromise = atlasQuery ? fetch('/api/atlas/search', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:atlasQuery,scope:atlasScope ? {cluster:atlasScope} : null,limit:20})}).then(async response => {
+  const casesPromise = atlasQuery ? fetch('/api/atlas/search', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:atlasQuery,scope:atlasScope ? {cluster:atlasScope} : null,limit:10})}).then(async response => {
     const result = await response.json();
     if (!response.ok) throw Object.assign(new Error(atlasFailureText(result.error, result.status)), {serviceStatus:result.status});
     if (sequence !== atlasRequestSequence) return;

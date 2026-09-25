@@ -88,7 +88,7 @@ class AtlasClient:
     def search(
         self, scope: dict[str, Any] | None, query: str = "", limit: int = 10, before: str | None = None,
     ) -> dict[str, Any]:
-        payload: dict[str, Any] = {"limit": max(1, min(50, int(limit)))}
+        payload: dict[str, Any] = {"limit": max(1, min(10, int(limit)))}
         if isinstance(scope, dict) and scope:
             payload["scope"] = scope
         if query:
