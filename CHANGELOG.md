@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Aligned Estima's map with the shared light visual system, balanced node placement,
+  separated overlapping case marks and improved label wrapping and type hierarchy.
 - Replaced the Estima catalogue-first page with an interactive collective-memory
   map, contextual record inspector, map/list views, event-time and instance
   filters, and shareable record links. Connections reflect exact retained

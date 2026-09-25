@@ -63,6 +63,30 @@ test('human-facing titles retain the technical meaning without asserting root ca
   assert.equal(map.caseTitle(record('a',[{key:'alert_family',value:'KubePodNotReady'}])),'Kube Pod Not Ready');
 });
 
+test('labels wrap at word boundaries and stay within two bounded lines',()=>{
+  assert.deepEqual(map.labelLines('Checkout Latency High'),['Checkout Latency High']);
+  assert.deepEqual(map.labelLines('pod container restarts total'),['pod container restarts','total']);
+  for (const value of ['x'.repeat(120),'inventory response schema mismatch across multiple services']) {
+    const lines=map.labelLines(value);
+    assert.equal(lines.length,2);
+    assert.ok(lines.every(line=>line.length<=23));
+  }
+});
+
+test('case marks stay centered and do not overlap while preserving relationships',()=>{
+  const patterns=Array.from({length:20},(_,i)=>pattern('p'+i,'timeout',i));
+  const records=Array.from({length:120},(_,i)=>record('c'+i,[{key:'timeout',value:i%20}]));
+  const source=map.buildGraph(patterns,records);
+  const placed=map.positionGraph(source);
+  const cases=placed.nodes.filter(n=>n.kind==='case');
+  assert.ok(Math.abs(cases.reduce((sum,n)=>sum+n.x,0)/cases.length-500)<0.01);
+  assert.ok(Math.abs(cases.reduce((sum,n)=>sum+n.y,0)/cases.length-350)<0.01);
+  for(let i=0;i<cases.length;i++) for(let j=i+1;j<cases.length;j++) {
+    assert.ok(Math.hypot(cases[i].x-cases[j].x,cases[i].y-cases[j].y)>11.8);
+  }
+  assert.deepEqual(placed.edges,source.edges);
+});
+
 test('explorer is read-only and uses bounded existing retrieval routes, not model APIs',()=>{
   const source=fs.readFileSync(path.join(__dirname,'../fcapsule/ui/assets/estima.js'),'utf8');
   assert.match(source,/limit:'20'/);

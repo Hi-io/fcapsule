@@ -2,10 +2,10 @@
 (function (global) {
   'use strict';
   const GROUPS = [
-    {id:'alerts', label:'Fault signals', color:'#ffb789'},
-    {id:'configuration', label:'Configuration', color:'#bdabff'},
-    {id:'performance', label:'Performance & health', color:'#79d5e5'},
-    {id:'observations', label:'Other observations', color:'#a6dba9'},
+    {id:'alerts', label:'Fault signals', color:'#bd7940'},
+    {id:'configuration', label:'Configuration', color:'#8968b5'},
+    {id:'performance', label:'Performance & health', color:'#308c9c'},
+    {id:'observations', label:'Other observations', color:'#478666'},
   ];
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const identifier = item => String(item?.id ?? item?.pattern_id ?? item?.case_id ?? '');
@@ -13,6 +13,12 @@
   const list = value => Array.isArray(value) ? value : [];
   const human = value => String(value ?? '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').trim();
   const shortened = (value, length = 30) => value.length > length ? value.slice(0, length - 1) + '\u2026' : value;
+  function labelLines(text, width = 23) {
+    if (text.length <= width) return [text];
+    const boundary = text.lastIndexOf(' ', width);
+    const split = boundary > width / 3 ? boundary : width;
+    return [text.slice(0,split),shortened(text.slice(split).trim(),width)];
+  }
   const dateText = value => Number.isFinite(typeof value === 'number' ? value : Date.parse(value)) ? new Date(value).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : 'Time unavailable';
   function groupFor(pattern) {
     const key = String(pattern.key || '');
@@ -73,13 +79,20 @@
     const patternCount = graph.nodes.filter(n => n.kind === 'pattern').length;
     const labels = [];
     for (const group of groups) {
-      const prominent = [...group.nodes].sort((a,b) => Number(b.data.key === 'alert_family')-Number(a.data.key === 'alert_family') || Number(b.data.case_count || 0)-Number(a.data.case_count || 0)).slice(0,2).map(n=>n.id);
+      const ranked = [...group.nodes].sort((a,b) => Number(b.data.key === 'alert_family')-Number(a.data.key === 'alert_family') || Number(b.data.case_count || 0)-Number(a.data.case_count || 0));
+      const prominent = [ranked[0].id];
       const first = index;
       for (const node of group.nodes) {
         const angle = -Math.PI / 2 + 2 * Math.PI * (index++ + .5) / Math.max(1, patternCount);
-        placed.set(node.id, {...node, x:500 + Math.cos(angle) * 350, y:350 + Math.sin(angle) * 238,
-          r:7 + Math.min(9, Math.sqrt(Math.max(0,Number(node.data.case_count) || 0)) * .8), color:group.color, prominent:prominent.includes(node.id)});
+        placed.set(node.id, {...node, x:500 + Math.cos(angle) * 300, y:350 + Math.sin(angle) * 220,
+          r:6.5 + Math.min(7, Math.sqrt(Math.max(0,Number(node.data.case_count) || 0)) * .65), color:group.color, prominent:prominent.includes(node.id)});
       }
+      const primary=placed.get(prominent[0]);
+      const peers=group.nodes.filter(n=>n.id!==primary.id);
+      const distinct=peers.filter(n=>primary.data.key==='alert_family' ? n.data.key==='alert_family' : n.data.key!==primary.data.key);
+      const secondary=(distinct.length ? distinct : peers).map(n=>placed.get(n.id))
+        .sort((a,b)=>Math.hypot(b.x-primary.x,b.y-primary.y)-Math.hypot(a.x-primary.x,a.y-primary.y))[0];
+      if(secondary) secondary.prominent=true;
       const angle = -Math.PI / 2 + 2 * Math.PI * (first + group.nodes.length / 2) / Math.max(1,patternCount);
       labels.push({...group, x:500 + Math.cos(angle) * 430, y:350 + Math.sin(angle) * 310});
     }
@@ -91,7 +104,21 @@
       const cx=related.length ? related.reduce((s,n)=>s+n.x,0)/related.length : 500;
       const cy=related.length ? related.reduce((s,n)=>s+n.y,0)/related.length : 350;
       const radius = 25 + Math.sqrt((i + .5) / Math.max(1,cases.length)) * 110;
-      placed.set(node.id, {...node, x:500+(cx-500)*.5+Math.cos(angle)*radius, y:350+(cy-350)*.5+Math.sin(angle)*radius*.82, r:4.5,color:'#b9c8d6'});
+      placed.set(node.id, {...node, x:500+(cx-500)*.5+Math.cos(angle)*radius, y:350+(cy-350)*.5+Math.sin(angle)*radius*.82, r:4,color:'#6984a2'});
+    }
+    // Keep the case cloud optically centered, then separate coincident marks.
+    // This changes presentation only; edge membership stays untouched.
+    const marks=cases.map(node=>placed.get(node.id));
+    if(marks.length) {
+      const dx=500-marks.reduce((sum,n)=>sum+n.x,0)/marks.length;
+      const dy=350-marks.reduce((sum,n)=>sum+n.y,0)/marks.length;
+      marks.forEach(n=>{n.x+=dx;n.y+=dy;});
+      for(let pass=0;pass<32;pass++) for(let i=0;i<marks.length;i++) for(let j=i+1;j<marks.length;j++) {
+        const a=marks[i],b=marks[j],vx=b.x-a.x,vy=b.y-a.y,distance=Math.hypot(vx,vy);
+        if(distance>=12) continue;
+        const ux=distance ? vx/distance : 1,uy=distance ? vy/distance : 0,push=(12-distance)/2;
+        a.x-=ux*push;a.y-=uy*push;b.x+=ux*push;b.y+=uy*push;
+      }
     }
     return {...graph,nodes:[...placed.values()],positions:placed,groups:labels};
   }
@@ -153,8 +180,9 @@
       const label = pattern ? `${title}: ${String(node.data.value)}. ${count(node.data.case_count || 0,'case')}.` : `${title}. ${dateText(node.data.observed_at)}. ${node.data.instance_id || ''}`;
       const anchor = node.x > 530 ? 'start' : node.x < 470 ? 'end' : 'middle';
       const dx = anchor === 'start' ? node.r + 9 : anchor === 'end' ? -node.r - 9 : 0;
-      const dy = anchor === 'middle' ? -node.r - 12 : -3;
-      return `<g class="em-node em-node-${node.kind} ${node.prominent ? 'is-prominent' : ''}" data-node="${esc(node.id)}" role="button" tabindex="0" aria-label="${esc(label)}" aria-pressed="false" transform="translate(${node.x},${node.y})" style="--node-color:${node.color}"><title>${esc(label)}</title><circle class="em-hit" r="${Math.max(18,node.r+7)}"/><circle class="em-node-ring" r="${node.r+5}"/><circle class="em-dot" r="${node.r}"/>${pattern ? `<text x="${dx}" y="${dy}" text-anchor="${anchor}" class="em-node-title">${esc(shortened(title,18))}</text><text x="${dx}" y="${dy+16}" text-anchor="${anchor}" class="em-node-meta">${esc(node.data.key === 'alert_family' ? count(node.data.case_count || 0,'case') : shortened(String(node.data.value),18) + ' · ' + count(node.data.case_count || 0,'case'))}</text>` : ''}</g>`;
+      const lines=labelLines(title);
+      const dy = anchor === 'middle' ? -node.r - 14 - (lines.length-1)*17 : lines.length>1 ? -10 : -3;
+      return `<g class="em-node em-node-${node.kind} ${node.prominent ? 'is-prominent' : ''}" data-node="${esc(node.id)}" role="button" tabindex="0" aria-label="${esc(label)}" aria-pressed="false" transform="translate(${node.x},${node.y})" style="--node-color:${node.color}"><title>${esc(label)}</title><circle class="em-hit" r="${Math.max(18,node.r+7)}"/><circle class="em-node-ring" r="${node.r+5}"/><circle class="em-dot" r="${node.r}"/>${pattern ? `<text x="${dx}" y="${dy}" text-anchor="${anchor}" class="em-node-title">${lines.map((line,index)=>`<tspan x="${dx}" dy="${index ? 17 : 0}">${esc(line)}</tspan>`).join('')}</text><text x="${dx}" y="${dy+(lines.length-1)*17+16}" text-anchor="${anchor}" class="em-node-meta">${esc(node.data.key === 'alert_family' ? count(node.data.case_count || 0,'case') : shortened(String(node.data.value),18) + ' · ' + count(node.data.case_count || 0,'case'))}</text>` : ''}</g>`;
     }
     function mapMarkup() {
       const edges = graph.edges.map(edge => {
@@ -351,7 +379,7 @@
     }
     return {load,dispose(){disposed=true;state.epoch++;detailSequence++;for(const c of controllers)c.abort();root.removeEventListener('click',click);root.removeEventListener('keydown',keydown);root.removeEventListener('mouseover',hover);root.removeEventListener('mouseout',out);root.removeEventListener('focusin',hover);root.removeEventListener('focusout',out);}};
   }
-  const api={start,buildGraph,positionGraph,uniqueCases,scalarKey,groupFor,patternTitle,caseTitle};
+  const api={start,buildGraph,positionGraph,uniqueCases,scalarKey,groupFor,patternTitle,caseTitle,labelLines};
   if(typeof module!=='undefined' && module.exports) module.exports=api;
   else global.EstimaExplorer=api;
 })(typeof window!=='undefined' ? window : globalThis);
