@@ -1,2 +1,1 @@
 """FCAPSule Atlas knowledge service."""
-
