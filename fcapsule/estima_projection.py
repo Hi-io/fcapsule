@@ -1,4 +1,4 @@
-"""Privacy-bounded projection of retained FCAPSule artifacts into Atlas cases."""
+"""Privacy-bounded projection of retained FCAPSule artifacts into Estima records."""
 
 from __future__ import annotations
 
@@ -122,7 +122,7 @@ def _fingerprint(episode: dict[str, Any], findings: list[dict[str, Any]], observ
     return f"{NORMALIZATION_VERSION}:{digest}"
 
 
-def project_atlas_case(
+def project_estima_record(
     instance_id: str, episode: dict[str, Any], investigation: dict[str, Any],
     retained: list[dict[str, Any]], app: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
@@ -291,8 +291,12 @@ def project_atlas_case(
     encoded = json.dumps(payload, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
     if len(encoded) > MAX_CASE_BYTES:
         payload["observations"] = observations[:12]
-        payload["summary"] = "Retained evidence profile; cause is not verified by Atlas."
+        payload["summary"] = "Retained evidence profile; cause is not verified by Estima."
         encoded = json.dumps(payload, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
         if len(encoded) > MAX_CASE_BYTES:
             return None
     return payload
+
+
+# The v1 record shape and fingerprint prefix are retained to keep old outbox data valid.
+project_atlas_case = project_estima_record

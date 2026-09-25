@@ -47,7 +47,7 @@ class AtlasInvestigationTests(unittest.TestCase):
     def _service(self, client):
         service = InvestigationService.__new__(InvestigationService)
         service.plane = Mock()
-        service.plane.atlas_client.return_value = client
+        service.plane.estima_client.return_value = client
         return service
 
     def test_retrieval_is_cross_instance_time_bounded_and_provenance_preserving(self):
@@ -72,7 +72,7 @@ class AtlasInvestigationTests(unittest.TestCase):
         self.assertEqual(status["status"], "matched")
         self.assertEqual([item["atlas_case_id"] for item in cases], ["atlas-case-01"])
         retained = cases[0]
-        self.assertEqual(retained["citation"], "Atlas case atlas-case-01")
+        self.assertEqual(retained["citation"], "Estima record atlas-case-01")
         self.assertEqual(retained["instance_id"], "atlas-instance-remote")
         self.assertEqual(retained["observations"][0]["reference"], "atlas-fact-21")
         self.assertEqual(retained["factual_reference_ids"], ["atlas-fact-21", "atlas-alert-22"])
@@ -181,14 +181,14 @@ class AtlasInvestigationTests(unittest.TestCase):
 
     def test_publisher_notification_is_best_effort_and_nonblocking(self):
         service = self._service(None)
-        service.plane.atlas_publisher = Mock()
+        service.plane.estima_publisher = Mock()
 
-        service._notify_atlas_publisher("episode-current")
+        service._notify_estima_publisher("episode-current")
 
-        service.plane.atlas_publisher.notify_episode.assert_called_once_with("episode-current")
-        service.plane.atlas_publisher.notify_episode.side_effect = RuntimeError("publisher stopped")
-        service._notify_atlas_publisher("episode-current")
-        self.assertEqual(service.plane.atlas_publisher.notify_episode.call_count, 2)
+        service.plane.estima_publisher.notify_episode.assert_called_once_with("episode-current")
+        service.plane.estima_publisher.notify_episode.side_effect = RuntimeError("publisher stopped")
+        service._notify_estima_publisher("episode-current")
+        self.assertEqual(service.plane.estima_publisher.notify_episode.call_count, 2)
 
     def test_not_configured_terminal_state_still_wakes_fact_only_publisher(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -208,7 +208,7 @@ class AtlasInvestigationTests(unittest.TestCase):
             service.plane.ai_configuration.return_value = {
                 "provider": "deepseek", "model": "test-model", "api_key_configured": False,
             }
-            service.plane.atlas_publisher = Mock()
+            service.plane.estima_publisher = Mock()
             service.entries = Mock(return_value=[{"incident": {"incident_id": "incident-current"}}])
             service.fingerprint = Mock(return_value="fingerprint")
             service._record_revision = Mock()
@@ -219,13 +219,13 @@ class AtlasInvestigationTests(unittest.TestCase):
                 path.write_text(json.dumps(state), encoding="utf-8")
 
             service.plane._write_briefing_state.side_effect = write_state
-            service.plane.atlas_publisher.notify_episode.side_effect = lambda _episode_id: self.assertTrue(
+            service.plane.estima_publisher.notify_episode.side_effect = lambda _episode_id: self.assertTrue(
                 service.path("episode-current").is_file())
 
             state = service.start("episode-current")
 
             self.assertEqual(state["status"], "not_configured")
-            service.plane.atlas_publisher.notify_episode.assert_called_once_with("episode-current")
+            service.plane.estima_publisher.notify_episode.assert_called_once_with("episode-current")
 
     def test_compaction_stays_within_tight_budget_and_never_lists_atlas_ids_as_evidence(self):
         context = {**self.context, "atlas_cases": [

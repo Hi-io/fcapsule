@@ -7,8 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from fcapsule.atlas_client import AtlasClient, AtlasClientError, atlas_client_from_env, validate_atlas_url
-from fcapsule.atlas_projection import project_atlas_case
+from fcapsule.estima_client import EstimaClient, EstimaClientError, estima_client_from_env, estima_settings_from_env, validate_estima_url
+from fcapsule.estima_projection import project_estima_record
 from fcapsule.control_plane import ControlPlane
 
 
@@ -69,7 +69,7 @@ class CapturingAtlas:
 class AtlasProjectionTests(unittest.TestCase):
     def test_projection_is_compact_cited_and_excludes_raw_logs_and_secrets(self):
         episode, investigation, retained, app = retained_fixture()
-        payload = project_atlas_case("instance-a", episode, investigation, retained, app)
+        payload = project_estima_record("instance-a", episode, investigation, retained, app)
         encoded = json.dumps(payload)
         self.assertEqual(payload["schema_version"], 1)
         self.assertEqual(payload["scope"]["environment"], "prod")
@@ -92,14 +92,14 @@ class AtlasProjectionTests(unittest.TestCase):
         episode, investigation, retained, app = retained_fixture()
         first_id = "fcapsule-9ddb5d57-d0e2-4f13-88d5-8c8d36f5089c"
         second_id = "fcapsule-20988638-7f41-44ce-9fad-148d2e85cf23"
-        first = project_atlas_case(first_id, episode, investigation, retained, app)
-        second = project_atlas_case(second_id, episode, investigation, retained, app)
+        first = project_estima_record(first_id, episode, investigation, retained, app)
+        second = project_estima_record(second_id, episode, investigation, retained, app)
         self.assertEqual(first["instance_id"], first_id)
         self.assertEqual(second["instance_id"], second_id)
         self.assertNotEqual(first["instance_id"], second["instance_id"])
         self.assertNotEqual(first["episode_id"], second["episode_id"])
         self.assertEqual(first["observations"], second["observations"])
-        unsafe = project_atlas_case("cluster/a password=hidden", episode, investigation, retained, app)
+        unsafe = project_estima_record("cluster/a password=hidden", episode, investigation, retained, app)
         self.assertTrue(unsafe["instance_id"].startswith("fcapsule-"))
         self.assertNotIn("hidden", json.dumps(unsafe))
 
@@ -107,9 +107,9 @@ class AtlasProjectionTests(unittest.TestCase):
         episode_a, investigation_a, retained_a, app = retained_fixture("queue-1", "scrape_health")
         episode_b, investigation_b, retained_b, _ = retained_fixture("queue-99", "scrape_health")
         episode_c, investigation_c, retained_c, _ = retained_fixture("queue-2", "monitoring_selection")
-        a = project_atlas_case("instance-a", episode_a, investigation_a, retained_a, app)
-        b = project_atlas_case("instance-a", episode_b, investigation_b, retained_b, app)
-        c = project_atlas_case("instance-a", episode_c, investigation_c, retained_c, app)
+        a = project_estima_record("instance-a", episode_a, investigation_a, retained_a, app)
+        b = project_estima_record("instance-a", episode_b, investigation_b, retained_b, app)
+        c = project_estima_record("instance-a", episode_c, investigation_c, retained_c, app)
         self.assertEqual(a["fingerprint"], b["fingerprint"])
         self.assertNotEqual(a["episode_id"], b["episode_id"])
         self.assertNotEqual(a["fingerprint"], c["fingerprint"])
@@ -117,16 +117,16 @@ class AtlasProjectionTests(unittest.TestCase):
     def test_naive_timestamps_are_not_serialized_as_invalid_values(self):
         episode, investigation, retained, app = retained_fixture()
         episode["last_activity_at"] = "2026-09-26T03:00:00"
-        self.assertIsNone(project_atlas_case("instance-a", episode, investigation, retained, app))
+        self.assertIsNone(project_estima_record("instance-a", episode, investigation, retained, app))
 
     def test_model_assessment_never_becomes_a_fact_or_fingerprint_input(self):
         episode, investigation, retained, app = retained_fixture()
-        baseline = project_atlas_case("instance-a", episode, investigation, retained, app)
+        baseline = project_estima_record("instance-a", episode, investigation, retained, app)
         investigation["findings"].append({
             "state": "likely_explanation", "category": "investigator_assessment",
             "evidence_ids": ["Q001"],
         })
-        projected = project_atlas_case("instance-a", episode, investigation, retained, app)
+        projected = project_estima_record("instance-a", episode, investigation, retained, app)
         self.assertEqual(projected["fingerprint"], baseline["fingerprint"])
         self.assertFalse(any(item["value"] == "investigator_assessment"
                              for item in projected["observations"]))
@@ -135,24 +135,46 @@ class AtlasProjectionTests(unittest.TestCase):
 
 class AtlasClientTests(unittest.TestCase):
     def test_env_constructor_is_opt_in_and_urls_are_restricted(self):
-        self.assertIsNone(atlas_client_from_env(environ={"FCAPSULE_ATLAS_URL": "https://atlas.example"}))
-        client = atlas_client_from_env("read", {"FCAPSULE_ATLAS_URL": "https://atlas.example",
+        self.assertIsNone(estima_client_from_env(environ={"FCAPSULE_ATLAS_URL": "https://atlas.example"}))
+        client = estima_client_from_env("read", {"FCAPSULE_ATLAS_URL": "https://atlas.example",
                                                  "FCAPSULE_ATLAS_READ": "true"})
-        self.assertIsInstance(client, AtlasClient)
-        self.assertEqual(validate_atlas_url("http://atlas.namespace.svc.cluster.local"),
+        self.assertIsInstance(client, EstimaClient)
+        self.assertEqual(validate_estima_url("http://atlas.namespace.svc.cluster.local"),
                          "http://atlas.namespace.svc.cluster.local")
         with self.assertRaises(ValueError):
-            validate_atlas_url("http://atlas.example")
+            validate_estima_url("http://atlas.example")
         with self.assertRaises(ValueError):
-            validate_atlas_url("https://user:pass@atlas.example")
+            validate_estima_url("https://user:pass@atlas.example")
+
+    def test_estima_environment_names_take_precedence_with_atlas_fallback(self):
+        settings = estima_settings_from_env({
+            "FCAPSULE_ESTIMA_URL": "https://estima.example",
+            "FCAPSULE_ESTIMA_TOKEN": "estima-service-token",
+            "FCAPSULE_ESTIMA_READ": "false",
+            "FCAPSULE_ESTIMA_PUBLISH": "true",
+            "FCAPSULE_ATLAS_URL": "https://old-atlas.example",
+            "FCAPSULE_ATLAS_TOKEN": "old-token",
+            "FCAPSULE_ATLAS_READ": "true",
+        })
+        self.assertEqual(settings["url"], "https://estima.example")
+        self.assertEqual(settings["token"], "estima-service-token")
+        self.assertFalse(settings["read_enabled"])
+        self.assertTrue(settings["publish_enabled"])
+        legacy = estima_settings_from_env({"FCAPSULE_ATLAS_URL": "https://old-atlas.example",
+                                           "FCAPSULE_ATLAS_READ": "true"})
+        self.assertEqual(legacy["url"], "https://old-atlas.example")
+        self.assertTrue(legacy["read_enabled"])
+
+    def test_estima_connection_stays_disabled_without_read_or_publish_opt_in(self):
+        self.assertIsNone(estima_client_from_env(environ={"FCAPSULE_ESTIMA_URL": "https://estima.example"}))
 
     def test_search_maps_before_to_observed_before_and_sends_bearer(self):
         response = Mock()
         response.__enter__ = Mock(return_value=response)
         response.__exit__ = Mock(return_value=False)
         response.read.return_value = b'{"cases":[]}'
-        with patch("fcapsule.atlas_client.urlopen", return_value=response) as open_url:
-            client = AtlasClient("https://atlas.example", "test-token")
+        with patch("fcapsule.estima_client.urlopen", return_value=response) as open_url:
+            client = EstimaClient("https://atlas.example", "test-token")
             self.assertEqual(client.search({"cluster": "c"}, "queue", 5, STAMP), {"cases": []})
         request = open_url.call_args.args[0]
         self.assertEqual(json.loads(request.data), {"limit": 5, "scope": {"cluster": "c"},
@@ -162,9 +184,9 @@ class AtlasClientTests(unittest.TestCase):
     def test_error_exposes_status_without_body(self):
         from urllib.error import HTTPError
         error = HTTPError("https://atlas.example", 422, "bad", {}, None)
-        with patch("fcapsule.atlas_client.urlopen", side_effect=error):
-            with self.assertRaises(AtlasClientError) as raised:
-                AtlasClient("https://atlas.example").create_case({})
+        with patch("fcapsule.estima_client.urlopen", side_effect=error):
+            with self.assertRaises(EstimaClientError) as raised:
+                EstimaClient("https://atlas.example").create_case({})
         self.assertEqual(raised.exception.status_code, 422)
         self.assertNotIn("bad", str(raised.exception))
 
@@ -173,8 +195,8 @@ class AtlasClientTests(unittest.TestCase):
         response.__enter__ = Mock(return_value=response)
         response.__exit__ = Mock(return_value=False)
         response.read.return_value = b'{"cases":[]}'
-        with patch("fcapsule.atlas_client.urlopen", return_value=response) as open_url:
-            AtlasClient("https://atlas.example").search(None, "timeout", 50)
+        with patch("fcapsule.estima_client.urlopen", return_value=response) as open_url:
+            EstimaClient("https://atlas.example").search(None, "timeout", 50)
         self.assertEqual(json.loads(open_url.call_args.args[0].data)["limit"], 10)
 
 
@@ -222,9 +244,34 @@ class AtlasOutboxTests(unittest.TestCase):
         self.addCleanup(lambda: other.atlas_publisher.shutdown(drain=False))
         self.assertNotEqual(one, other.atlas_configuration()["instance_id"])
 
+    def test_legacy_atlas_settings_are_copied_to_estima_path_without_removing_source(self):
+        state_dir = Path(self.directory.name) / "migration-state"
+        state_dir.mkdir()
+        legacy = state_dir / "atlas-settings.json"
+        legacy.write_text(json.dumps({
+            "url": "https://shared-memory.example",
+            "token": "service-token",
+            "instance_id": "fcapsule-existing",
+            "read_enabled": True,
+            "publish_enabled": True,
+            "instance_id_auto": False,
+        }), encoding="utf-8")
+        plane = ControlPlane(state_dir)
+        self.addCleanup(lambda: plane.atlas_publisher.shutdown(drain=False))
+        config = plane.atlas_configuration()
+        migrated = state_dir / "estima-settings.json"
+        self.assertEqual(config["url"], "https://shared-memory.example")
+        self.assertEqual(config["instance_id"], "fcapsule-existing")
+        self.assertTrue(config["read_enabled"])
+        self.assertTrue(config["publish_enabled"])
+        self.assertTrue(config["token_configured"])
+        self.assertTrue(migrated.is_file())
+        self.assertTrue(legacy.is_file())
+        self.assertEqual(json.loads(migrated.read_text(encoding="utf-8"))["token"], "service-token")
+
     def test_revision_survives_pruned_sent_outbox_row(self):
         episode, investigation, retained, app = retained_fixture()
-        payload = project_atlas_case("instance-a", episode, investigation, retained, app)
+        payload = project_estima_record("instance-a", episode, investigation, retained, app)
         first = self.plane.store.enqueue_atlas_publication(payload)
         self.assertEqual(first["revision"], 1)
         self.plane.store.complete_atlas_publication(first["outbox_id"])
@@ -238,7 +285,7 @@ class AtlasOutboxTests(unittest.TestCase):
 
     def test_pre_ledger_upgrade_uses_global_outbox_high_water(self):
         episode, investigation, retained, app = retained_fixture()
-        payload = project_atlas_case("instance-a", episode, investigation, retained, app)
+        payload = project_estima_record("instance-a", episode, investigation, retained, app)
         first = self.plane.store.enqueue_atlas_publication(payload)
         with self.plane.store._connect() as connection:
             connection.execute("DELETE FROM atlas_outbox WHERE outbox_id = ?", (first["outbox_id"],))
@@ -266,9 +313,9 @@ class AtlasOutboxTests(unittest.TestCase):
         with patch.object(self.plane.atlas_publisher, "start"):
             self.plane.update_atlas_configuration({"url": "https://atlas.example", "token": "old-token",
                                                    "publish_enabled": True})
-        payload = project_atlas_case("one", *retained_fixture()[:3], retained_fixture()[3])
+        payload = project_estima_record("one", *retained_fixture()[:3], retained_fixture()[3])
         self.plane.store.enqueue_atlas_publication(payload)
-        result = self.plane.process_atlas_outbox_once(client=CapturingAtlas(AtlasClientError("Atlas returned HTTP 401", 401)))
+        result = self.plane.process_estima_outbox_once(client=CapturingAtlas(EstimaClientError("Estima returned HTTP 401", 401)))
         self.assertEqual(result["failed"], 1)
         self.assertEqual(self.plane.atlas_configuration()["failed_count"], 1)
         with patch.object(self.plane.atlas_publisher, "start"):
@@ -278,10 +325,17 @@ class AtlasOutboxTests(unittest.TestCase):
         result = self.plane.process_atlas_outbox_once(client=client)
         self.assertEqual(result["sent"], 1)
 
+    def test_legacy_atlas_auth_failures_remain_retryable_after_upgrade(self):
+        payload = project_estima_record("one", *retained_fixture()[:3], retained_fixture()[3])
+        row = self.plane.store.enqueue_atlas_publication(payload)
+        self.plane.store.defer_atlas_publication(row["outbox_id"], "Atlas returned HTTP 401", 2, permanent=True)
+        self.assertEqual(self.plane.store.retry_failed_atlas_publications(auth_only=True), 1)
+        self.assertEqual(self.plane.atlas_configuration()["failed_count"], 0)
+
     def test_503_is_retried_with_attempt_count_and_future_retry_time(self):
-        payload = project_atlas_case("one", *retained_fixture()[:3], retained_fixture()[3])
+        payload = project_estima_record("one", *retained_fixture()[:3], retained_fixture()[3])
         self.plane.store.enqueue_atlas_publication(payload)
-        result = self.plane.process_atlas_outbox_once(client=CapturingAtlas(AtlasClientError("Atlas returned HTTP 503", 503)))
+        result = self.plane.process_estima_outbox_once(client=CapturingAtlas(EstimaClientError("Estima returned HTTP 503", 503)))
         self.assertEqual(result["retried"], 1)
         row = self.plane.store.due_atlas_publications()[0] if self.plane.store.due_atlas_publications() else None
         self.assertIsNone(row)

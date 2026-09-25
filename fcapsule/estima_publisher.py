@@ -1,4 +1,4 @@
-"""Background projection and durable retry worker for Atlas publication."""
+"""Background projection and durable retry worker for Estima publication."""
 
 from __future__ import annotations
 
@@ -8,14 +8,14 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fcapsule.atlas_client import AtlasClientError
-from fcapsule.atlas_projection import project_atlas_case
+from fcapsule.estima_client import EstimaClientError
+from fcapsule.estima_projection import project_estima_record
 
 
 TERMINAL_STATES = {"ready", "inconclusive", "incomplete", "not_configured"}
 
 
-class AtlasPublisher:
+class EstimaPublisher:
     """Scans retained completed cases, persists projections, and retries off-thread."""
 
     def __init__(self, plane, interval_seconds: float = 5.0) -> None:
@@ -39,7 +39,7 @@ class AtlasPublisher:
             self.stop_event.clear()
             with self._queue_lock:
                 self._full_scan_pending = True
-            self.thread = threading.Thread(target=self._run, daemon=True, name="fcapsule-atlas-publisher")
+            self.thread = threading.Thread(target=self._run, daemon=True, name="fcapsule-estima-publisher")
             self.thread.start()
 
     def wake(self) -> None:
@@ -53,7 +53,7 @@ class AtlasPublisher:
     def notify_episode(self, episode_id: str) -> None:
         """Queue a terminal episode ID without performing projection or network I/O."""
         try:
-            if not self.plane._effective_atlas_settings().get("publish_enabled"):
+            if not self.plane._effective_estima_settings().get("publish_enabled"):
                 return
             with self._queue_lock:
                 if len(self._notified) >= 500:
@@ -64,7 +64,7 @@ class AtlasPublisher:
             self.start()
             self.wake_event.set()
         except Exception:
-            self.plane.store.set_setting("atlas_projection_last_error", "Atlas completion hook unavailable")
+            self.plane.store.set_setting("atlas_projection_last_error", "Estima completion hook unavailable")
 
     def _run(self) -> None:
         while not self.stop_event.is_set():
@@ -77,7 +77,7 @@ class AtlasPublisher:
                     full_scan, self._full_scan_pending = self._full_scan_pending, False
                     episode_ids = list(self._notified)
                     self._notified.clear()
-                if not self.plane._effective_atlas_settings().get("publish_enabled"):
+                if not self.plane._effective_estima_settings().get("publish_enabled"):
                     continue
                 periodic_scan = time.monotonic() - self._last_full_scan >= 600
                 with self._lock:
@@ -87,7 +87,7 @@ class AtlasPublisher:
                         self._last_full_scan = time.monotonic()
                     self._drain(limit=4)
             except Exception as error:
-                self.plane.store.set_setting("atlas_projection_last_error", f"Atlas worker unavailable ({type(error).__name__})")
+                self.plane.store.set_setting("atlas_projection_last_error", f"Estima worker unavailable ({type(error).__name__})")
 
     def shutdown(self, drain: bool = True, timeout: float = 7.0) -> None:
         self.stop_event.set()
@@ -152,7 +152,7 @@ class AtlasPublisher:
         return tuple(signature)
 
     def scan_completed(self, episode_ids: list[str] | None = None) -> int:
-        config = self.plane._effective_atlas_settings()
+        config = self.plane._effective_estima_settings()
         if not config.get("publish_enabled") or not config.get("url"):
             return 0
         queued = 0
@@ -179,20 +179,20 @@ class AtlasPublisher:
                 if not retained:
                     continue
                 app = self.plane.store.get_application(str(episode["app_id"]))
-                payload = project_atlas_case(
+                payload = project_estima_record(
                     str(config.get("instance_id") or ""), episode, state, retained, app,
                 )
                 if payload is None:
                     continue
                 result = self.plane.store.enqueue_atlas_publication(payload)
                 if result.get("accepted") is False:
-                    projection_error = "Pending Atlas outbox quota reached"
+                    projection_error = "Pending Estima outbox quota reached"
                     continue
                 self._seen[episode_id] = signature
                 if result.get("is_new"):
                     queued += 1
             except Exception as error:
-                projection_error = f"Atlas projection unavailable ({type(error).__name__})"
+                projection_error = f"Estima projection unavailable ({type(error).__name__})"
         if projection_error:
             self.plane.store.set_setting("atlas_projection_last_error", projection_error)
         else:
@@ -201,14 +201,14 @@ class AtlasPublisher:
 
     def _drain(self, limit: int = 4, client=None) -> dict[str, int]:
         with self._lock:
-            atlas = client if client is not None else self.plane.atlas_client("publish")
-            if atlas is None:
+            estima = client if client is not None else self.plane.estima_client("publish")
+            if estima is None:
                 return {"sent": 0, "retried": 0, "failed": 0}
             sent = retried = failed = 0
             for row in self.plane.store.due_atlas_publications(limit=limit):
                 try:
-                    atlas.create_case(row["payload"])
-                except AtlasClientError as error:
+                    estima.create_case(row["payload"])
+                except EstimaClientError as error:
                     status = error.status_code
                     permanent = status is not None and 400 <= status < 500 and status not in {408, 425, 429}
                     attempts = int(row.get("attempts", 0)) + 1
@@ -223,7 +223,7 @@ class AtlasPublisher:
                 except Exception as error:
                     attempts = int(row.get("attempts", 0)) + 1
                     self.plane.store.defer_atlas_publication(
-                        int(row["outbox_id"]), f"Atlas send unavailable ({type(error).__name__})",
+                        int(row["outbox_id"]), f"Estima send unavailable ({type(error).__name__})",
                         min(300, 2 ** min(attempts, 8)),
                     )
                     retried += 1
@@ -237,3 +237,7 @@ class AtlasPublisher:
             queued = self.scan_completed(None if scan_all else [])
             result = self._drain(limit=limit, client=client)
             return {"queued": queued, **result}
+
+
+# Compatibility alias for callers which still inspect the previous class name.
+AtlasPublisher = EstimaPublisher

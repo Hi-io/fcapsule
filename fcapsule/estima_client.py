@@ -1,4 +1,4 @@
-"""Small bounded HTTP client for the optional Atlas case service."""
+"""Small bounded HTTP client for the optional Estima memory service."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 
-class AtlasClientError(RuntimeError):
-    """An Atlas request failed; response bodies are deliberately not retained."""
+class EstimaClientError(RuntimeError):
+    """An Estima request failed; response bodies are deliberately not retained."""
 
     def __init__(self, message: str, status_code: int | None = None) -> None:
         super().__init__(message)
@@ -22,34 +22,44 @@ def _enabled(value: Any) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def validate_atlas_url(value: str) -> str:
+def validate_estima_url(value: str) -> str:
     url = str(value or "").strip().rstrip("/")
     parts = urlsplit(url)
     if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password:
-        raise ValueError("Atlas URL must be an absolute HTTP(S) URL without embedded credentials")
+        raise ValueError("Estima URL must be an absolute HTTP(S) URL without embedded credentials")
     if parts.scheme == "http":
         host = parts.hostname.lower().rstrip(".")
         if host not in {"localhost", "127.0.0.1", "::1"} and not (host.endswith(".svc") or host.endswith(".svc.cluster.local")):
-            raise ValueError("Atlas URL must use HTTPS except for localhost or in-cluster .svc DNS")
+            raise ValueError("Estima URL must use HTTPS except for localhost or in-cluster .svc DNS")
     return url
 
 
-def atlas_settings_from_env(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
+def validate_atlas_url(value: str) -> str:
+    """Compatibility alias for callers using the previous service name."""
+    return validate_estima_url(value)
+
+
+def estima_settings_from_env(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
     env = os.environ if environ is None else environ
+    def value(name: str, default: str = "") -> str:
+        new_name = f"FCAPSULE_ESTIMA_{name}"
+        old_name = f"FCAPSULE_ATLAS_{name}"
+        return str(env[new_name] if new_name in env else env.get(old_name, default))
+
     return {
-        "url": str(env.get("FCAPSULE_ATLAS_URL", "")).strip(),
-        "token": str(env.get("FCAPSULE_ATLAS_TOKEN", "")),
-        "instance_id": str(env.get("FCAPSULE_ATLAS_INSTANCE_ID", "")).strip(),
-        "read_enabled": _enabled(env.get("FCAPSULE_ATLAS_READ", "false")),
-        "publish_enabled": _enabled(env.get("FCAPSULE_ATLAS_PUBLISH", "false")),
+        "url": value("URL").strip(),
+        "token": value("TOKEN"),
+        "instance_id": value("INSTANCE_ID").strip(),
+        "read_enabled": _enabled(value("READ", "false")),
+        "publish_enabled": _enabled(value("PUBLISH", "false")),
     }
 
 
-class AtlasClient:
-    """Bounded client for the public Atlas v1 case/search/pattern endpoints."""
+class EstimaClient:
+    """Bounded client for Estima's stable v1 memory/search/pattern endpoints."""
 
     def __init__(self, base_url: str, bearer_token: str | None = None, timeout_seconds: float = 2.0) -> None:
-        self.base_url = validate_atlas_url(base_url)
+        self.base_url = validate_estima_url(base_url)
         self.bearer_token = str(bearer_token or "").strip() or None
         self.timeout_seconds = min(10.0, max(0.2, float(timeout_seconds)))
 
@@ -66,17 +76,17 @@ class AtlasClient:
             with urlopen(request, timeout=self.timeout_seconds) as response:
                 body = response.read(512 * 1024 + 1)
         except HTTPError as error:
-            raise AtlasClientError(f"Atlas returned HTTP {error.code}", status_code=error.code) from None
+            raise EstimaClientError(f"Estima returned HTTP {error.code}", status_code=error.code) from None
         except (URLError, TimeoutError, OSError) as error:
-            raise AtlasClientError(f"Atlas request unavailable ({type(error).__name__})") from None
+            raise EstimaClientError(f"Estima request unavailable ({type(error).__name__})") from None
         if len(body) > 512 * 1024:
-            raise AtlasClientError("Atlas response exceeded the 512 KiB limit")
+            raise EstimaClientError("Estima response exceeded the 512 KiB limit")
         try:
             value = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
-            raise AtlasClientError("Atlas returned invalid JSON") from None
+            raise EstimaClientError("Estima returned invalid JSON") from None
         if not isinstance(value, dict):
-            raise AtlasClientError("Atlas returned a non-object response")
+            raise EstimaClientError("Estima returned a non-object response")
         return value
 
     def health(self) -> dict[str, Any]:
@@ -113,7 +123,7 @@ class AtlasClient:
     def get_pattern(self, pattern_id: str) -> dict[str, Any] | None:
         try:
             return self._request("GET", f"/v1/patterns/{quote(str(pattern_id), safe='')}")
-        except AtlasClientError as error:
+        except EstimaClientError as error:
             if "HTTP 404" in str(error):
                 return None
             raise
@@ -121,28 +131,28 @@ class AtlasClient:
     def get_case(self, case_id: str) -> dict[str, Any] | None:
         try:
             return self._request("GET", f"/v1/cases/{quote(str(case_id), safe='')}")
-        except AtlasClientError as error:
+        except EstimaClientError as error:
             if "HTTP 404" in str(error):
                 return None
             raise
 
 
-def atlas_client_from_config(
+def estima_client_from_config(
     config: Mapping[str, Any], operation: str, *, timeout_seconds: float = 2.0,
-) -> AtlasClient | None:
+) -> EstimaClient | None:
     if operation not in {"read", "publish"}:
         raise ValueError("operation must be 'read' or 'publish'")
     enabled_key = "read_enabled" if operation == "read" else "publish_enabled"
     if not bool(config.get(enabled_key)) or not str(config.get("url") or "").strip():
         return None
-    return AtlasClient(str(config["url"]), str(config.get("token") or ""), timeout_seconds)
+    return EstimaClient(str(config["url"]), str(config.get("token") or ""), timeout_seconds)
 
 
-def atlas_client_from_env(
+def estima_client_from_env(
     operation: str | None = None, environ: Mapping[str, str] | None = None,
-) -> AtlasClient | None:
-    """Build an opt-in client from environment settings; runtime UI uses ControlPlane.atlas_client."""
-    config = atlas_settings_from_env(environ)
+) -> EstimaClient | None:
+    """Build an opt-in client; no model API key or model request is used here."""
+    config = estima_settings_from_env(environ)
     if operation is None:
         if config["read_enabled"]:
             operation = "read"
@@ -150,4 +160,12 @@ def atlas_client_from_env(
             operation = "publish"
         else:
             return None
-    return atlas_client_from_config(config, operation)
+    return estima_client_from_config(config, operation)
+
+
+# Compatibility aliases for pre-Estima integrations and local extensions.
+AtlasClientError = EstimaClientError
+AtlasClient = EstimaClient
+atlas_settings_from_env = estima_settings_from_env
+atlas_client_from_config = estima_client_from_config
+atlas_client_from_env = estima_client_from_env

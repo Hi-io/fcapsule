@@ -62,23 +62,23 @@ test('case detail separates observations and hypotheses and shows source provena
   assert.match(html, /episode-7/);
 });
 
-test('local deletion warns that an Atlas copy is retained', () => {
-  assert.match(source, /A case already published to Atlas will remain there/);
+test('local deletion warns that an Estima record is retained', () => {
+  assert.match(source, /A record already published to Estima will remain there/);
 });
 
-test('Atlas retrieval trail links case IDs without treating them as FCAPSule evidence', () => {
+test('Estima retrieval trail links record IDs without treating them as FCAPSule evidence', () => {
   const code = helpers + source.slice(source.indexOf('function relatedAtlasCases('), source.indexOf('function atlasRender('));
   const renderTrail = vm.runInNewContext(code + '\nrelatedAtlasCases', {...context});
   const html = renderTrail({context:{atlas_cases:[{
     atlas_case_id:'prior-case',summary:'Earlier timeout',instance_id:'edge-east',relation:'fingerprint_match',
   }]}});
-  assert.match(html, /href="\/atlas\?case=prior-case"/);
+  assert.match(html, /href="\/estima\?case=prior-case"/);
   assert.match(html, /not FCAPSule evidence citations/);
   assert.match(html, /Fingerprint match/);
   assert.equal(renderTrail({context:{atlas_cases:[]}}), '');
 });
 
-test('Atlas links preserve search context without exposing a misleading similarity percentage', () => {
+test('Estima links preserve search context without exposing a misleading similarity percentage', () => {
   const html = render('atlasCaseLink', `atlasCaseLink({id:'case/one',score:1,relation:'lexical_similarity',instance_id:'west'})`,
     {atlasQuery:'queue timeout',atlasScope:'cluster-a'});
   assert.match(html, /case%2Fone&amp;q=queue\+timeout&amp;scope=cluster-a/);
@@ -86,7 +86,7 @@ test('Atlas links preserve search context without exposing a misleading similari
   assert.doesNotMatch(html, /100% similarity/);
 });
 
-test('Atlas retrieval shows no-match, pending and unavailable states without inventing empty success', () => {
+test('Estima retrieval shows no-match, pending and unavailable states without inventing empty success', () => {
   const code = helpers + source.slice(source.indexOf('function relatedAtlasCases('), source.indexOf('function atlasRender('));
   const renderTrail = vm.runInNewContext(code + '\nrelatedAtlasCases', {...context});
   for (const [status, text] of [
@@ -99,7 +99,7 @@ test('Atlas retrieval shows no-match, pending and unavailable states without inv
   }
 });
 
-test('Atlas failures distinguish configuration and disabled reads from empty results', () => {
+test('Estima failures distinguish configuration and disabled reads from empty results', () => {
   const code = source.slice(source.indexOf('function atlasFailureText('), source.indexOf('function relatedAtlasCases('));
   const failureText = vm.runInNewContext(code + '\natlasFailureText', {});
   assert.match(failureText('', 'not_configured'), /not configured/);
@@ -107,7 +107,7 @@ test('Atlas failures distinguish configuration and disabled reads from empty res
   assert.match(failureText('', 'unavailable'), /unavailable/);
 });
 
-test('Atlas settings call out failed publishes and never render a saved token', () => {
+test('Estima settings call out failed publishes and never render a saved service token', () => {
   const code = source.slice(source.indexOf('function atlasSettingsForm('), source.indexOf('async function loadAtlasSettings('));
   const renderSettings = vm.runInNewContext(code + '\natlasSettingsForm', {
     ...context, fmt:new Intl.NumberFormat('en-US'), window:{},
@@ -117,5 +117,6 @@ test('Atlas settings call out failed publishes and never render a saved token', 
   assert.match(html, /3 failed publishes/);
   assert.match(html, /id="retry-atlas-failed"[^>]* disabled/);
   assert.match(html, /Configure a service URL and token/);
+  assert.match(html, /not an LLM key/);
   assert.doesNotMatch(html, /never-render-this-secret/);
 });

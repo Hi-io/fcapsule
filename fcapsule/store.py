@@ -1626,7 +1626,10 @@ class FCAPSuleStore:
     def retry_failed_atlas_publications(self, limit: int = 100, auth_only: bool = False) -> int:
         limit = max(1, min(500, int(limit)))
         now = utc_now()
-        filter_sql = "AND (last_error LIKE 'Atlas returned HTTP 401%' OR last_error LIKE 'Atlas returned HTTP 403%')" if auth_only else ""
+        filter_sql = (
+            "AND (last_error LIKE 'Estima returned HTTP 401%' OR last_error LIKE 'Estima returned HTTP 403%' "
+            "OR last_error LIKE 'Atlas returned HTTP 401%' OR last_error LIKE 'Atlas returned HTTP 403%')"
+        ) if auth_only else ""
         with self._connect() as connection:
             rows = connection.execute(
                 f"SELECT outbox_id FROM atlas_outbox WHERE status = 'failed' {filter_sql} "

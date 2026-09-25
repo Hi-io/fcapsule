@@ -30,7 +30,7 @@ const widths = [1920, 1366, 1024, 720, 390, 320];
     };
     for (const width of widths) {
       await page.setViewportSize({width,height:width === 1920 ? 1080 : width < 720 ? 844 : 768});
-      for (const view of ['console','patterns','targets','atlas','settings']) {
+      for (const view of ['console','patterns','targets','estima','settings']) {
         await page.goto(base + '/' + view);
         await page.locator('h1').waitFor();
         await capture(view + '-' + width);
@@ -124,11 +124,11 @@ const widths = [1920, 1366, 1024, 720, 390, 320];
           await page.locator('#configure-targets').click();
           await page.locator('.connection-settings').scrollIntoViewIfNeeded();
           await capture('target-settings-' + width);
-        } else if (view === 'atlas') {
-          assert.ok(await page.getByRole('note').filter({hasText:'Similarity is not causation'}).count(), 'Atlas page must qualify similarity patterns');
-          await page.getByLabel('Search patterns and cases').fill('timeout');
-          await page.getByLabel('Search patterns and cases').press('Enter');
-          await page.waitForFunction(()=>!document.querySelector('.atlas-status')?.textContent.includes('Loading Atlas records'));
+        } else if (view === 'estima') {
+          assert.ok(await page.getByRole('note').filter({hasText:'Similarity is not causation'}).count(), 'Estima page must qualify similarity patterns');
+          await page.getByLabel('Search patterns and records').fill('timeout');
+          await page.getByLabel('Search patterns and records').press('Enter');
+          await page.waitForFunction(()=>!document.querySelector('.atlas-status')?.textContent.includes('Loading Estima records'));
           const hasPattern = await page.locator('.atlas-pattern-link').count();
           if (hasPattern) {
             await page.locator('.atlas-pattern-link').first().click();
@@ -136,22 +136,22 @@ const widths = [1920, 1366, 1024, 720, 390, 320];
             const caseLink = page.locator('.atlas-case-list .atlas-case-link').first();
             if (await caseLink.count()) {
               await caseLink.click();
-              await page.getByText('Retained case',{exact:true}).waitFor();
+              await page.getByText('Retained record',{exact:true}).waitFor();
               await page.getByRole('heading',{name:'Provenance'}).waitFor();
             }
-            await page.goto(base + '/atlas');
+            await page.goto(base + '/estima');
             await page.locator('h1').waitFor();
           } else {
             const caseLink = page.locator('.atlas-case-link').first();
             if (await caseLink.count()) {
               await caseLink.click();
-              await page.getByText('Retained case',{exact:true}).waitFor();
+              await page.getByText('Retained record',{exact:true}).waitFor();
               await page.getByRole('heading',{name:'Provenance'}).waitFor();
-              await page.goto(base + '/atlas');
+              await page.goto(base + '/estima');
               await page.locator('h1').waitFor();
             }
           }
-          await capture('atlas-search-' + width);
+          await capture('estima-search-' + width);
         } else {
           await page.locator('#evidence-models').scrollIntoViewIfNeeded();
           await capture('evidence-settings-' + width);

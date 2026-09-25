@@ -17,8 +17,9 @@ class UIAssetTests(unittest.TestCase):
                 self.assertEqual(ET.fromstring(source).tag, "{http://www.w3.org/2000/svg}svg")
 
     def test_navigation_retains_text_labels_and_local_assets(self):
-        for label in ("Operations", "Targets", "Patterns", "Atlas", "Settings"):
+        for label in ("Operations", "Targets", "Patterns", "Estima", "Settings"):
             self.assertIn(label, HTML)
+        self.assertIn('href="/estima" data-nav="estima"', HTML)
         self.assertNotIn("https://", HTML)
         self.assertIn("--accent:", CSS)
         self.assertIn('rel="icon"', HTML)
