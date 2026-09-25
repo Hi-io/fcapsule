@@ -34,6 +34,13 @@ The model's assessment is a supported hypothesis, not a certified root cause or 
 
 ## Evidence and Memory
 
+Each FCAPSule instance retains its own capsules and uses conservative same-instance
+history. A separate, opt-in **FCAPSule Atlas** service can share compact cases
+across participating instances; it is disabled by default and does not replace
+local history or turn a similar case into a shared-cause finding. See the
+[FCAPSule Atlas guide](docs/ATLAS.md) for its privacy boundary, current API,
+operator limits and evaluation plan.
+
 | Source | What FCAPSule uses today |
 | --- | --- |
 | Prometheus | Firing alerts, matching rule conditions where available, and bounded metric windows |
@@ -78,6 +85,13 @@ See [provider operations](docs/llm_provider_operations.md), [evaluation plan](EV
 ## Current Boundaries
 
 FCAPSule is working single-replica software for a trusted environment, not an Internet-facing managed service. The reference HTTP server has no built-in authentication, authorization or TLS; SQLite and in-process workers are not distributed. Masking is heuristic, not a guarantee of anonymization. Historical matching is deliberately conservative and cannot equate every failure across changed workloads. Investigation quality still requires review on real incidents.
+
+Cross-instance case sharing through Atlas is a distinct, optional integration.
+It is disabled by default and requires a separately deployed service. The current
+service uses a single shared bearer token without per-instance authorization, and
+has no remote delete endpoint or automated case-retention policy. Do not treat it
+as a production multi-tenant service. Local incident capture and investigation
+must remain useful when Atlas is unavailable.
 
 The [roadmap](ROADMAP.md) covers production hardening, source scaling, durable workers and broader evaluation. No measured storage-cost reduction, diagnosis accuracy or industry-first claim is implied by the product narrative.
 
