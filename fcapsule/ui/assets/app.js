@@ -1,4 +1,4 @@
-const view = location.pathname.startsWith('/settings') ? 'settings' : location.pathname.startsWith('/targets') ? 'targets' : location.pathname.startsWith('/patterns') ? 'patterns' : 'console';
+const view = location.pathname.startsWith('/settings') ? 'settings' : location.pathname.startsWith('/targets') ? 'targets' : location.pathname.startsWith('/patterns') ? 'patterns' : location.pathname.startsWith('/atlas') ? 'atlas' : 'console';
 const app = document.querySelector('#app');
 const fmt = new Intl.NumberFormat('en-US');
 const pct = value => typeof value === 'number' ? (value * 100).toFixed(1) + '%' : '--';
@@ -13,7 +13,7 @@ const shortTime = value => value ? new Date(value).toLocaleTimeString([], {hour:
 document.querySelector(`[data-nav="${view}"]`)?.classList.add('active');
 document.querySelector(`[data-nav="${view}"]`)?.setAttribute('aria-current', 'page');
 document.body.dataset.view = view;
-document.title = ({console:'Operations', targets:'Targets', patterns:'Patterns', settings:'Settings'})[view] + ' | FCAPSule';
+document.title = ({console:'Operations', targets:'Targets', patterns:'Patterns', atlas:'Atlas', settings:'Settings'})[view] + ' | FCAPSule';
 let lastState = null;
 let selectedReport = null;
 let selectedEpisodeId = null;
@@ -30,6 +30,19 @@ let lastPatternsSignature = '';
 let sourceReturn = null;
 let patternsMode = new URLSearchParams(location.search).get('view') === 'shared' ? 'shared' : 'recurring';
 let pendingSharedAnchor = location.hash.startsWith('#shared-');
+let atlasPatterns = [];
+let atlasCases = [];
+let atlasResultStatus = 'pending';
+let atlasMessage = '';
+let atlasPatternError = '';
+let atlasCaseError = '';
+let atlasCasesSearched = false;
+let atlasRequestSequence = 0;
+let atlasQuery = new URLSearchParams(location.search).get('q') || '';
+let atlasScope = new URLSearchParams(location.search).get('scope') || '';
+let atlasSelectedPattern = new URLSearchParams(location.search).get('pattern') || '';
+let atlasSelectedCase = new URLSearchParams(location.search).get('case') || '';
+let atlasDetail = null;
 const openDisclosures = new Set();
 const closedNamespaces = new Set();
 
@@ -416,6 +429,9 @@ function renderSettings(state) {
       <div class="field"><label for="asr-model">Audio model</label><input id="asr-model" value="${safe(media.audio?.model)}"></div>
       ${window.mediaSettingsNotice ? `<p class="notice">${safe(window.mediaSettingsNotice)}</p>` : ''}
       <div class="actions"><button id="save-media-settings">Validate and save media</button><button class="secondary" id="validate-media-settings">Recheck media</button></div>
+    </div></section><section id="atlas-connection" class="sheet"><div class="sheet-head"><h2>${icon('network')}Atlas connection</h2><span id="atlas-settings-status" class="queue-note" role="status">Loading</span></div><div class="sheet-body">
+      <p class="queue-note">Atlas stores cross-instance similarity patterns and cases. Pattern matches are retrieval signals, not verified causes. Credentials are never returned to this page.</p>
+      <div id="atlas-settings-body" aria-live="polite"><div class="empty">Loading Atlas configuration...</div></div>
     </div></section></div>`;
   document.querySelector('#save-general-settings').addEventListener('click', saveGeneralSettings);
   document.querySelector('#save-ai-settings').addEventListener('click', saveAiSettings);
@@ -433,6 +449,7 @@ function renderSettings(state) {
       : `Optional key for ${label}; blank keeps that provider's configured key`;
     document.querySelector('label[for="ai-key"]').textContent = `${label} API key`;
   });
+  if (typeof loadAtlasSettings === 'function') loadAtlasSettings();
 }
 
 function applicationTable(items) {
@@ -894,6 +911,79 @@ async function saveGeneralSettings() {
   lastState.settings = result; window.generalSettingsNotice = 'Retention policy saved.'; renderSettings(lastState);
 }
 
+function atlasSettingsForm(config) {
+  const state = !config.url ? 'Not configured' : config.read_enabled ? 'Reads enabled' : 'Reads disabled';
+  const pending = config.pending_count == null ? 'Unknown' : fmt.format(config.pending_count);
+  const failed = Number(config.failed_count || 0);
+  const canRetry = Boolean(config.url && config.token_configured && config.publish_enabled);
+  return `<div class="ai-active-summary" aria-label="Atlas connection status"><span><strong>Read access</strong> ${safe(state)}</span><span><strong>Bearer token</strong> ${config.token_configured ? 'Configured' : 'Not configured'}</span><span><strong>Pending publishes</strong> ${pending}</span></div>
+    ${failed ? `<div class="atlas-retry-notice" role="status"><div><strong>${fmt.format(failed)} failed publish${failed === 1 ? '' : 'es'}</strong><p>${canRetry ? 'These records remain queued for recovery.' : 'Configure a service URL and token, then enable publishing before retrying.'}</p></div><button id="retry-atlas-failed" class="secondary" type="button" ${canRetry ? '' : 'disabled'}>${icon('refresh-cw')}Retry failed</button></div>` : ''}
+    <div class="field"><label for="atlas-url">Atlas service URL</label><input id="atlas-url" type="url" value="${safe(config.url || '')}" placeholder="https://atlas.example.internal"></div>
+    <div class="field"><label for="atlas-instance">Instance ID</label><input id="atlas-instance" value="${safe(config.instance_id || '')}" autocomplete="off"></div>
+    <div class="field"><label for="atlas-token">Bearer token</label><input id="atlas-token" type="password" autocomplete="new-password" placeholder="${config.token_configured ? 'Leave blank to keep the saved token' : 'Paste an Atlas token'}"><small>The saved secret is masked and never sent back to the browser. Enable publishing only for instances allowed to contribute records.</small></div>
+    <label class="toggle"><input id="atlas-read-enabled" type="checkbox" ${config.read_enabled ? 'checked' : ''}>Allow FCAPSule to read Atlas patterns and cases</label>
+    <label class="toggle" style="margin-top:8px"><input id="atlas-publish-enabled" type="checkbox" ${config.publish_enabled ? 'checked' : ''}>Allow FCAPSule to publish eligible cases to Atlas</label>
+    ${config.token_configured ? '<label class="toggle" style="margin-top:8px"><input id="atlas-clear-token" type="checkbox">Remove the saved Atlas token</label>' : ''}
+    ${config.last_error ? '<p class="queue-note">Atlas reported a recent publish error. Error details are omitted here.</p>' : ''}
+    ${window.atlasSettingsNotice ? `<p class="notice" role="status">${safe(window.atlasSettingsNotice)}</p>` : ''}
+    <div class="actions"><button id="save-atlas-settings">Save Atlas settings</button></div>`;
+}
+
+async function loadAtlasSettings() {
+  const host = document.querySelector('#atlas-settings-body');
+  if (!host) return;
+  const status = document.querySelector('#atlas-settings-status');
+  try {
+    const response = await fetch('/api/settings/atlas', {cache:'no-store'});
+    const config = await response.json();
+    if (!response.ok) throw new Error(config.error || 'Unable to load Atlas settings.');
+    host.innerHTML = atlasSettingsForm(config);
+    status.textContent = !config.url ? 'Not configured' : config.read_enabled ? 'Read enabled' : 'Read disabled';
+    document.querySelector('#save-atlas-settings').addEventListener('click', saveAtlasSettings);
+    document.querySelector('#retry-atlas-failed')?.addEventListener('click', retryAtlasPublications);
+  } catch (error) {
+    status.textContent = 'Unavailable';
+    host.innerHTML = `<p class="target-error" role="alert">${safe(error.message || 'Atlas settings are unavailable.')}</p>`;
+  }
+}
+
+async function retryAtlasPublications() {
+  const button = document.querySelector('#retry-atlas-failed');
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/atlas/retry-failed', {method:'POST'});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Unable to retry Atlas publishes.');
+    window.atlasSettingsNotice = 'Retry requested for failed Atlas publishes.';
+  } catch (error) {
+    window.atlasSettingsNotice = error.message || 'Unable to retry Atlas publishes.';
+  }
+  await loadAtlasSettings();
+}
+
+async function saveAtlasSettings() {
+  const button = document.querySelector('#save-atlas-settings');
+  button.disabled = true;
+  const payload = {
+    url:document.querySelector('#atlas-url').value.trim(),
+    instance_id:document.querySelector('#atlas-instance').value.trim(),
+    token:document.querySelector('#atlas-token').value,
+    read_enabled:document.querySelector('#atlas-read-enabled').checked,
+    publish_enabled:document.querySelector('#atlas-publish-enabled').checked,
+    clear_token:document.querySelector('#atlas-clear-token')?.checked || false,
+  };
+  try {
+    const response = await fetch('/api/settings/atlas', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Unable to save Atlas settings.');
+    window.atlasSettingsNotice = 'Atlas settings saved. The secret remains masked.';
+    await loadAtlasSettings();
+  } catch (error) {
+    window.atlasSettingsNotice = error.message || 'Unable to save Atlas settings.';
+    await loadAtlasSettings();
+  }
+}
+
 async function changeEpisodeState(id, action) {
   const response = await fetch(`/api/episodes/${encodeURIComponent(id)}/${action}`, {method:'POST'});
   const result = await response.json();
@@ -1010,10 +1100,11 @@ function briefingPanel(payload, detailed = false, evidencePrompt = '') {
   const saved = run.finished_at ? (zeroCallBudget ? 'Last attempt ' : run.status === 'ready' ? 'Assessment ready ' : run.status === 'inconclusive' ? 'Assessment inconclusive ' : 'Last attempt ') + formatDate(run.finished_at) : '';
   const provider = run.provider === 'deepseek' ? 'DeepSeek' : run.provider === 'openrouter' ? 'OpenRouter' : run.provider;
   const header = '<div class="section-heading"><h3>Episode assessment</h3><span class="queue-note">' + safe([provider, run.model, saved].filter(Boolean).join(' · ')) + '</span></div>';
+  const atlasHtml = typeof relatedAtlasCases === 'function' ? relatedAtlasCases(run) : '';
   if (zeroCallBudget) return '<section class="briefing">' + header + '<div class="analysis-state" role="status" aria-live="polite"><div><strong>Prompt budget exceeded before any model call</strong>' +
     '<p>Retained evidence and source checks remain available. Review the prompt budget before reassessing.</p>' +
-    '<button class="secondary" data-investigate="' + safe(run.episode_id) + '">Reassess episode</button>' + evidencePrompt + '</div></div></section>';
-  if (detailed && !assessment) return '';
+    '<button class="secondary" data-investigate="' + safe(run.episode_id) + '">Reassess episode</button>' + evidencePrompt + '</div></div>' + atlasHtml + '</section>';
+  if (detailed && !assessment) return atlasHtml ? '<section class="investigation-details">' + atlasHtml + '</section>' : '';
   const incompleteNote = run.status === 'incomplete'
     ? '<details class="assessment-note"><summary>Why this needs attention</summary><p>The last attempt stopped before a conclusion met the evidence contract. Retained observations below are still available.</p>' + (run.validation_error ? '<small>' + safe(run.validation_error) + '</small>' : '') + '</details>' : '';
   const inconclusiveNote = run.status === 'inconclusive'
@@ -1029,7 +1120,7 @@ function briefingPanel(payload, detailed = false, evidencePrompt = '') {
           : run.message || 'Retained evidence is available below.';
   if (!assessment) return '<section class="briefing">' + header + '<div class="analysis-state" role="status" aria-live="polite">' +
     (loading ? '<span class="spinner"></span>' : '') + '<div><strong>' + safe(pendingTitle) + '</strong><p>' + safe(pendingCopy) + '</p>' + incompleteNote + (run.status === 'inconclusive' ? inconclusiveNote : '') +
-    (!loading ? run.status === 'not_configured' ? '<a href="/settings">Open Settings</a>' : '<button class="secondary" data-investigate="' + safe(run.episode_id) + '">' + (run.status === 'not_started' ? 'Start investigation' : 'Reassess episode') + '</button>' : '') + '</div></div></section>';
+    (!loading ? run.status === 'not_configured' ? '<a href="/settings">Open Settings</a>' : '<button class="secondary" data-investigate="' + safe(run.episode_id) + '">' + (run.status === 'not_started' ? 'Start investigation' : 'Reassess episode') + '</button>' : '') + '</div></div>' + atlasHtml + '</section>';
   const hypotheses = (assessment.hypotheses || []).map(item => '<article class="hypothesis-row"><div class="section-heading"><h4>' + safe(item.explanation) + '</h4><span class="hypothesis-state ' + safe(item.status) + '">' + safe(item.status) + '</span></div><p>' + investigationText(run, item.reason) + '</p><div class="citations">' + investigationRefs(run, item.evidence_ids) + '</div></article>').join('');
   const name = id => run.context?.alerts?.find(item=>item.incident_id === id)?.title || id;
   const connections = (assessment.connections || []).map(item=>'<article class="hypothesis-row"><h4>' + safe(name(item.from)) + ' / ' + safe(name(item.to)) + '</h4><small>' + safe(item.relationship.replaceAll('_',' ')) + '</small><p>' + investigationText(run, item.reason) + '</p><div class="citations">' + investigationRefs(run,item.evidence_ids) + '</div></article>').join('');
@@ -1063,12 +1154,12 @@ function briefingPanel(payload, detailed = false, evidencePrompt = '') {
     (historyHtml ? disclosure('related-history', 'Related history', historyHtml) : '') +
     (findingDetails ? disclosure('all-findings', 'Retained findings', '<div class="findings">' + findingDetails + '</div>', run.findings.length) : '') +
     (hypotheses ? disclosure('competing-explanations','Explanations considered',hypotheses,assessment.hypotheses.length) : '') +
-    (connections ? disclosure('alert-connections','How the alerts relate',connections,assessment.connections.length) : '') + '</section>';
+    (connections ? disclosure('alert-connections','How the alerts relate',connections,assessment.connections.length) : '') + atlasHtml + '</section>';
   return '<section class="briefing">' + header + inconclusiveNote +
     '<div class="assessment-decision"><div class="assessment-main"><span class="text-label">' + (run.status === 'inconclusive' ? 'Evidence assessment · inconclusive' : 'Likely explanation · model assessment') + '</span><p class="brief-lead">' + investigationText(run, mechanism || 'No supported cause yet.') + '</p>' +
     inlineDisclosure('assessment-basis', run.status === 'inconclusive' ? 'Assessment basis' : 'Why this fits', (assessment.basis ? '<p class="assessment-basis">' + investigationText(run, assessment.basis) + '</p>' : '') + (extraIds.length ? '<div class="citations">' + investigationRefs(run, extraIds) + '</div>' : ''), mainIds.length ? mainIds.length + (mainIds.length === 1 ? ' source' : ' sources') : '') + '</div>' +
     '<div class="next-check"><h4>Next check</h4><p><strong>' + investigationText(run, assessment.next_action) + '</strong></p>' + (assessment.expected_finding ? inlineDisclosure('expected-finding', 'Expected finding', '<p>' + investigationText(run, assessment.expected_finding) + '</p>') : '') + evidencePrompt + '</div>' +
-    '</div>' + discrepancy + (briefObservations ? '<div class="key-observations">' + inlineDisclosure('key-observations', 'Key observations', '<ul>' + briefObservations + '</ul>', observations.length) + '</div>' : '') +
+    '</div>' + atlasHtml + discrepancy + (briefObservations ? '<div class="key-observations">' + inlineDisclosure('key-observations', 'Key observations', '<ul>' + briefObservations + '</ul>', observations.length) + '</div>' : '') +
     '<p class="uncertainty"><strong>Still unconfirmed:</strong> ' + investigationText(run, assessment.uncertainty) + '</p></section>';
 }
 
@@ -1462,6 +1553,170 @@ function renderPatterns(state) {
   }
 }
 
+function atlasRecords(value) { return Array.isArray(value) ? value : value == null ? [] : [value]; }
+function atlasId(item) { return String(item?.atlas_case_id ?? item?.case_id ?? item?.pattern_id ?? item?.id ?? item?.fingerprint ?? ''); }
+function atlasText(value) {
+  if (value == null) return '';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return value.map(atlasText).filter(Boolean).join(', ');
+  if (value.key != null && value.value != null) return `${value.key}: ${value.value}${value.unit ? ' ' + value.unit : ''}`;
+  return String(value.fact ?? value.observation ?? value.description ?? value.statement ?? value.summary ?? value.title ?? value.text ?? value.value ?? value.name ?? value.ref ?? value.id ?? '');
+}
+function atlasFactSection(title, values, emptyText) {
+  const items = atlasRecords(values).map(item => {
+    const text = atlasText(item);
+    const source = item && typeof item === 'object'
+      ? [item.source && `Source: ${atlasText(item.source)}`, item.supporting_refs && `Supporting references: ${atlasText(item.supporting_refs)}`, item.reference && `Reference: ${atlasText(item.reference)}`, item.source_ref && `Reference: ${atlasText(item.source_ref)}`].filter(Boolean).join(' · ')
+      : '';
+    return text ? `<li><span>${safe(text)}</span>${source ? `<small>${safe(source)}</small>` : ''}</li>` : '';
+  }).filter(Boolean);
+  return `<section class="atlas-record-section"><h3>${safe(title)}</h3>${items.length ? `<ul>${items.join('')}</ul>` : `<p class="queue-note">${safe(emptyText)}</p>`}</section>`;
+}
+function atlasCaseLink(item, label = '') {
+  const id = atlasId(item);
+  if (!id) return '';
+  const title = item.title || item.summary || item.case_id || id;
+  const instance = item.instance_id || item.instance || '';
+  const date = item.observed_at || item.created_at || item.occurred_at || '';
+  const score = typeof item.score === 'number' ? ` · ${Math.round(item.score * 100)}% similarity` : '';
+  return `<a class="atlas-case-link" href="/atlas?case=${encodeURIComponent(id)}"><span><strong>${safe(label || title)}</strong><small>${safe([item.relation && item.relation.replaceAll('_',' '), instance, date && formatDate(date)].filter(Boolean).join(' · ') + score || id)}</small></span>${icon('chevron-right')}</a>`;
+}
+function atlasPatternLink(item) {
+  const id = atlasId(item);
+  if (!id) return '';
+  const observation = [item.key, item.value].filter(value => value != null).join(': ');
+  const title = item.title || item.name || item.summary || observation || item.pattern_id || id;
+  const cases = item.case_count ?? item.total_cases ?? item.occurrence_count ?? item.match_count;
+  const instances = item.instance_count ?? item.instances_count;
+  const meta = [cases == null ? '' : `${safe(cases)} cases`, instances == null ? '' : `${safe(instances)} instances`].filter(Boolean).join(' · ');
+  return `<a class="atlas-pattern-link" href="/atlas?pattern=${encodeURIComponent(id)}"><span><strong>${safe(title)}</strong><small>${safe(meta || id)}</small></span>${icon('chevron-right')}</a>`;
+}
+function atlasProvenance(record) {
+  const scope = record.scope && typeof record.scope === 'object' ? Object.entries(record.scope).filter(([,value]) => value != null && String(value) !== '').map(([key,value]) => `${key}: ${value}`).join(' · ') : record.scope;
+  const entries = [
+    ['Instance', record.instance_id ?? record.instance],
+    ['Scope', scope],
+    ['Source', record.source ?? record.source_system],
+    ['Observed', record.observed_at ?? record.created_at ?? record.occurred_at],
+    ['Record', record.source_ref ?? record.source_id ?? record.record_id ?? record.episode_id],
+  ].filter(([,value]) => value != null && String(value) !== '');
+  const refs = record.evidence_refs ?? record.source_refs ?? record.references ?? record.provenance?.sources;
+  atlasRecords(refs).forEach((ref, index) => {
+    const value = atlasText(ref);
+    if (value) entries.push([`Reference ${index + 1}`, value]);
+  });
+  if (!entries.length) return '<p class="queue-note">No provenance details were returned for this record.</p>';
+  return `<dl class="atlas-provenance">${entries.map(([label,value]) => `<div><dt>${safe(label)}</dt><dd>${safe(value)}</dd></div>`).join('')}</dl>`;
+}
+function atlasRecord(record) {
+  const facts = record.facts ?? record.observations ?? record.observed_facts ?? record.observed ?? (record.kind === 'observation' && record.key != null ? [{key:record.key,value:record.value,unit:record.unit}] : null);
+  const hypotheses = record.hypotheses ?? record.interpretations ?? record.possible_causes ?? (record.interpretation ? [{statement:record.interpretation}] : null);
+  const hypothesisTitle = record.kind === 'observation' ? 'Pattern interpretation (not causal evidence)' : 'Unverified hypotheses';
+  const patternId = record.pattern_id ?? record.related_pattern_id;
+  const linkedPattern = patternId ? atlasPatternLink({id:patternId,title:record.pattern_title || patternId}) : '';
+  return `<div class="atlas-record"><div class="atlas-record-columns">${atlasFactSection('Retained observations (facts)', facts, 'No structured facts were returned for this record.')}${atlasFactSection(hypothesisTitle, hypotheses, 'No hypothesis was returned. No cause is asserted.')}</div><section class="atlas-record-section"><h3>Provenance</h3>${atlasProvenance(record)}${linkedPattern ? `<div class="atlas-related-pattern"><span>Similarity pattern</span>${linkedPattern}<p class="queue-note">Pattern membership indicates similarity only, not causation.</p></div>` : ''}</section></div>`;
+}
+function atlasPatternDetail(data) {
+  const pattern = data?.pattern || {};
+  const cases = atlasRecords(data?.cases || pattern.cases);
+  const id = atlasId(pattern) || atlasSelectedPattern;
+  const observation = [pattern.key, pattern.value].filter(value => value != null).join(': ');
+  const title = pattern.title || pattern.name || pattern.summary || observation || id;
+  const caseCount = pattern.case_count ?? pattern.total_cases ?? pattern.occurrence_count ?? pattern.match_count;
+  const instanceCount = pattern.instance_count ?? pattern.instances_count;
+  const counts = [caseCount == null ? '' : `Seen in ${safe(caseCount)} cases`, instanceCount == null ? '' : `across ${safe(instanceCount)} instances`].filter(Boolean).join(' ');
+  const time = [pattern.first_seen_at || pattern.first_seen ? `First seen ${formatDate(pattern.first_seen_at || pattern.first_seen)}` : '', pattern.last_seen_at || pattern.last_seen ? `Last seen ${formatDate(pattern.last_seen_at || pattern.last_seen)}` : ''].filter(Boolean).join(' · ');
+  return `<div class="atlas-detail-head"><a href="/atlas">${icon('chevron-right')}Back to Atlas</a><div class="eyebrow">Similarity pattern</div><h2>${safe(title)}</h2><p>${safe(counts || `${cases.length} linked case${cases.length === 1 ? '' : 's'} returned`)}${time ? ' · ' + safe(time) : ''}</p><code>${safe(id)}</code></div>${atlasRecord(pattern)}<section class="atlas-record-section atlas-case-list"><h3>Linked cases <span class="queue-note">${cases.length} returned</span></h3>${cases.length ? cases.map(item => atlasCaseLink(item)).join('') : '<p class="queue-note">No cases were returned with this pattern.</p>'}</section>`;
+}
+function atlasCaseDetail(data) {
+  const record = data?.case || {};
+  const id = atlasId(record) || atlasSelectedCase;
+  const title = record.title || record.summary || record.case_id || id;
+  const relations = atlasRecords(record.related_cases || record.relations || record.related_case_ids);
+  const scope = record.scope && typeof record.scope === 'object' ? Object.values(record.scope).filter(value => value != null && String(value) !== '').join(' / ') : record.scope;
+  return `<div class="atlas-detail-head"><a href="/atlas">${icon('chevron-right')}Back to Atlas</a><div class="eyebrow">Retained case</div><h2>${safe(title)}</h2><p>${safe([record.instance_id || record.instance, record.observed_at && formatDate(record.observed_at), scope].filter(Boolean).join(' · ') || 'Case details')}</p><code>${safe(id)}</code></div>${atlasRecord(record)}${relations.length ? `<section class="atlas-record-section atlas-case-list"><h3>Related cases</h3>${relations.map(item => typeof item === 'object' ? atlasCaseLink(item) : atlasCaseLink({case_id:item})).join('')}</section>` : ''}`;
+}
+function atlasFailureText(message, status) {
+  if (status === 'not_configured') return 'Atlas is not configured. Add its service URL and enable reads in Settings.';
+  if (status === 'disabled') return 'Atlas reads are disabled. Enable them in Settings to browse retained records.';
+  return message || 'Atlas is currently unavailable. Try again when the service is reachable.';
+}
+function relatedAtlasCases(run) {
+  const cases = atlasRecords(run?.context?.atlas_cases);
+  if (cases.length) return `<section class="related-atlas-cases"><h4>Related Atlas cases</h4><p>Similarity references retrieved for this investigation. Atlas case IDs are not FCAPSule evidence citations, and the relationship does not establish cause.</p>${cases.map(item => atlasCaseLink(item, item.summary || `Atlas case ${atlasId(item)}`)).join('')}</section>`;
+  const state = run?.context?.atlas_retrieval?.status;
+  const messages = {
+    no_matches:'Atlas search completed with no matching cases. This does not establish that a cause is new or absent.',
+    unavailable:'Atlas retrieval was unavailable; no Atlas cases were available to this investigation.',
+    pending:'Atlas retrieval is pending; no related cases are available yet.',
+  };
+  return messages[state] ? `<p class="atlas-retrieval-note" role="status">${safe(messages[state])}</p>` : '';
+}
+function atlasRender() {
+  const focusedId = document.activeElement?.id;
+  const patterns = atlasPatterns.map(item => atlasPatternLink(item)).join('');
+  const cases = atlasCases.map(item => atlasCaseLink(item)).join('');
+  const query = safe(atlasQuery);
+  const detail = atlasSelectedPattern ? (atlasDetail ? atlasPatternDetail(atlasDetail) : atlasDetailStatus === 'pending' ? '<div class="empty">Loading pattern detail...</div>' : `<p class="target-error" role="alert">${safe(atlasMessage)}</p>`) : atlasSelectedCase ? (atlasDetail ? atlasCaseDetail(atlasDetail) : atlasDetailStatus === 'pending' ? '<div class="empty">Loading case detail...</div>' : `<p class="target-error" role="alert">${safe(atlasMessage)}</p>`) : '';
+  const connection = atlasResultStatus === 'ready' ? 'Connected' : atlasResultStatus === 'pending' ? 'Connecting' : 'Unavailable';
+  app.innerHTML = `<div class="page-head"><div><div class="eyebrow">Cross-instance memory</div><h1>Atlas</h1><p>Browse repeated patterns and retained cases from connected FCAPSule instances.</p></div><div class="actions"><span class="status ${atlasResultStatus === 'ready' ? 'healthy' : atlasResultStatus === 'pending' ? 'running' : 'error'}" role="status">${connection}</span><button type="button" class="secondary" id="atlas-refresh" title="Refresh Atlas records">${icon('refresh-cw')}Refresh</button></div></div>
+    <aside class="atlas-caveat" role="note"><strong>Similarity is not causation.</strong> Patterns help retrieve comparable cases; retained observations are shown separately from unverified hypotheses. Atlas records do not verify root cause.</aside>
+    <form class="atlas-search" id="atlas-search-form"><div class="field"><label for="atlas-query">Search patterns and cases</label><input id="atlas-query" type="search" value="${query}" placeholder="Service timeout, rollout, error text" autocomplete="off"></div><div class="field"><label for="atlas-scope">Cluster <span class="queue-note">optional</span></label><input id="atlas-scope" value="${safe(atlasScope)}" placeholder="Cluster name" autocomplete="off"></div><button type="submit">Search Atlas</button></form>
+    <div class="atlas-status" role="status" aria-live="polite">${atlasMessage ? safe(atlasMessage) : atlasResultStatus === 'pending' ? 'Loading Atlas records...' : ''}</div>
+    ${detail ? `<section class="atlas-detail sheet">${detail}</section>` : `<div class="atlas-results"><section class="sheet"><div class="sheet-head"><h2>Similarity patterns</h2><span class="queue-note">${atlasPatterns.length} returned</span></div><div class="atlas-result-list">${atlasPatternError ? `<p class="target-error" role="alert">${safe(atlasPatternError)}</p>` : atlasResultStatus === 'pending' ? '<div class="empty">Loading patterns...</div>' : patterns || `<div class="empty">${atlasQuery ? 'No matching patterns were returned. Search cases below can still find first-occurrence records.' : 'No Atlas patterns were returned. Records may not be indexed yet.'}</div>`}</div></section><section class="sheet"><div class="sheet-head"><h2>${atlasQuery ? 'Matching cases' : 'Cases'}</h2><span class="queue-note">${atlasCases.length} returned</span></div><div class="atlas-result-list">${atlasCaseError ? `<p class="target-error" role="alert">${safe(atlasCaseError)}</p>` : atlasQuery && atlasResultStatus === 'pending' ? '<div class="empty">Searching cases...</div>' : atlasQuery ? cases || '<div class="empty">No matching cases were returned for this query and scope.</div>' : '<div class="empty">Search to find individual cases, including records without an established repeat pattern.</div>'}</div></section></div>`}`;
+  if (focusedId) document.getElementById(focusedId)?.focus({preventScroll:true});
+  document.querySelector('#atlas-search-form')?.addEventListener('submit', event => {
+    event.preventDefault();
+    atlasQuery = document.querySelector('#atlas-query').value.trim();
+    atlasScope = document.querySelector('#atlas-scope').value.trim();
+    atlasSelectedPattern = ''; atlasSelectedCase = ''; atlasDetail = null;
+    const params = new URLSearchParams(); if (atlasQuery) params.set('q', atlasQuery); if (atlasScope) params.set('scope', atlasScope);
+    history.replaceState(null, '', '/atlas' + (params.size ? '?' + params.toString() : ''));
+    loadAtlas();
+  });
+  document.querySelector('#atlas-refresh')?.addEventListener('click', loadAtlas);
+}
+let atlasDetailStatus = 'pending';
+async function loadAtlas() {
+  const sequence = ++atlasRequestSequence;
+  atlasMessage = ''; atlasPatternError = ''; atlasCaseError = '';
+  if (atlasSelectedPattern || atlasSelectedCase) {
+    atlasDetail = null; atlasDetailStatus = 'pending'; atlasResultStatus = 'pending'; atlasRender();
+    const kind = atlasSelectedPattern ? 'patterns' : 'cases';
+    const id = atlasSelectedPattern || atlasSelectedCase;
+    try {
+      const response = await fetch(`/api/atlas/${kind}/${encodeURIComponent(id)}`, {cache:'no-store'});
+      const result = await response.json();
+      if (!response.ok) throw Object.assign(new Error(atlasFailureText(result.error, result.status)), {serviceStatus:result.status});
+      if (sequence !== atlasRequestSequence) return;
+      atlasDetail = result; atlasDetailStatus = 'ready'; atlasResultStatus = 'ready';
+    } catch (error) {
+      if (sequence !== atlasRequestSequence) return;
+      atlasDetailStatus = 'error'; atlasResultStatus = 'error'; atlasMessage = error.message || 'Atlas record unavailable.';
+    }
+    atlasRender(); return;
+  }
+  atlasResultStatus = 'pending'; atlasCasesSearched = Boolean(atlasQuery); atlasPatterns = []; atlasCases = []; atlasRender();
+  const params = new URLSearchParams(); if (atlasQuery) params.set('query', atlasQuery); if (atlasScope) params.set('scope', atlasScope); params.set('limit', '20');
+  const patternsPromise = fetch('/api/atlas/patterns?' + params.toString(), {cache:'no-store'}).then(async response => {
+    const result = await response.json();
+    if (!response.ok) throw Object.assign(new Error(atlasFailureText(result.error, result.status)), {serviceStatus:result.status});
+    if (sequence !== atlasRequestSequence) return;
+    atlasPatterns = atlasRecords(result.patterns);
+  }).catch(error => { if (sequence === atlasRequestSequence) atlasPatternError = error.message || 'Atlas patterns are unavailable.'; });
+  const casesPromise = atlasQuery ? fetch('/api/atlas/search', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:atlasQuery,scope:atlasScope ? {cluster:atlasScope} : null,limit:20})}).then(async response => {
+    const result = await response.json();
+    if (!response.ok) throw Object.assign(new Error(atlasFailureText(result.error, result.status)), {serviceStatus:result.status});
+    if (sequence !== atlasRequestSequence) return;
+    atlasCases = atlasRecords(result.cases);
+  }).catch(error => { if (sequence === atlasRequestSequence) atlasCaseError = error.message || 'Atlas cases are unavailable.'; }) : Promise.resolve();
+  await Promise.all([patternsPromise, casesPromise]);
+  if (sequence !== atlasRequestSequence) return;
+  atlasResultStatus = atlasPatternError && (!atlasQuery || atlasCaseError) ? 'error' : 'ready';
+  atlasMessage = atlasResultStatus === 'error' ? 'Atlas records are unavailable. Check connection settings or try again.' : atlasPatternError ? 'Case search returned; pattern retrieval is unavailable.' : atlasCaseError ? 'Patterns returned; case search is unavailable.' : '';
+  atlasRender();
+}
+
 async function refresh() {
   if (refreshing || document.hidden) return;
   refreshing = true;
@@ -1495,7 +1750,7 @@ async function refresh() {
       }
       if (!reportLoading && consoleSignature(state) !== lastConsoleSignature) renderPreservingFocus(() => renderConsole(state));
     } else if (!previous) {
-      view === 'targets' ? renderTargets(state) : view === 'patterns' ? renderPatterns(state) : renderSettings(state);
+      view === 'targets' ? renderTargets(state) : view === 'patterns' ? renderPatterns(state) : view === 'atlas' ? (atlasRender(), loadAtlas()) : renderSettings(state);
     } else if (view === 'targets') {
       // Refresh inventory without replacing editable connection settings.
       document.querySelector('#discovery-time').textContent = formatDate(state.sources.last_sync_at);

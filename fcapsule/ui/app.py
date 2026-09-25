@@ -11,7 +11,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from fcapsule.control_plane import ControlPlane
 
@@ -33,6 +33,7 @@ HTML = """<!doctype html>
       <a href="/console" data-nav="console"><span class="ui-icon" data-icon="activity" aria-hidden="true"></span>Operations</a>
       <a href="/targets" data-nav="targets"><span class="ui-icon" data-icon="network" aria-hidden="true"></span>Targets</a>
       <a href="/patterns" data-nav="patterns"><span class="ui-icon" data-icon="layers" aria-hidden="true"></span>Patterns</a>
+      <a href="/atlas" data-nav="atlas"><span class="ui-icon" data-icon="network" aria-hidden="true"></span>Atlas</a>
       <a href="/settings" data-nav="settings"><span class="ui-icon" data-icon="settings-2" aria-hidden="true"></span>Settings</a>
     </nav>
     <div class="system-state" role="status"><i></i><span id="system-state">Connecting</span></div>
@@ -51,6 +52,22 @@ STREAM_CHUNK_BYTES = 128 * 1024
 JSON_SPOOL_MEMORY_BYTES = 1024 * 1024
 
 
+def _atlas_client(control_plane: ControlPlane, operation: str):
+    configured_client = getattr(control_plane, "atlas_client", None)
+    if configured_client:
+        try:
+            return configured_client(operation)
+        except Exception:
+            return None
+    try:
+        from fcapsule.atlas_client import atlas_client_from_env
+        return atlas_client_from_env(operation=operation)
+    except ImportError:
+        return None
+    except Exception:
+        return None
+
+
 class FCAPSuleHTTPServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int], control_plane: ControlPlane) -> None:
         self.control_plane = control_plane
@@ -58,6 +75,9 @@ class FCAPSuleHTTPServer(ThreadingHTTPServer):
 
     def server_close(self) -> None:
         self.control_plane.investigator.stopping = True
+        publisher = getattr(self.control_plane, "atlas_publisher", None)
+        if publisher is not None:
+            publisher.shutdown(drain=True, timeout=7.0)
         self.control_plane.stop_live_monitoring()
         self.control_plane.briefing_executor.shutdown(wait=False, cancel_futures=True)
         self.control_plane.evidence.shutdown(wait=False)
@@ -145,6 +165,25 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             raise ValueError("JSON body must be an object")
         return value
 
+    def _atlas_unavailable(self) -> None:
+        try:
+            config = self.server.control_plane.atlas_configuration()
+        except AttributeError:
+            config = {}
+        if not config.get("url"):
+            status, message = "not_configured", "Add the Atlas service URL in Settings."
+        elif not config.get("read_enabled"):
+            status, message = "disabled", "Atlas reads are disabled in Settings."
+        else:
+            status, message = "unavailable", "Atlas client is unavailable in this FCAPSule build."
+        self._json({"status": status, "error": message}, HTTPStatus.SERVICE_UNAVAILABLE)
+
+    def _atlas_failure(self, exc: Exception) -> None:
+        self._json({
+            "status": "unavailable",
+            "error": "Atlas request failed. Check the saved URL, access token, and service availability.",
+        }, HTTPStatus.SERVICE_UNAVAILABLE)
+
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         if path == "/":
@@ -152,7 +191,7 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             self.send_header("Location", "/console")
             self.end_headers()
             return
-        if path in {"/console", "/targets", "/patterns", "/settings"}:
+        if path in {"/console", "/targets", "/patterns", "/atlas", "/settings"} or path.startswith("/atlas/"):
             self._text(HTML, "text/html; charset=utf-8")
             return
         if path == "/assets/app.css":
@@ -188,6 +227,59 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/settings/sources":
             self._json(self.server.control_plane.source_configuration())
+            return
+        if path == "/api/settings/atlas":
+            self._json(self.server.control_plane.atlas_configuration())
+            return
+        if path == "/api/atlas/patterns":
+            query = parse_qs(urlparse(self.path).query)
+            cluster = (query.get("cluster") or query.get("scope") or [None])[0]
+            scope = {"cluster": cluster} if cluster else None
+            search = (query.get("query") or [None])[0]
+            before = (query.get("before") or [None])[0]
+            try:
+                limit = max(1, min(50, int((query.get("limit") or ["20"])[0])))
+            except ValueError:
+                self._json({"error": "limit must be a number", "status": "invalid_request"}, HTTPStatus.BAD_REQUEST)
+                return
+            client = _atlas_client(self.server.control_plane, "read")
+            if client is None:
+                self._atlas_unavailable()
+                return
+            try:
+                self._json(client.list_patterns(scope=scope, query=search, limit=limit, before=before))
+            except Exception as exc:
+                self._atlas_failure(exc)
+            return
+        if path.startswith("/api/atlas/patterns/"):
+            pattern_id = unquote(path.removeprefix("/api/atlas/patterns/").rstrip("/"))
+            client = _atlas_client(self.server.control_plane, "read")
+            if client is None:
+                self._atlas_unavailable()
+                return
+            try:
+                result = client.get_pattern(pattern_id)
+                if result is None:
+                    self._json({"error": "Pattern not found", "status": "not_found"}, HTTPStatus.NOT_FOUND)
+                else:
+                    self._json(result)
+            except Exception as exc:
+                self._atlas_failure(exc)
+            return
+        if path.startswith("/api/atlas/cases/"):
+            case_id = unquote(path.removeprefix("/api/atlas/cases/").rstrip("/"))
+            client = _atlas_client(self.server.control_plane, "read")
+            if client is None:
+                self._atlas_unavailable()
+                return
+            try:
+                result = client.get_case(case_id)
+                if result is None:
+                    self._json({"error": "Case not found", "status": "not_found"}, HTTPStatus.NOT_FOUND)
+                else:
+                    self._json(result)
+            except Exception as exc:
+                self._atlas_failure(exc)
             return
         if path.startswith("/api/episodes/") and path.endswith("/evidence"):
             episode_id = unquote(path.removeprefix("/api/episodes/").removesuffix("/evidence").rstrip("/"))
@@ -287,6 +379,47 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/settings/sources":
                 self._json(self.server.control_plane.update_source_configuration(self._payload()))
+                return
+            if path == "/api/settings/atlas":
+                self._json(self.server.control_plane.update_atlas_configuration(self._payload()))
+                return
+            if path == "/api/atlas/search":
+                payload = self._payload()
+                query = str(payload.get("query") or "").strip()
+                if not query:
+                    self._json({"error": "Enter a search term", "status": "invalid_request"}, HTTPStatus.BAD_REQUEST)
+                    return
+                try:
+                    limit = max(1, min(50, int(payload.get("limit", 20))))
+                except (TypeError, ValueError):
+                    self._json({"error": "limit must be a number", "status": "invalid_request"}, HTTPStatus.BAD_REQUEST)
+                    return
+                scope = payload.get("scope")
+                if isinstance(scope, str):
+                    scope = {"cluster": scope.strip()} if scope.strip() else None
+                if scope is not None and (not isinstance(scope, dict) or any(key not in {"cluster", "namespace", "service", "workload", "cnfc_id", "vnfc_id"} for key in scope)):
+                    self._json({"error": "scope must contain supported scope fields", "status": "invalid_request"}, HTTPStatus.BAD_REQUEST)
+                    return
+                client = _atlas_client(self.server.control_plane, "read")
+                if client is None:
+                    self._atlas_unavailable()
+                    return
+                try:
+                    self._json(client.search(
+                        scope=scope,
+                        query=query,
+                        limit=limit,
+                        before=str(payload.get("before") or "").strip() or None,
+                    ))
+                except Exception as exc:
+                    self._atlas_failure(exc)
+                return
+            if path == "/api/atlas/retry-failed":
+                retry = getattr(self.server.control_plane, "retry_atlas_publications", None)
+                if retry is None:
+                    self._json({"error": "Atlas retry is unavailable in this FCAPSule build"}, HTTPStatus.NOT_IMPLEMENTED)
+                    return
+                self._json(retry(limit=100), HTTPStatus.ACCEPTED)
                 return
             if path == "/api/sources/test":
                 result = self.server.control_plane.test_source_connections()
