@@ -324,7 +324,9 @@ class LiveSourceCoordinator:
             namespace = scope_pods[0]["namespace"]
             alert["resolved_scope"] = {key: value for key, value in scope.items() if key != "pods"}
             alert["resolved_scope"]["pods"] = [item["name"] for item in scope_pods]
-            incident_id = _incident_id(alert, namespace, f"{scope['kind']}:{scope['name']}")
+            incident_scope = (scope_pods[0]["name"] if len(scope_pods) == 1 and not alert.get("source")
+                              else f"{scope['kind']}:{scope['name']}")
+            incident_id = _incident_id(alert, namespace, incident_scope)
             active_incident_ids.add(incident_id)
             if self.store.get_incident(incident_id):
                 self.store.activate_live_incident(incident_id)
