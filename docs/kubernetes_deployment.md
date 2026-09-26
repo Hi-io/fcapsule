@@ -62,17 +62,18 @@ The application Service is ClusterIP-only. For remote HTTPS access, add the opti
 `python:3.12-slim` to install source into an `emptyDir`; the application container
 runs that source with the same non-root security policy as the base Deployment.
 The checked-in overlay points at mutable `master.zip`, so applying it unchanged
-is not reproducible. The tested source revision is
-`003d3876f1e1f708664bfb7fa7070007f7a57067`. The current live Deployment also
-uses the `install-source` init-container name and pins its GitHub archive URL
-to that SHA. Do not apply the checked-in overlay unchanged to the live
-Deployment: strategic merge matches by name, so it would replace the pinned URL
-with mutable `master.zip`. Inspect the live template and preserve or update its
-existing source URL as described below. Pin the overlay URL before applying it
-to a fresh/base Deployment as well:
+is not reproducible. In a read-only live snapshot taken on 2026-09-26, the
+Deployment used `install-source` and pinned its GitHub archive URL to
+`003d3876f1e1f708664bfb7fa7070007f7a57067`. That SHA documents the snapshot
+only; it is not a current release target. Do not apply the checked-in overlay
+unchanged to the live Deployment: strategic merge matches by name, so it would
+replace the pinned URL with mutable `master.zip`. Inspect the live template and
+preserve or update its existing source URL as described below. Pin the overlay
+URL before applying it to a fresh/base Deployment as well:
 
 ```bash
-source_sha=003d3876f1e1f708664bfb7fa7070007f7a57067
+# Run from the exact source commit that has been verified and pushed.
+source_sha="$(git rev-parse HEAD)"
 source_archive="https://github.com/Hi-io/fcapsule/archive/${source_sha}.zip"
 overlay_patch="$(mktemp)"
 trap 'rm -f "$overlay_patch"' EXIT
@@ -104,7 +105,8 @@ replacing only command element 7. Do not reuse an index or current URL from a
 different Deployment layout.
 
 ```bash
-source_sha=003d3876f1e1f708664bfb7fa7070007f7a57067
+# Run from the exact source commit that has been verified and pushed.
+source_sha="$(git rev-parse HEAD)"
 source_archive="https://github.com/Hi-io/fcapsule/archive/${source_sha}.zip"
 init_index=observed-index # replace with the inspected numeric array index
 current_archive='<copy-exact-current-archive-url-from-inspection>'
@@ -118,11 +120,11 @@ kubectl patch deployment fcapsule -n fcapsule --type=json --patch "$patch"
 kubectl rollout status deployment/fcapsule -n fcapsule
 ```
 
-The tested live profile uses `python:3.12-slim` for the source installer and
-application container, with the init-container URL ending in the pinned SHA
-above. A plain `kubectl rollout restart` recreates pods from the existing
-template; it does not advance a pinned source revision. To roll back, use the
-known-good revision recorded by `rollout history` before changing the template:
+The observed live profile used `python:3.12-slim` for the source installer and
+application container. A plain `kubectl rollout restart` recreates pods from the
+existing template; it does not advance a pinned source revision. To roll back,
+use the known-good revision recorded by `rollout history` before changing the
+template:
 
 ```bash
 known_good_revision=your-known-good-revision # replace with the recorded numeric revision
@@ -160,6 +162,7 @@ use the guarded JSON Patch procedure above with the observed name and array inde
 instead of applying this overlay:
 
 ```bash
+# Run from the exact merged commit that passed verification.
 source_sha="$(git rev-parse HEAD)"
 source_archive="https://github.com/Hi-io/fcapsule/archive/${source_sha}.zip"
 overlay_patch="$(mktemp)"
