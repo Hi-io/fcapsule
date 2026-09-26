@@ -251,6 +251,7 @@ class StoreTests(unittest.TestCase):
             episodes = store.list_episodes()
             self.assertEqual(episodes[0]["primary_incident_id"], "late-arrival")
             self.assertEqual(episodes[0]["last_activity_at"], "2026-09-23T10:02:00Z")
+            self.assertGreater(episodes[0]["last_activity_at"], episodes[1]["last_activity_at"])
             self.assertEqual([signal["incident_id"] for signal in episodes[0]["signals"]], ["early", "late-arrival"])
 
     def test_resolved_critical_alert_does_not_title_a_different_active_failure(self):
