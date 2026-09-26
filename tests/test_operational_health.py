@@ -1,10 +1,13 @@
+import base64
 import json
+import os
 import tempfile
 import threading
 import unittest
 from http.client import HTTPConnection
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from fcapsule.operational_health import render_operational_metrics
 from fcapsule.ui.app import FCAPSuleHTTPServer
@@ -118,6 +121,34 @@ class OperationalHealthTests(unittest.TestCase):
         self.assertIn("fcapsule_retention_cleanup_due 1", rendered)
         self.assertNotIn("customer-episode-id", rendered)
 
+    def test_collective_publish_flag_wins_over_legacy_aliases(self):
+        plane = self._plane(estima_settings_path=None)
+        cases = (
+            ({"FCAPSULE_COLLECTIVE_PUBLISH": "false", "FCAPSULE_ESTIMA_PUBLISH": "true", "FCAPSULE_ATLAS_PUBLISH": "true"}, 0),
+            ({"FCAPSULE_COLLECTIVE_PUBLISH": "true", "FCAPSULE_ESTIMA_PUBLISH": "false", "FCAPSULE_ATLAS_PUBLISH": "false"}, 1),
+            ({"FCAPSULE_ESTIMA_PUBLISH": "false", "FCAPSULE_ATLAS_PUBLISH": "true"}, 0),
+            ({"FCAPSULE_ESTIMA_PUBLISH": "true", "FCAPSULE_ATLAS_PUBLISH": "false"}, 1),
+            ({"FCAPSULE_ATLAS_PUBLISH": "true"}, 1),
+        )
+        for values, expected in cases:
+            with patch.dict(os.environ, values, clear=True):
+                rendered = render_operational_metrics(plane, monotonic_now=120.0)
+            self.assertIn(f"fcapsule_shared_publication_enabled {expected}", rendered)
+
+    def test_saved_publish_flag_overrides_collective_environment_default(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "collective-settings.json"
+            path.write_text(json.dumps({"publish_enabled": False}), encoding="utf-8")
+            plane = self._plane(estima_settings_path=path)
+            with patch.dict(os.environ, {
+                "FCAPSULE_COLLECTIVE_PUBLISH": "true",
+                "FCAPSULE_ESTIMA_PUBLISH": "false",
+                "FCAPSULE_ATLAS_PUBLISH": "false",
+            }, clear=True):
+                rendered = render_operational_metrics(plane, monotonic_now=120.0)
+
+        self.assertIn("fcapsule_shared_publication_enabled 0", rendered)
+
     def test_metrics_route_returns_prometheus_plaintext(self):
         plane = self._plane()
         plane.investigator = SimpleNamespace(stopping=False)
@@ -128,16 +159,56 @@ class OperationalHealthTests(unittest.TestCase):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            connection = HTTPConnection("127.0.0.1", server.server_port)
-            connection.request("GET", "/metrics")
-            response = connection.getresponse()
-            body = response.read().decode("utf-8")
-            connection.close()
-            self.assertEqual(response.status, 200)
-            self.assertTrue(response.getheader("Content-Type").startswith("text/plain; version=0.0.4"))
-            self.assertEqual(response.getheader("Cache-Control"), "no-store")
-            self.assertIn("# TYPE fcapsule_source_sync_state gauge", body)
-            self.assertIn("fcapsule_shared_publication_backlog", body)
+            with patch.dict(os.environ, {
+                "FCAPSULE_CONSOLE_USERNAME": "",
+                "FCAPSULE_CONSOLE_PASSWORD": "",
+                "FCAPSULE_CONSOLE_AUTH_REQUIRED": "false",
+            }):
+                connection = HTTPConnection("127.0.0.1", server.server_port)
+                connection.request("GET", "/metrics")
+                response = connection.getresponse()
+                body = response.read().decode("utf-8")
+                connection.close()
+                self.assertEqual(response.status, 200)
+                self.assertTrue(response.getheader("Content-Type").startswith("text/plain; version=0.0.4"))
+                self.assertEqual(response.getheader("Cache-Control"), "no-store")
+                self.assertIn("# TYPE fcapsule_source_sync_state gauge", body)
+                self.assertIn("fcapsule_shared_publication_backlog", body)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_metrics_route_requires_basic_auth_when_configured(self):
+        plane = self._plane()
+        plane.investigator = SimpleNamespace(stopping=False)
+        plane.stop_live_monitoring = lambda: None
+        plane.briefing_executor = SimpleNamespace(shutdown=lambda **_: None)
+        plane.evidence = SimpleNamespace(shutdown=lambda **_: None)
+        server = FCAPSuleHTTPServer(("127.0.0.1", 0), plane)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        credentials = base64.b64encode(b"operator:private-password").decode("ascii")
+        try:
+            with patch.dict(os.environ, {
+                "FCAPSULE_CONSOLE_USERNAME": "operator",
+                "FCAPSULE_CONSOLE_PASSWORD": "private-password",
+            }):
+                connection = HTTPConnection("127.0.0.1", server.server_port)
+                connection.request("GET", "/metrics")
+                unauthorized = connection.getresponse()
+                unauthorized.read()
+                self.assertEqual(unauthorized.status, 401)
+                self.assertTrue(unauthorized.getheader("WWW-Authenticate", "").startswith("Basic "))
+                connection.close()
+
+                connection = HTTPConnection("127.0.0.1", server.server_port)
+                connection.request("GET", "/metrics", headers={"Authorization": f"Basic {credentials}"})
+                authorized = connection.getresponse()
+                body = authorized.read().decode("utf-8")
+                connection.close()
+                self.assertEqual(authorized.status, 200)
+                self.assertIn("# TYPE fcapsule_source_sync_state gauge", body)
         finally:
             server.shutdown()
             server.server_close()

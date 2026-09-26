@@ -29,8 +29,8 @@ _METRIC_HELP = {
     "fcapsule_provider_selected": "Whether the bounded provider is selected for the core investigator.",
     "fcapsule_provider_capability_state": "One-hot validation state for the selected core provider.",
     "fcapsule_provider_work_items": "Briefing jobs queued or running across all providers.",
-    "fcapsule_shared_publication_enabled": "Whether Estima shared publication is enabled.",
-    "fcapsule_shared_publication_backlog": "Retained Estima outbox records by bounded delivery state.",
+    "fcapsule_shared_publication_enabled": "Whether Collective shared publication is enabled.",
+    "fcapsule_shared_publication_backlog": "Retained Collective outbox records by bounded delivery state.",
     "fcapsule_retention_policy_days": "Configured incident retention period in days.",
     "fcapsule_retention_cleanup_seconds_since_check": "Seconds since the last incident-retention cleanup check, or zero if none is known.",
     "fcapsule_retention_cleanup_due": "Whether the periodic incident-retention cleanup check is due.",
@@ -86,17 +86,18 @@ def _boolean_setting(value: Any) -> bool | None:
 def _publication_enabled(control_plane: Any) -> bool:
     """Read only the publish flag without invoking settings migration or exposing secrets."""
 
-    enabled = _boolean_setting(
-        os.environ.get("FCAPSULE_ESTIMA_PUBLISH", os.environ.get("FCAPSULE_ATLAS_PUBLISH", "false"))
-    )
+    enabled = False
+    for name in ("FCAPSULE_COLLECTIVE_PUBLISH", "FCAPSULE_ESTIMA_PUBLISH", "FCAPSULE_ATLAS_PUBLISH"):
+        if name in os.environ:
+            enabled = _boolean_setting(os.environ[name]) or False
+            break
     settings_path = getattr(control_plane, "estima_settings_path", None)
     if settings_path:
         try:
             settings = json.loads(Path(settings_path).read_text(encoding="utf-8"))
             if isinstance(settings, dict) and "publish_enabled" in settings:
                 stored = _boolean_setting(settings["publish_enabled"])
-                if stored is not None:
-                    enabled = stored
+                enabled = stored if stored is not None else bool(settings["publish_enabled"])
         except (OSError, ValueError, TypeError):
             pass
     return bool(enabled)
