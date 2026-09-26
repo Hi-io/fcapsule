@@ -419,6 +419,28 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(state["checks"][0]["status"], "completed")
         self.assertNotIn("do-not-save", json.dumps(state))
 
+    def test_provider_timeout_is_inconclusive_and_preserves_completed_observations(self):
+        state, _ = self.run_case([TimeoutError("provider read timed out")])
+
+        self.assertEqual(state["status"], "inconclusive")
+        self.assertEqual(state["error_type"], "TimeoutError")
+        self.assertEqual(state["assessment"]["provenance"], "deterministic_abstention")
+        self.assertIn("provider did not return", state["assessment"]["uncertainty"])
+        self.assertEqual(state["checks"][0]["status"], "completed")
+        self.assertEqual(state["calls"][0]["status"], "failed")
+        self.assertFalse(state["usage"]["complete"])
+
+    def test_provider_balance_failure_is_inconclusive_and_does_not_leak_provider_detail(self):
+        state, _ = self.run_case([RuntimeError("OpenRouter API returned HTTP 402: insufficient credit balance")])
+
+        self.assertEqual(state["status"], "inconclusive")
+        self.assertEqual(state["error_type"], "RuntimeError")
+        self.assertEqual(state["assessment"]["provenance"], "deterministic_abstention")
+        self.assertEqual(state["checks"][0]["status"], "completed")
+        self.assertEqual(state["calls"][0]["status"], "failed")
+        self.assertNotIn("402", json.dumps(state))
+        self.assertNotIn("balance", json.dumps(state).lower())
+
     def test_one_schema_repair_uses_existing_budget_and_keeps_rejected_decision(self):
         state, client = self.run_case([{"action": "check", "tool": "review_omitted", "arguments": {}, "question": "Other failures?", "distinguishes": "A competing cause"},
                                        {"action": "finish", "assessment": assessment("invented")},

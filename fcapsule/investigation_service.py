@@ -255,7 +255,8 @@ class InvestigationService:
             "revision_id", "parent_revision_id", "revision_reason", "source_mode", "status", "provider", "queued_at",
             "started_at", "finished_at", "model", "policy_version", "message", "validation_error",
             "assessment", "checks", "calls", "review", "findings", "usage", "token_budget",
-            "investigation_contract", "evidence_manifest", "input_fingerprint",
+            "investigation_contract", "evidence_manifest", "input_fingerprint", "report_fingerprint",
+            "recovery_attempt",
         )
         for revision in history["revisions"]:
             path = Path(str(revision.get("state_path") or ""))
@@ -630,6 +631,17 @@ class InvestigationService:
         )
 
     @staticmethod
+    def report_fingerprint(entries, primary_incident_id: str | None = None) -> str:
+        payload = {
+            "reports": [
+                [item.get("incident", {}).get("incident_id", ""), item.get("report", "")]
+                for item in entries
+            ],
+            "primary_incident_id": primary_incident_id or "",
+        }
+        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+    @staticmethod
     def fingerprint(entries, evidence_manifest: list[dict[str, Any]] | None = None,
                     primary_incident_id: str | None = None) -> str:
         payload = {
@@ -769,7 +781,8 @@ class InvestigationService:
                 self.source_review_jobs.discard(review_id)
 
     def start(self, episode_id: str, retry: bool = False, reason: str = "initial_capture",
-              source_mode: str = "live_sources", primary_incident_id: str | None = None) -> dict[str, Any]:
+              source_mode: str = "live_sources", primary_incident_id: str | None = None,
+              automatic_recovery: bool = False) -> dict[str, Any]:
         with self.plane.briefing_lock:
             episode = self.plane.store.get_episode(episode_id)
             if not episode:
@@ -798,8 +811,36 @@ class InvestigationService:
             fingerprint = self.fingerprint(entries, evidence_manifest, primary_incident_id)
             previous = self.read(episode_id)
             config = self.plane.ai_configuration()
-            if any(call.get("status") == "running" for call in previous.get("calls", [])):
-                previous.setdefault("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})["complete"] = False
+            if previous.get("status") in {"queued", "running"}:
+                interrupted_at = now()
+                calls = previous.get("calls") if isinstance(previous.get("calls"), list) else []
+                checks = previous.get("checks") if isinstance(previous.get("checks"), list) else []
+                active_call = False
+                for call in calls:
+                    if isinstance(call, dict) and call.get("status") == "running":
+                        call.update(status="failed", finished_at=interrupted_at,
+                                    error_type="InterruptedError", interrupted=True)
+                        active_call = True
+                for check in checks:
+                    if isinstance(check, dict) and check.get("status") == "running":
+                        check.update(
+                            status="unavailable",
+                            finished_at=interrupted_at,
+                            result={"limitation": "Check was interrupted before an observation was retained."},
+                        )
+                usage = previous.setdefault(
+                    "usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                )
+                if active_call:
+                    usage["complete"] = False
+                previous.update(
+                    status="incomplete",
+                    finished_at=interrupted_at,
+                    error_type="InterruptedError",
+                    message="Investigation was interrupted by process shutdown. Retained checks are available; retry is explicit.",
+                )
+                self.plane._write_briefing_state(self.path(episode_id), previous)
+                self._record_revision(previous)
             if not retry and previous.get("input_fingerprint") == fingerprint and previous.get("status") in {"ready", "incomplete", "inconclusive"}:
                 return previous
             revision_id = f"revision-{uuid.uuid4().hex}"
@@ -809,10 +850,16 @@ class InvestigationService:
                      "provider": config["provider"], "model": config["model"],
                      "input_fingerprint": fingerprint, "checks": [], "assessment": None,
                      "attempt": previous.get("attempt", 0) + 1, "evidence_manifest": evidence_manifest,
-                     "primary_incident_id": primary_incident_id}
+                     "report_fingerprint": self.report_fingerprint(entries, primary_incident_id),
+                     "primary_incident_id": primary_incident_id,
+                     "recovery_attempt": 1 if automatic_recovery else 0}
             history = list(previous.get("previous_runs", []))
             if previous.get("started_at"):
-                history.append({key: previous.get(key) for key in ("attempt", "started_at", "finished_at", "status", "provider", "model", "usage", "assessment", "checks", "calls", "draft_assessment", "review", "policy_version")})
+                history.append({key: previous.get(key) for key in (
+                    "attempt", "started_at", "finished_at", "status", "provider", "model", "usage",
+                    "assessment", "checks", "calls", "draft_assessment", "review", "policy_version",
+                    "recovery_attempt",
+                )})
             state["previous_runs"] = history[-3:]
             if previous.get("usage"):
                 prior = previous.get("lifetime_usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True})
@@ -837,18 +884,48 @@ class InvestigationService:
     def resume(self) -> None:
         for episode in self.plane.store.list_episodes(limit=10000):
             if any(signal.get("report_ready") for signal in episode["signals"]):
-                previous = self.read(episode["episode_id"])
+                episode_id = str(episode["episode_id"])
+                previous = self.read(episode_id)
+                primary_id = previous.get("primary_incident_id")
                 if previous.get("status") in {"ready", "incomplete", "inconclusive"}:
-                    primary_id = previous.get("primary_incident_id")
                     entries = self.entries(episode, primary_incident_id=primary_id or episode.get("primary_incident_id"))
-                    manifest = self.plane.evidence.manifest(episode["episode_id"])
+                    manifest = self.plane.evidence.manifest(episode_id)
+                    current_primary_id = primary_id or episode.get("primary_incident_id")
                     # Older manual revisions fingerprinted an implicit primary as
                     # None. Keep completed work when its inputs are unchanged.
                     if previous.get("input_fingerprint") == self.fingerprint(
                         entries, manifest, primary_id
                     ):
                         continue
-                self.start(episode["episode_id"], primary_incident_id=episode.get("primary_incident_id"))
+                    old_manifest = previous.get("evidence_manifest")
+                    old_attachment_ids = {
+                        str(item.get("attachment_id")) for item in old_manifest if isinstance(item, dict)
+                    } if isinstance(old_manifest, list) else set()
+                    current_attachment_ids = {
+                        str(item.get("attachment_id")) for item in manifest if isinstance(item, dict)
+                    }
+                    report_fingerprint = self.report_fingerprint(entries, current_primary_id)
+                    prior_report_fingerprint = previous.get("report_fingerprint")
+                    reports_unchanged = (
+                        prior_report_fingerprint == report_fingerprint
+                        if isinstance(prior_report_fingerprint, str)
+                        else bool(previous.get("input_fingerprint"))
+                    )
+                    if (reports_unchanged and current_attachment_ids - old_attachment_ids
+                            and old_attachment_ids.issubset(current_attachment_ids)):
+                        continue
+                if previous.get("status") in {"queued", "running"}:
+                    recover_automatically = int(previous.get("recovery_attempt", 0) or 0) < 1
+                    self.start(
+                        episode_id,
+                        retry=recover_automatically,
+                        reason=str(previous.get("revision_reason") or "initial_capture"),
+                        source_mode=str(previous.get("source_mode") or "live_sources"),
+                        primary_incident_id=primary_id or episode.get("primary_incident_id"),
+                        automatic_recovery=recover_automatically,
+                    )
+                else:
+                    self.start(episode_id, primary_incident_id=episode.get("primary_incident_id"))
 
     def invalidate(self, episode_id: str) -> None:
         """Do not retain deleted member evidence in a surviving episode assessment."""
@@ -929,6 +1006,8 @@ class InvestigationService:
                         raise RuntimeError("Investigation cancelled after shutdown or membership deletion")
                     state.update(input_fingerprint=input_fingerprint, attempt=queued["attempt"],
                                  provider=config["provider"], model=config["model"],
+                                 report_fingerprint=queued.get("report_fingerprint"),
+                                 recovery_attempt=queued.get("recovery_attempt", 0),
                                  lifetime_usage=queued.get("lifetime_usage", {}), previous_runs=queued.get("previous_runs", []),
                                  revision_id=queued.get("revision_id"), parent_revision_id=queued.get("parent_revision_id"),
                                  primary_incident_id=primary_incident_id,

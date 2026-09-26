@@ -580,6 +580,7 @@ def create_app_server(
     control_plane = ControlPlane(state_dir)
     server = FCAPSuleHTTPServer((host, port), control_plane)
     control_plane.investigator.resume()
+    control_plane.evidence.resume()
     control_plane.start_live_monitoring()
     return server
 

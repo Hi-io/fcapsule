@@ -16,7 +16,7 @@ from zipfile import ZipFile
 from fcapsule.control_plane import ControlPlane
 from fcapsule.evidence_service import TEXT_LIMIT, _extract_json
 from fcapsule.reasoning.context_budget import compact_for_model
-from fcapsule.ui.app import FCAPSuleHTTPServer
+from fcapsule.ui.app import FCAPSuleHTTPServer, create_app_server
 
 
 PIXEL_PNG = base64.b64decode(
@@ -378,6 +378,78 @@ class EvidenceServiceTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=3)
+
+    def test_server_startup_resumes_media_evidence_left_queued(self):
+        self._ready_core()
+        os.environ["OPENROUTER_API_KEY"] = "test-media-key"
+        model = self.plane.media_configuration()["vision"]["model"]
+        self.plane._set_capability("media_vision_capability", "test-media-key", model, "ready", "Test validation")
+        with patch.object(self.plane.evidence.executor, "submit"), patch.object(
+            self.plane, "media_submission_allowed", return_value=(True, "")
+        ):
+            attachment = self.plane.submit_evidence(self.episode_id, {
+                "kind": "image", "content_base64": base64.b64encode(PIXEL_PNG).decode("ascii"),
+            })
+        self.assertEqual(attachment["status"], "queued")
+        self.plane.evidence.shutdown(wait=True)
+        self.plane.briefing_executor.shutdown(wait=True, cancel_futures=True)
+
+        server = None
+        try:
+            with patch("fcapsule.evidence_service.OpenRouterClient") as client:
+                client.return_value.visual_extract.return_value = {
+                    "content": '{"visible_text":["Target down"],"observations":[],"ambiguities":[],"limitation":"Visible state only."}',
+                    "usage": {"total_tokens": 21},
+                }
+                server = create_app_server("127.0.0.1", 0, Path(self.directory.name) / "state")
+                deadline = time.time() + 3
+                stored = None
+                while time.time() < deadline:
+                    stored = server.control_plane.store.get_evidence_attachment(attachment["attachment_id"])
+                    if stored and stored["status"] in {"ready", "failed", "blocked"}:
+                        break
+                    time.sleep(0.02)
+
+                self.assertEqual(stored["status"], "ready")
+                self.assertEqual(stored["extraction"]["visible_text"], ["Target down"])
+                client.assert_called_once_with(timeout_seconds=90)
+                client.return_value.visual_extract.assert_called_once()
+        finally:
+            if server is not None:
+                server.control_plane.evidence.shutdown(wait=True)
+                server.control_plane.briefing_executor.shutdown(wait=True, cancel_futures=True)
+                server.server_close()
+
+    def test_server_startup_does_not_replay_media_evidence_already_processing(self):
+        self._ready_core()
+        os.environ["OPENROUTER_API_KEY"] = "test-media-key"
+        model = self.plane.media_configuration()["vision"]["model"]
+        self.plane._set_capability("media_vision_capability", "test-media-key", model, "ready", "Test validation")
+        with patch.object(self.plane.evidence.executor, "submit"), patch.object(
+            self.plane, "media_submission_allowed", return_value=(True, "")
+        ):
+            attachment = self.plane.submit_evidence(self.episode_id, {
+                "kind": "image", "content_base64": base64.b64encode(PIXEL_PNG).decode("ascii"),
+            })
+        self.plane.store.update_evidence_attachment(attachment["attachment_id"], status="processing")
+        self.plane.evidence.shutdown(wait=True)
+        self.plane.briefing_executor.shutdown(wait=True, cancel_futures=True)
+
+        server = None
+        try:
+            with patch("fcapsule.evidence_service.OpenRouterClient") as client:
+                server = create_app_server("127.0.0.1", 0, Path(self.directory.name) / "state")
+                stored = server.control_plane.store.get_evidence_attachment(attachment["attachment_id"])
+
+                self.assertEqual(stored["status"], "failed")
+                self.assertIn("interrupted", stored["extraction"]["limitation"].lower())
+                self.assertIn("upload", stored["extraction"]["limitation"].lower())
+                client.assert_not_called()
+        finally:
+            if server is not None:
+                server.control_plane.evidence.shutdown(wait=True)
+                server.control_plane.briefing_executor.shutdown(wait=True, cancel_futures=True)
+                server.server_close()
 
     def test_image_evidence_is_checked_extracted_and_made_available_to_investigation(self):
         with patch.object(self.plane, "media_submission_allowed", return_value=(True, "")), patch(

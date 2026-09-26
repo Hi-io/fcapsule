@@ -99,6 +99,41 @@ class ControlPlaneTests(unittest.TestCase):
             self.assertEqual(incident["status"], "firing")
             self.assertIsNone(incident["ended_at"])
 
+    def test_interrupted_capture_can_be_retried_after_server_restart(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
+            state_dir = Path(directory) / "state"
+            plane = ControlPlane(state_dir)
+            incident = plane.ingest_case(REFERENCE_CASE, "checkout")
+
+            def interrupt_capture(_case_dir, _output_dir, progress):
+                progress("running", "Collecting retained evidence", {})
+                raise RuntimeError("controlled capture interruption")
+
+            with patch("fcapsule.control_plane.investigate_case", side_effect=interrupt_capture):
+                self.assertTrue(plane.start_capsule(incident["incident_id"]))
+                wait_for_idle(plane)
+            self.assertIn("controlled capture interruption", plane.snapshot()["error"])
+            self.assertIsNone(plane.store.get_capsule_for_incident(incident["incident_id"]))
+            plane.evidence.shutdown(wait=True)
+            plane.briefing_executor.shutdown(wait=True, cancel_futures=True)
+
+            server = None
+            try:
+                server = create_app_server("127.0.0.1", 0, state_dir)
+                self.assertEqual(server.control_plane.snapshot()["current_incident_id"], incident["incident_id"])
+                self.assertFalse(server.control_plane.snapshot()["running"])
+                self.assertTrue(server.control_plane.start_capsule(incident["incident_id"]))
+                wait_for_idle(server.control_plane)
+
+                capsule = server.control_plane.store.get_capsule_for_incident(incident["incident_id"])
+                self.assertIsNotNone(capsule)
+                self.assertTrue(Path(capsule["archive_path"]).is_file())
+            finally:
+                if server is not None:
+                    server.control_plane.evidence.shutdown(wait=True)
+                    server.control_plane.briefing_executor.shutdown(wait=True, cancel_futures=True)
+                    server.server_close()
+
     def test_identity_refresh_only_parses_alert_and_optional_configuration(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
             source = Path(directory) / "source"
