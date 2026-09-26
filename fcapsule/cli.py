@@ -16,6 +16,7 @@ from fcapsule.processing.entity_resolver import resolve_entities
 from fcapsule.reasoning.llm_client import LLMUnavailableError
 from fcapsule.reasoning.model_comparator import DEFAULT_MODELS, compare_models, rescore_comparison
 from fcapsule.control_plane import ControlPlane
+from fcapsule.archive_import import import_capsule_archive
 from fcapsule.store import FCAPSuleStore
 from fcapsule.ui.app import serve_app
 from fcapsule.ui.dashboard import render_dashboard
@@ -55,6 +56,9 @@ def _parser() -> argparse.ArgumentParser:
     register.add_argument("--state-dir", default=".fcapsule")
     status = subparsers.add_parser("status", help="Print control-plane applications, incidents, capsules, and models")
     status.add_argument("--state-dir", default=".fcapsule")
+    imported = subparsers.add_parser("import-archive", help="Import a retained capsule archive as a local read-only record")
+    imported.add_argument("--archive", required=True, help="Path to a verified FCAPSule capsule archive")
+    imported.add_argument("--state-dir", default=".fcapsule")
     ingest = subparsers.add_parser("ingest-case", help="Register a normalized case captured by an external source")
     ingest.add_argument("--case", required=True, help="Path to a normalized incident case directory")
     ingest.add_argument("--app-id", required=True, help="Registered application ID, or a new ID to register from case metadata")
@@ -148,6 +152,19 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "status":
             store = FCAPSuleStore(Path(args.state_dir) / "fcapsule.db")
             print(json.dumps(store.overview(), indent=2))
+        elif args.command == "import-archive":
+            try:
+                imported = import_capsule_archive(args.archive, args.state_dir)
+            except ValueError as exc:
+                print(f"Capsule archive import failed: {exc}", file=sys.stderr)
+                return 5
+            print(json.dumps({
+                "application_id": imported["application"].get("app_id"),
+                "incident_id": imported["incident"].get("incident_id"),
+                "episode_id": imported["episode"].get("episode_id"),
+                "capsule_id": imported["capsule"].get("capsule_id"),
+                "output_dir": imported["capsule"].get("output_dir"),
+            }, indent=2))
         elif args.command == "ingest-case":
             control_plane = ControlPlane(args.state_dir)
             incident = control_plane.ingest_case(args.case, args.app_id, args.app_name, args.environment)

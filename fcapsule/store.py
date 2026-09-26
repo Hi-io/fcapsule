@@ -508,6 +508,75 @@ class FCAPSuleStore:
             )
         return self.get_incident(incident_id) or {}
 
+    def register_imported_capsule(
+        self,
+        application: dict[str, Any],
+        incident: dict[str, Any],
+        capsule: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Register a retained archive atomically without upserting or changing app health."""
+        now = utc_now()
+        app_id = str(application["app_id"])
+        incident_id = str(incident["incident_id"])
+        capsule_id = str(capsule["capsule_id"])
+        resource_kind = str(incident.get("resource_kind") or "application")
+        resource_name = str(incident.get("resource_name") or application["name"])
+        recurrence_key = _recurrence_key(
+            app_id, resource_kind, resource_name,
+            str(incident.get("summary") or incident.get("scenario") or "imported capsule"),
+        )
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO applications
+                    (app_id, name, namespace, cluster, environment, status, source_config, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 'unknown', ?, ?, ?)
+                """,
+                (
+                    app_id, application["name"], application["namespace"], application["cluster"],
+                    "imported", _json({"source": "capsule_archive_import", "live_capture": False}), now, now,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO incidents
+                    (incident_id, app_id, scenario, status, severity, started_at, ended_at,
+                     case_dir, alert_count, log_count, metric_series_count, raw_bytes,
+                     trace_access, summary, created_at, source_kind, resource_kind, resource_name, recurrence_key)
+                VALUES (?, ?, ?, 'resolved', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 'imported', ?, ?, ?)
+                """,
+                (
+                    incident_id, app_id, incident.get("scenario", "Imported capsule"),
+                    incident.get("severity", "warning"), incident["started_at"], incident.get("ended_at"),
+                    str(incident["case_dir"]), int(incident.get("alert_count", 0)),
+                    int(incident.get("log_count", 0)), int(incident.get("metric_series_count", 0)),
+                    _json(incident.get("trace_access", {})), incident.get("summary", ""), now,
+                    resource_kind, resource_name, recurrence_key,
+                ),
+            )
+            self._assign_episode(connection, incident_id, observed_at=now)
+            connection.execute(
+                """
+                INSERT INTO capsules
+                    (capsule_id, incident_id, app_id, status, output_dir, archive_path,
+                     size_bytes, selected_evidence, compression, signal_preservation,
+                     grounding, runtime_seconds, model_winner, created_at)
+                VALUES (?, ?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+                """,
+                (
+                    capsule_id, incident_id, app_id, str(capsule["output_dir"]), str(capsule["archive_path"]),
+                    int(capsule.get("size_bytes", 0)), int(capsule.get("selected_evidence", 0)),
+                    float(capsule.get("compression", 0)), float(capsule.get("signal_preservation", 0)),
+                    float(capsule.get("grounding", 0)), float(capsule.get("runtime_seconds", 0)), now,
+                ),
+            )
+        return {
+            "application": self.get_application(app_id) or {},
+            "incident": self.get_incident(incident_id) or {},
+            "capsule": self.get_capsule(capsule_id) or {},
+            "episode": self.episode_for_incident(incident_id) or {},
+        }
+
     @staticmethod
     def _parse_time(value: str) -> datetime:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
