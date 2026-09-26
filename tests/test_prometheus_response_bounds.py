@@ -194,7 +194,7 @@ class PrometheusResponseBoundTests(unittest.TestCase):
 
         self.assertEqual(captured["alert_evidence"]["status"], "unavailable")
         self.assertEqual(captured["alert_evidence"]["reason"], "response_byte_limit")
-        self.assertEqual(captured["alert_evidence"]["source_metric_capture"]["status"], "available")
+        self.assertEqual(captured["alert_evidence"]["source_metric_capture"]["status"], "partial")
         self.assertEqual([item["metric"] for item in captured["series"]], ["orders_checkout_sample_count"])
 
     def test_oversized_source_query_is_explicitly_unavailable(self):
@@ -224,7 +224,7 @@ class PrometheusResponseBoundTests(unittest.TestCase):
         )
 
         source = captured["alert_evidence"]["source_metric_capture"]
-        self.assertEqual(captured["alert_evidence"]["status"], "available")
+        self.assertEqual(captured["alert_evidence"]["status"], "partial")
         self.assertEqual(source["status"], "unavailable")
         self.assertEqual(source["reason"], "response_byte_limit")
         self.assertEqual(source["response_byte_limit_count"], 1)

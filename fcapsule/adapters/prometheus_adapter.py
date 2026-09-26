@@ -334,6 +334,7 @@ class PrometheusAdapter:
             "status": "unavailable", "reason": None, "signal_origin": "alert_rule",
             "alertname": alert.get("alertname"), "alert_timestamp": alert.get("startsAt"),
             "rule": rule, "labels": dict(alert.get("labels", {})),
+            "omitted_no_finite_series_count": 0,
             "source": {"adapter": "prometheus", "endpoint": "/api/v1/query_range",
                        "captured_at": _timestamp(time.time()), "capture_mode": "incident_capture"},
             "time_range": {"start": _timestamp(start.timestamp()), "end": _timestamp(end.timestamp())},
@@ -387,6 +388,7 @@ class PrometheusAdapter:
         if len(results) > MAX_ALERT_SERIES:
             evidence["reason"] = "series_limit_exceeded"
             return result
+        unobserved_series: list[dict[str, Any]] = []
         try:
             for item in results:
                 if item.get("histograms"):
@@ -398,6 +400,9 @@ class PrometheusAdapter:
                     evidence["reason"] = "result_outside_incident_scope"
                     result["series"] = []
                     return result
+                rule_identity = {key: rule.get(key) for key in ("name", "query", "duration", "keep_firing_for", "group", "file", "labels")}
+                identity = json.dumps([rule_identity, labels], sort_keys=True, separators=(",", ":"))
+                series_id = "alert_" + hashlib.sha256(identity.encode()).hexdigest()[:16]
                 samples = item.get("values", [])
                 if len(samples) > MAX_ALERT_POINTS:
                     raise ValueError("too many samples")
@@ -412,14 +417,14 @@ class PrometheusAdapter:
                         raise ValueError("invalid sample timestamp")
                     by_position[position] = [_timestamp(stamp), value if math.isfinite(value) else None]
                 values = [by_position.get(position, [_timestamp(stamp), None]) for position, stamp in enumerate(grid)]
-                if not any(point[1] is not None for point in values):
-                    continue
                 sample_coverage = _sample_coverage(
                     [point[0] for point in values if point[1] is not None], grid, end.timestamp(), alert.get("startsAt"),
                 )
-                rule_identity = {key: rule.get(key) for key in ("name", "query", "duration", "keep_firing_for", "group", "file", "labels")}
-                identity = json.dumps([rule_identity, labels], sort_keys=True, separators=(",", ":"))
-                series_id = "alert_" + hashlib.sha256(identity.encode()).hexdigest()[:16]
+                if not any(point[1] is not None for point in values):
+                    unobserved_series.append({
+                        "series_id": series_id, **sample_coverage, "reason": "no_finite_samples",
+                    })
+                    continue
                 result["series"].append({
                     **{key: value for key, value in evidence.items() if key not in {"status", "reason", "labels"}},
                     "series_id": series_id, "labels": labels, "values": values,
@@ -429,13 +434,14 @@ class PrometheusAdapter:
             evidence["reason"] = "invalid_query_samples"
             result["series"] = []
             return result
-        has_gaps = any(item["sample_coverage"]["missing_samples"] for item in result["series"])
-        evidence["status"] = "partial" if has_gaps else "available" if result["series"] else "unavailable"
-        evidence["reason"] = "incomplete_sample_coverage" if has_gaps else None if result["series"] else "no_finite_samples"
+        has_gaps = bool(unobserved_series) or any(item["sample_coverage"]["missing_samples"] for item in result["series"])
+        evidence["status"] = "unavailable" if not result["series"] else "partial" if has_gaps else "available"
+        evidence["reason"] = "no_finite_samples" if not result["series"] else "incomplete_sample_coverage" if has_gaps else None
+        evidence["omitted_no_finite_series_count"] = len(unobserved_series)
         evidence["series_ids"] = [item["series_id"] for item in result["series"]]
         evidence["sample_coverage"] = [
             {"series_id": item["series_id"], **item["sample_coverage"]} for item in result["series"]
-        ]
+        ] + unobserved_series
         source_capture = self._collect_alert_source_metrics(alert, namespace, pod, start, end, step, evidence)
         evidence["source_metric_capture"] = source_capture["evidence"]
         result["series"].extend(source_capture["series"])
@@ -805,7 +811,7 @@ def _sample_coverage(
     missing = len(expected) - observed_count
     incident_missing = len(incident_expected) - incident_observed_count
     return {
-        "status": "partial" if missing else "complete",
+        "status": "unavailable" if observed_count == 0 else "partial" if missing else "complete",
         "expected_samples": len(expected),
         "observed_samples": observed_count,
         "missing_samples": missing,

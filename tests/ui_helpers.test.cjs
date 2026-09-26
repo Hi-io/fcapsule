@@ -497,4 +497,7 @@ test('missing alert series is not presented as a healthy graph', () => {
   const render=helper('metricsPanel','overviewMetrics',{safe:value=>String(value),metricChart:()=>''});
   assert.match(render({pm_signals:[]}),/not retained.*not backfilled/);
   assert.match(render({alert_metric_evidence:[{alertname:'Condition',status:'unavailable',reason:'query_failed'}]}),/Condition \(query failed\)/);
+  const partial=render({alert_metric_evidence:[{alertname:'Condition',status:'partial',reason:'incomplete_sample_coverage'}],pm_signals:[{signal_origin:'alert_rule'}]});
+  assert.match(partial,/Alert signal coverage is partial: Condition \(incomplete sample coverage\)/);
+  assert.doesNotMatch(partial,/Alert signal unavailable/);
 });
