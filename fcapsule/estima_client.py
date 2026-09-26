@@ -26,11 +26,11 @@ def validate_estima_url(value: str) -> str:
     url = str(value or "").strip().rstrip("/")
     parts = urlsplit(url)
     if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password:
-        raise ValueError("Estima URL must be an absolute HTTP(S) URL without embedded credentials")
+        raise ValueError("Collective URL must be an absolute HTTP(S) URL without embedded credentials")
     if parts.scheme == "http":
         host = parts.hostname.lower().rstrip(".")
         if host not in {"localhost", "127.0.0.1", "::1"} and not (host.endswith(".svc") or host.endswith(".svc.cluster.local")):
-            raise ValueError("Estima URL must use HTTPS except for localhost or in-cluster .svc DNS")
+            raise ValueError("Collective URL must use HTTPS except for localhost or in-cluster .svc DNS")
     return url
 
 
