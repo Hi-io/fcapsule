@@ -127,6 +127,8 @@ body[data-view="estima"] main { max-width:1920px; padding:28px 30px 40px; }
 .em-list-row small { font-size:10px; display:block; color:#758398; font-weight:400; margin-top:5px; overflow-wrap:anywhere; }
 .em-list-row > span:nth-of-type(2) { font-size:11px; color:#728098; flex:none; }
 .em-muted { font-size:11px; color:#748197; line-height:1.7; }
+.em-load-more { display:block; margin:20px auto 0; min-height:36px; padding:7px 16px; border:1px solid var(--line); background:var(--surface); color:var(--accent); font-size:12px; font-weight:600; }
+.em-load-more:hover:not(:disabled) { border-color:var(--accent); background:var(--accent-soft); }
 .em-detail-loading { color:#687991; font-size:12px; padding:24px 0; }
 .em-explorer :focus-visible { outline:2px solid #4b7dd2; outline-offset:4px; }
 .em-explorer .em-node:focus-visible { outline:none; }

@@ -1,4 +1,4 @@
-/* Estima's read-only explorer. Relationships come from retained typed observations. */
+/* Collective's read-only explorer. Relationships come from retained typed observations. */
 (function (global) {
   'use strict';
   const GROUPS = [
@@ -130,7 +130,8 @@
   }
   function explorer(root, options) {
     const icons = options.icon;
-    const state = {patterns:[],cases:[],cache:new Map(),selected:null,mode:'map',instance:'',time:100,
+    const state = {patterns:[],cases:[],browseCases:[],nextCursor:null,stats:null,statsUnavailable:false,
+      browseUnavailable:false,browseLoading:false,browseError:'',cache:new Map(),selected:null,mode:'map',instance:'',time:100,
       query:options.query || '',scope:options.scope || '',phase:'loading',message:'',partial:0,loaded:0,
       detailError:'',detailLoading:false,epoch:0,zoom:1,pan:{x:0,y:0}};
     const controllers = new Set();
@@ -143,7 +144,7 @@
         const response = await fetch(path, {cache:'no-store',signal:controller.signal,
           ...(body ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)} : {})});
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error || data.detail || 'Estima is unavailable. Check the connection in Settings.');
+        if (!response.ok) throw new Error(data.error || data.detail || 'Collective is unavailable. Check the connection in Settings.');
         return data;
       } finally {clearTimeout(timer); controllers.delete(controller);}
     }
@@ -169,7 +170,7 @@
       return `<button type="button" id="${id}" class="em-icon-button" title="${label}" aria-label="${label}">${icons(symbol)}</button>`;
     }
     function header() {
-      return `<header class="em-header"><div><div class="eyebrow">FCAPSule investigates. Estima remembers.</div><h1>Estima <span>Collective memory</span></h1></div><div class="em-connection"><span class="status ${state.phase === 'error' ? 'error' : state.phase === 'loading' ? 'running' : 'healthy'}">${state.phase === 'error' ? 'Unavailable' : state.phase === 'loading' ? 'Connecting' : 'Connected'}</span>${controlButton('em-refresh','refresh-cw','Refresh memory')}</div></header>`;
+      return `<header class="em-header"><div><div class="eyebrow">FCAPSule investigates. Collective remembers.</div><h1>Collective <span>Shared knowledge</span></h1></div><div class="em-connection"><span class="status ${state.phase === 'error' ? 'error' : state.phase === 'loading' ? 'running' : 'healthy'}">${state.phase === 'error' ? 'Unavailable' : state.phase === 'loading' ? 'Connecting' : 'Connected'}</span>${controlButton('em-refresh','refresh-cw','Refresh memory')}</div></header>`;
     }
     function toolbar() {
       return `<div class="em-toolbar"><form id="em-search" class="em-search"><label class="sr-only" for="em-query">Search memory</label><input id="em-query" type="search" value="${esc(state.query)}" placeholder="Search collective memory" autocomplete="off"><label class="sr-only" for="em-scope">Cluster</label><input id="em-scope" value="${esc(state.scope)}" placeholder="All clusters" autocomplete="off"><button type="submit" title="Search memory" aria-label="Search memory">${icons('scan-line')}</button></form><div class="em-modes" role="group" aria-label="Memory view"><button type="button" id="em-map-mode" aria-pressed="${state.mode === 'map'}">${icons('network')}Map</button><button type="button" id="em-list-mode" aria-pressed="${state.mode === 'list'}">${icons('logs')}List</button></div></div>`;
@@ -189,10 +190,12 @@
         const a=graph.positions.get(edge.source), b=graph.positions.get(edge.target);
         return `<line class="em-edge" data-source="${esc(edge.source)}" data-target="${esc(edge.target)}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"/>`;
       }).join('');
-      return `<div class="em-map" id="em-map"><div class="em-map-heading"><div><span class="em-overline">KNOWLEDGE MAP</span><h2>Experience, connected.</h2></div><span class="em-map-count" id="em-map-count">${count(graph.nodes.filter(n=>n.kind==='pattern').length,'pattern')}<br>${count(graph.cases.length,'case')} loaded</span></div><svg id="em-network" viewBox="0 0 1000 700" role="group" aria-label="Shared observations and retained cases. Select a node to inspect its connections."><g id="em-viewport"><g class="em-edges">${edges}</g><g class="em-nodes">${graph.nodes.map(nodeMarkup).join('')}</g></g></svg><div id="em-map-empty" class="em-map-empty" ${graph.nodes.length ? 'hidden' : ''}>${state.phase === 'loading' ? 'Connecting to collective memory...' : state.phase === 'error' ? 'Memory is unavailable' : 'No memories in this view'}</div><div class="em-map-footer"><div class="em-legend">${GROUPS.filter(g=>graph.nodes.some(n=>n.group===g.id)).map(g=>`<span><i style="background:${g.color}"></i>${g.label}</span>`).join('')}<span><i class="em-case-dot"></i>Retained case</span></div><div class="em-map-tools">${controlButton('em-zoom-in','zoom-in','Zoom in')}${controlButton('em-zoom-out','zoom-out','Zoom out')}${controlButton('em-fit','scan-line','Fit map')}</div></div></div>`;
+      return `<div class="em-map" id="em-map"><div class="em-map-heading"><div><span class="em-overline">KNOWLEDGE MAP</span><h2>Experience, connected.</h2></div><span class="em-map-count" id="em-map-count">${count(graph.nodes.filter(n=>n.kind==='pattern').length,'pattern')}<br>${count(graph.cases.length,'case')} in map${state.stats && !state.scope && !state.query ? ` / ${esc(state.stats.episodes)} total` : ''}</span></div><svg id="em-network" viewBox="0 0 1000 700" role="group" aria-label="Shared observations and retained cases. Select a node to inspect its connections."><g id="em-viewport"><g class="em-edges">${edges}</g><g class="em-nodes">${graph.nodes.map(nodeMarkup).join('')}</g></g></svg><div id="em-map-empty" class="em-map-empty" ${graph.nodes.length ? 'hidden' : ''}>${state.phase === 'loading' ? 'Connecting to collective memory...' : state.phase === 'error' ? 'Memory is unavailable' : 'No memories in this view'}</div><div class="em-map-footer"><div class="em-legend">${GROUPS.filter(g=>graph.nodes.some(n=>n.group===g.id)).map(g=>`<span><i style="background:${g.color}"></i>${g.label}</span>`).join('')}<span><i class="em-case-dot"></i>Retained case</span></div><div class="em-map-tools">${controlButton('em-zoom-in','zoom-in','Zoom in')}${controlButton('em-zoom-out','zoom-out','Zoom out')}${controlButton('em-fit','scan-line','Fit map')}</div></div></div>`;
     }
     function listMarkup() {
-      return `<div class="em-list"><h2>Shared observations <span>${graph.nodes.filter(n=>n.kind==='pattern').length}</span></h2>${graph.nodes.filter(n=>n.kind==='pattern').map(node=>`<button type="button" data-node="${esc(node.id)}" class="em-list-row"><i style="background:${node.color}"></i><span><strong>${esc(patternTitle(node.data))}</strong><small>${esc(node.data.key)}: ${esc(node.data.value)}</small></span><span>${count(node.data.case_count || 0,'case')}</span>${icons('chevron-right')}</button>`).join('') || '<p class="em-muted">No shared observations in this view.</p>'}<h2>Retained cases <span>${graph.cases.length}</span></h2>${graph.cases.map(c=>caseButton(c)).join('') || '<p class="em-muted">No retained cases loaded.</p>'}</div>`;
+      const records=state.browseUnavailable ? graph.cases : state.browseCases;
+      const more=state.nextCursor ? `<button type="button" id="em-load-more" class="em-load-more" ${state.browseLoading ? 'disabled' : ''}>${state.browseLoading ? 'Loading cases...' : 'Load more cases'}</button>` : '';
+      return `<div class="em-list"><h2>Shared observations <span>${graph.nodes.filter(n=>n.kind==='pattern').length} in map</span></h2>${graph.nodes.filter(n=>n.kind==='pattern').map(node=>`<button type="button" data-node="${esc(node.id)}" class="em-list-row"><i style="background:${node.color}"></i><span><strong>${esc(patternTitle(node.data))}</strong><small>${esc(node.data.key)}: ${esc(node.data.value)}</small></span><span>${count(node.data.case_count || 0,'case')}</span>${icons('chevron-right')}</button>`).join('') || '<p class="em-muted">No shared observations in this view.</p>'}<h2>Retained cases <span>${records.length} shown${state.stats && !state.scope && !state.query ? ` of ${esc(state.stats.episodes)}` : ''}</span></h2>${records.map(c=>caseButton(c)).join('') || '<p class="em-muted">No retained cases in this view.</p>'}${more}${state.browseError ? `<p role="alert" class="em-muted">${esc(state.browseError)}</p>` : ''}${state.browseUnavailable ? '<p class="em-muted">The case list is unavailable; showing cases from the map.</p>' : ''}</div>`;
     }
     function caseButton(record) {
       return `<button type="button" class="em-case-row" data-node="c:${esc(identifier(record))}"><span><strong>${esc(caseTitle(record))}</strong><small>${esc([record.scope?.service || record.scope?.workload, dateText(record.observed_at)].filter(Boolean).join(' · '))}</small></span>${icons('chevron-right')}</button>`;
@@ -200,7 +203,8 @@
     function overview() {
       const instances = new Set(graph.cases.map(c=>c.instance_id).filter(Boolean));
       const recent = [...graph.cases].sort((a,b)=>Date.parse(b.observed_at)-Date.parse(a.observed_at)).slice(0,3);
-      return `<div class="em-panel-intro"><span class="em-overline">RETAINED KNOWLEDGE</span><h2>Every case leaves<br>a memory.</h2><p>Explore the observations that connect past investigations.</p></div><div class="em-stat-pair"><div><strong>${graph.cases.length}</strong><span>Cases loaded</span></div><div><strong>${instances.size}</strong><span>${instances.size === 1 ? 'Instance represented' : 'Instances represented'}</span></div></div><div class="em-panel-section"><h3>Recent in this view</h3>${recent.map(caseButton).join('') || `<p class="em-muted">${state.phase === 'loading' || state.phase === 'connections' ? 'Retrieving retained cases...' : 'Select a pattern or search for a case.'}</p>`}</div><div class="em-panel-section em-reading-key"><h3>Read the connections</h3><p>A line means a case contains that exact observation. Shared observations do not establish a shared cause.</p><p>Node size reflects a pattern's case count. The map is a loaded selection, not the entire memory.</p></div>`;
+      const total=state.stats && !state.scope && !state.query ? state.stats.episodes : null;
+      return `<div class="em-panel-intro"><span class="em-overline">RETAINED KNOWLEDGE</span><h2>Every case leaves<br>a memory.</h2><p>Explore the observations that connect past investigations.</p></div><div class="em-stat-pair"><div><strong>${total == null ? graph.cases.length : esc(total)}</strong><span>${total == null ? 'Cases in this map' : 'Unique episodes retained'}</span></div><div><strong>${graph.cases.length}</strong><span>Cases in this map</span></div></div><div class="em-panel-section"><h3>Recent in this view</h3>${recent.map(caseButton).join('') || `<p class="em-muted">${state.phase === 'loading' || state.phase === 'connections' ? 'Retrieving retained cases...' : 'Select a pattern or search for a case.'}</p>`}</div><div class="em-panel-section em-reading-key"><h3>Read the connections</h3><p>A line means a case contains that exact observation. Shared observations do not establish a shared cause.</p><p>${instances.size} ${instances.size === 1 ? 'instance is' : 'instances are'} represented in this map. The map is a loaded selection; use List to browse more cases.</p></div>`;
     }
     function panelContent() {
       const selection = state.selected;
@@ -215,7 +219,7 @@
         const members = list(data.cases).filter(c=>!state.scope || c.scope?.cluster === state.scope);
         const group = groupFor(pattern);
         const first=pattern.first_seen_at || pattern.first_seen, last=pattern.last_seen_at || pattern.last_seen;
-        return close + `<div class="em-selected-heading"><span class="em-domain-label" style="--node-color:${group.color}">${esc(group.label)}</span><h2>${esc(patternTitle(pattern))}</h2><div class="em-value">${esc(String(pattern.value))}${pattern.unit ? ' ' + esc(pattern.unit) : ''}</div><code>${esc(pattern.key)}</code></div><div class="em-stat-pair"><div><strong>${esc(pattern.case_count ?? members.length)}</strong><span>Cases across memory</span></div><div><strong>${esc(pattern.instance_count ?? '--')}</strong><span>Contributing instances</span></div></div><div class="em-panel-section"><h3>What connects these cases</h3><p>Each retained case contains <strong>${esc(pattern.key)} = ${esc(String(pattern.value))}</strong>${pattern.unit ? ' ' + esc(pattern.unit) : ''}. This is a repeated observation, not a confirmed cause.</p></div>${first || last ? `<div class="em-time-span"><span>First observed<strong>${esc(dateText(first))}</strong></span><span>Last observed<strong>${esc(dateText(last))}</strong></span></div>` : ''}<div class="em-panel-section"><h3>Linked cases <span>${members.length} loaded${state.scope ? ' in cluster' : ''}</span></h3>${members.map(caseButton).join('') || '<p class="em-muted">No linked cases returned for this view.</p>'}${data.has_more ? '<p class="em-muted">Recent members shown. More cases are retained by Estima.</p>' : ''}</div>`;
+        return close + `<div class="em-selected-heading"><span class="em-domain-label" style="--node-color:${group.color}">${esc(group.label)}</span><h2>${esc(patternTitle(pattern))}</h2><div class="em-value">${esc(String(pattern.value))}${pattern.unit ? ' ' + esc(pattern.unit) : ''}</div><code>${esc(pattern.key)}</code></div><div class="em-stat-pair"><div><strong>${esc(pattern.case_count ?? members.length)}</strong><span>Cases across memory</span></div><div><strong>${esc(pattern.instance_count ?? '--')}</strong><span>Contributing instances</span></div></div><div class="em-panel-section"><h3>What connects these cases</h3><p>Each retained case contains <strong>${esc(pattern.key)} = ${esc(String(pattern.value))}</strong>${pattern.unit ? ' ' + esc(pattern.unit) : ''}. This is a repeated observation, not a confirmed cause.</p></div>${first || last ? `<div class="em-time-span"><span>First observed<strong>${esc(dateText(first))}</strong></span><span>Last observed<strong>${esc(dateText(last))}</strong></span></div>` : ''}<div class="em-panel-section"><h3>Linked cases <span>${members.length} loaded${state.scope ? ' in cluster' : ''}</span></h3>${members.map(caseButton).join('') || '<p class="em-muted">No linked cases returned for this view.</p>'}${data.has_more ? '<p class="em-muted">Recent members shown. More cases are retained by Collective.</p>' : ''}</div>`;
       }
       const record = data.case;
       const matches = graph.edges.filter(e=>e.source==='c:'+identifier(record));
@@ -236,7 +240,7 @@
       return `<div class="em-explore-controls"><div class="em-time-control"><label for="em-time">${esc(text)}</label><input type="range" id="em-time" min="0" max="100" value="${state.time}" step="1" ${records.length<2 ? 'disabled' : ''} aria-label="Filter loaded cases by event time"></div><div class="em-instance-control"><label for="em-instance">Contribution</label><select id="em-instance"><option value="">All instances</option>${instances.map(i=>`<option value="${esc(i)}" ${state.instance===i ? 'selected' : ''}>${esc(i)}</option>`).join('')}</select></div></div>`;
     }
     function statusText() {
-      if (state.phase==='loading') return 'Connecting to Estima...';
+      if (state.phase==='loading') return 'Connecting to Collective...';
       if (state.phase==='connections') return `Loading connections · ${state.loaded} / ${state.patterns.length} patterns`;
       if (state.message) return state.message;
       return `${count(graph.edges.length,'connection')} in this view · Shared observations, not causal links${state.partial ? ' · Some records could not be loaded; refresh to retry.' : ''}`;
@@ -244,7 +248,7 @@
     function render() {
       if(disposed) return;
       graph=makeGraph();
-      root.innerHTML=`<div class="em-explorer">${header()}${toolbar()}<div class="em-workspace"><div class="em-main">${state.mode==='map' ? mapMarkup() : listMarkup()}${footer()}<div class="em-status" role="status" aria-live="polite">${esc(statusText())}</div></div><aside id="em-panel" class="em-panel" aria-label="Memory details">${panelContent()}</aside></div></div>`;
+      root.innerHTML=`<div class="em-explorer">${header()}${toolbar()}<div class="em-workspace"><div class="em-main">${state.mode==='map' ? mapMarkup() : listMarkup()}${state.mode==='map' ? footer() : ''}<div class="em-status" role="status" aria-live="polite">${esc(statusText())}</div></div><aside id="em-panel" class="em-panel" aria-label="Memory details">${panelContent()}</aside></div></div>`;
       wireControls(); highlight(); transform();
     }
     function transform() {
@@ -268,7 +272,7 @@
       try {
         let data;
         if(kind==='pattern' && state.cache.has(id)) data=state.cache.get(id);
-        else data=await request(`/api/estima/${kind==='pattern' ? 'patterns' : 'cases'}/${encodeURIComponent(id)}`);
+        else data=await request(`/api/collective/${kind==='pattern' ? 'patterns' : 'cases'}/${encodeURIComponent(id)}`);
         if(disposed||sequence!==detailSequence) return;
         state.selected.data=data;
         if(kind==='pattern') {
@@ -294,10 +298,11 @@
         options.setSearch(state.query,state.scope);clearSelection();state.instance='';state.time=100;load();
       };
       for(const mode of ['map','list']) root.querySelector(`#em-${mode}-mode`).onclick=()=>{state.mode=mode;render();root.querySelector(`#em-${mode}-mode`).focus();};
-      root.querySelector('#em-time').onchange=event=>{
+      root.querySelector('#em-time')?.addEventListener('change',event=>{
         const value=Number(event.target.value);state.time=value;clearSelection();render();root.querySelector('#em-time').focus({preventScroll:true});
-      };
-      root.querySelector('#em-instance').onchange=event=>{state.instance=event.target.value;clearSelection();render();root.querySelector('#em-instance').focus({preventScroll:true});};
+      });
+      root.querySelector('#em-instance')?.addEventListener('change',event=>{state.instance=event.target.value;clearSelection();render();root.querySelector('#em-instance').focus({preventScroll:true});});
+      root.querySelector('#em-load-more')?.addEventListener('click',loadMoreCases);
       root.querySelector('#em-zoom-in')?.addEventListener('click',()=>{state.zoom=Math.min(3,state.zoom+.25);transform();});
       root.querySelector('#em-zoom-out')?.addEventListener('click',()=>{state.zoom=Math.max(.75,state.zoom-.25);transform();});
       root.querySelector('#em-fit')?.addEventListener('click',()=>{state.zoom=1;state.pan={x:0,y:0};transform();});
@@ -332,27 +337,59 @@
     function out(event) {if(event.target.closest('.em-node')) highlight();}
     root.addEventListener('click',click);root.addEventListener('keydown',keydown);root.addEventListener('mouseover',hover);root.addEventListener('mouseout',out);
     root.addEventListener('focusin',hover);root.addEventListener('focusout',out);
+    async function loadMoreCases() {
+      if(state.browseLoading || !state.nextCursor) return;
+      const epoch=state.epoch;
+      const cursor=state.nextCursor;
+      state.browseLoading=true;state.browseError='';render();
+      const params=new URLSearchParams({limit:'20',cursor});
+      if(state.query) params.set('query',state.query);
+      if(state.scope) params.set('cluster',state.scope);
+      try {
+        const page=await request('/api/collective/cases?'+params);
+        if(disposed || epoch!==state.epoch) return;
+        state.browseCases=uniqueCases([...state.browseCases,...list(page.cases)]);
+        state.nextCursor=page.next_cursor || null;
+      } catch(error) {
+        if(disposed || epoch!==state.epoch) return;
+        state.browseError=error.name==='AbortError' ? 'The case list timed out. Retry.' : error.message;
+      }
+      state.browseLoading=false;render();root.querySelector('#em-load-more')?.focus({preventScroll:true});
+    }
     async function load() {
       const epoch=++state.epoch;
       detailSequence++;
       for(const c of controllers) c.abort();
       state.detailLoading=Boolean(state.selected);state.detailError='';
       if(state.selected) state.selected.data=null;
-      state.phase='loading';state.message='';state.partial=0;state.loaded=0;state.patterns=[];state.cases=[];state.cache.clear();render();
+      state.phase='loading';state.message='';state.partial=0;state.loaded=0;state.patterns=[];state.cases=[];
+      state.browseCases=[];state.nextCursor=null;state.stats=null;state.statsUnavailable=false;
+      state.browseUnavailable=false;state.browseLoading=false;state.browseError='';state.cache.clear();render();
       const params=new URLSearchParams({limit:'20'});
       if(state.query) params.set('query',state.query);if(state.scope) params.set('scope',state.scope);
+      const caseParams=new URLSearchParams({limit:'20'});
+      if(state.query) caseParams.set('query',state.query);
+      if(state.scope) caseParams.set('cluster',state.scope);
       const results=await Promise.allSettled([
-        request('/api/estima/patterns?'+params),
-        state.query ? request('/api/estima/search',{query:state.query,scope:state.scope ? {cluster:state.scope} : null,limit:10}) : Promise.resolve({cases:[]}),
+        request('/api/collective/patterns?'+params),
+        state.query ? request('/api/collective/search',{query:state.query,scope:state.scope ? {cluster:state.scope} : null,limit:10}) : Promise.resolve({cases:[]}),
+        request('/api/collective/stats'),
+        request('/api/collective/cases?'+caseParams),
       ]);
       if(disposed||epoch!==state.epoch) return;
       if(results[0].status==='fulfilled') state.patterns=list(results[0].value.patterns);
       if(results[1].status==='fulfilled') state.cases=list(results[1].value.cases);
-      const failed=results.filter(r=>r.status==='rejected');
+      if(results[2].status==='fulfilled') state.stats=results[2].value;
+      else state.statsUnavailable=true;
+      if(results[3].status==='fulfilled') {
+        state.browseCases=list(results[3].value.cases);
+        state.nextCursor=results[3].value.next_cursor || null;
+      } else state.browseUnavailable=true;
+      const failed=results.slice(0,2).filter(r=>r.status==='rejected');
       if(failed.length) {
-        state.message=failed.map(r=>r.reason.name==='AbortError' ? 'Estima request timed out. Refresh to retry.' : r.reason.message).join(' ');
+        state.message=failed.map(r=>r.reason.name==='AbortError' ? 'Collective request timed out. Refresh to retry.' : r.reason.message).join(' ');
         state.partial=failed.length;
-        if(!state.patterns.length&&!state.cases.length) {state.phase='error';render();return;}
+        if(!state.patterns.length&&!state.cases.length&&!state.browseCases.length) {state.phase='error';render();return;}
       }
       state.phase=state.patterns.length ? 'connections' : 'ready';render();
       let cursor=0;
@@ -361,7 +398,7 @@
         while(cursor<state.patterns.length && epoch===state.epoch && !disposed) {
           const pattern=state.patterns[cursor++];
           try {
-            const data=await request('/api/estima/patterns/'+encodeURIComponent(identifier(pattern)));
+            const data=await request('/api/collective/patterns/'+encodeURIComponent(identifier(pattern)));
             if(disposed||epoch!==state.epoch) return;
             state.cache.set(identifier(pattern),data);
             state.cases.push(...list(data.cases).filter(c=>!state.scope||c.scope?.cluster===state.scope));

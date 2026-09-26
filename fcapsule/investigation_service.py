@@ -153,7 +153,7 @@ def _atlas_case(value: Any, before: datetime) -> dict[str, Any] | None:
     }
     result = {
         "atlas_case_id": atlas_case_id,
-        "citation": f"Estima record {atlas_case_id}",
+        "citation": f"Collective record {atlas_case_id}",
         "observed_at": observed_at[:40],
         "relation": scrub(value.get("relation"), reference_ids=references)[:80]
         if isinstance(value.get("relation"), str) else "historical_analog",
@@ -555,7 +555,7 @@ class InvestigationService:
         return observed_alert and diagnostic_overlap
 
     def _estima_retrieval(self, context: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        limitation = "Estima retrieval is optional; retained local evidence remains the investigation source of truth."
+        limitation = "Collective retrieval is optional; retained local evidence remains the investigation source of truth."
         get_client = getattr(self.plane, "estima_client", None) or getattr(self.plane, "atlas_client", None)
         if not callable(get_client):
             return [], {"status": "disabled", "case_count": 0, "limitation": limitation}
@@ -563,7 +563,7 @@ class InvestigationService:
             client = get_client("read")
         except Exception:
             return [], {"status": "unavailable", "case_count": 0,
-                        "limitation": "Estima retrieval was unavailable; the local evidence investigation continues."}
+                        "limitation": "Collective retrieval was unavailable; the local evidence investigation continues."}
         if client is None:
             return [], {"status": "disabled", "case_count": 0, "limitation": limitation}
 
@@ -571,12 +571,12 @@ class InvestigationService:
         before = _aware_capture_time(scope.get("alert_started_at"))
         if before is None:
             return [], {"status": "skipped_no_time", "case_count": 0,
-                        "limitation": "Estima retrieval was skipped because no reliable alert time was available; future records are excluded."}
+                        "limitation": "Collective retrieval was skipped because no reliable alert time was available; future records are excluded."}
         query, alert_family, diagnostic_keys = self._atlas_search_profile(context)
         if not query:
             return [], {"status": "skipped_no_diagnostics", "case_count": 0,
                         "observed_before": before.isoformat().replace("+00:00", "Z"),
-                        "limitation": "Estima retrieval was skipped because the primary alert lacked structured diagnostic keys; local evidence continues."}
+                        "limitation": "Collective retrieval was skipped because the primary alert lacked structured diagnostic keys; local evidence continues."}
         observed_before = before.isoformat().replace("+00:00", "Z")
         # Estima scope accepts deployment identity fields, not Kubernetes resource
         # kinds. Query text carries the target/alert signal without excluding
@@ -586,11 +586,11 @@ class InvestigationService:
             response = client.search(estima_scope, query, limit=ATLAS_SEARCH_LIMIT, before=observed_before)
         except Exception:
             return [], {"status": "unavailable", "case_count": 0, "observed_before": observed_before,
-                        "limitation": "Estima retrieval was unavailable; the local evidence investigation continues."}
+                        "limitation": "Collective retrieval was unavailable; the local evidence investigation continues."}
         raw_cases = response.get("cases") if isinstance(response, dict) else None
         if not isinstance(raw_cases, list):
             return [], {"status": "unavailable", "case_count": 0, "observed_before": observed_before,
-                        "limitation": "Estima returned no usable retrieval response; the local evidence investigation continues."}
+                        "limitation": "Collective returned no usable retrieval response; the local evidence investigation continues."}
         cases = []
         rejected = 0
         for raw in raw_cases[:ATLAS_SEARCH_LIMIT]:
@@ -605,9 +605,9 @@ class InvestigationService:
         status = "matched" if cases else "no_relevant_matches" if rejected else "no_matches"
         return cases, {"status": status, "case_count": len(cases), "observed_before": observed_before,
                        "limitation": limitation if cases else
-                       ("No prior Estima records met the alert-time and relevance gates; local evidence investigation continues."
+                       ("No prior Collective records met the alert-time and relevance gates; local evidence investigation continues."
                         if rejected else
-                        "No prior Estima records met the strict alert-time cutoff; local evidence investigation continues.")}
+                        "No prior Collective records met the strict alert-time cutoff; local evidence investigation continues.")}
 
     def _atlas_retrieval(self, context: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Compatibility alias for persisted FCAPSule investigation integrations."""

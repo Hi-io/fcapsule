@@ -274,7 +274,7 @@ class ControlPlane:
 
     def update_estima_configuration(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict):
-            raise ValueError("Estima settings must be an object")
+            raise ValueError("Collective settings must be an object")
         with self._estima_config_lock:
             stored = self._read_estima_settings()
             env = estima_settings_from_env()
@@ -289,9 +289,9 @@ class ControlPlane:
                 stored["url"] = url
             instance_id = str(payload.get("instance_id", current.get("instance_id") or "")).strip()
             if not instance_id:
-                raise ValueError("Estima instance ID must be non-empty")
+                raise ValueError("Collective instance ID must be non-empty")
             if len(instance_id) > 96 or not all(character.isalnum() or character in "._:-" for character in instance_id):
-                raise ValueError("Estima instance ID contains unsupported characters")
+                raise ValueError("Collective instance ID contains unsupported characters")
             stored["instance_id"] = instance_id
             stored["instance_id_auto"] = False
             if payload.get("clear_token") is True:
@@ -299,7 +299,7 @@ class ControlPlane:
             elif isinstance(payload.get("token"), str) and payload["token"].strip():
                 token = payload["token"].strip()
                 if len(token) > 4096 or "\n" in token or "\r" in token:
-                    raise ValueError("Estima service token is invalid")
+                    raise ValueError("Collective service token is invalid")
                 stored["token"] = token
             for key in ("read_enabled", "publish_enabled"):
                 if key in payload:

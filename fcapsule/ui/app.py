@@ -33,7 +33,7 @@ HTML = """<!doctype html>
       <a href="/console" data-nav="console"><span class="ui-icon" data-icon="activity" aria-hidden="true"></span>Operations</a>
       <a href="/targets" data-nav="targets"><span class="ui-icon" data-icon="network" aria-hidden="true"></span>Targets</a>
       <a href="/patterns" data-nav="patterns"><span class="ui-icon" data-icon="layers" aria-hidden="true"></span>Patterns</a>
-      <a href="/estima" data-nav="estima"><span class="ui-icon" data-icon="network" aria-hidden="true"></span>Estima</a>
+      <a href="/collective" data-nav="estima"><span class="ui-icon" data-icon="network" aria-hidden="true"></span>Collective</a>
       <a href="/settings" data-nav="settings"><span class="ui-icon" data-icon="settings-2" aria-hidden="true"></span>Settings</a>
     </nav>
     <div class="system-state" role="status"><i></i><span id="system-state">Connecting</span></div>
@@ -56,7 +56,11 @@ JSON_SPOOL_MEMORY_BYTES = 1024 * 1024
 
 
 def _canonical_memory_path(path: str) -> str:
-    """Keep local Atlas URLs as aliases while making Estima the public route."""
+    """Keep previous local memory routes available to existing clients."""
+    if path == "/api/settings/collective":
+        return "/api/settings/estima"
+    if path == "/api/collective" or path.startswith("/api/collective/"):
+        return path.replace("/api/collective", "/api/estima", 1)
     if path == "/api/settings/atlas":
         return "/api/settings/estima"
     if path == "/api/atlas" or path.startswith("/api/atlas/"):
@@ -193,17 +197,17 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
         except AttributeError:
             config = {}
         if not config.get("url"):
-            status, message = "not_configured", "Add the Estima service URL in Settings."
+            status, message = "not_configured", "Add the Collective service URL in Settings."
         elif not config.get("read_enabled"):
-            status, message = "disabled", "Estima reads are disabled in Settings."
+            status, message = "disabled", "Collective reads are disabled in Settings."
         else:
-            status, message = "unavailable", "Estima client is unavailable in this FCAPSule build."
+            status, message = "unavailable", "Collective client is unavailable in this FCAPSule build."
         self._json({"status": status, "error": message}, HTTPStatus.SERVICE_UNAVAILABLE)
 
     def _atlas_failure(self, exc: Exception) -> None:
         self._json({
             "status": "unavailable",
-            "error": "Estima request failed. Check the saved URL, access token, and service availability.",
+            "error": "Collective request failed. Check the saved URL, access token, and service availability.",
         }, HTTPStatus.SERVICE_UNAVAILABLE)
 
     def do_GET(self) -> None:  # noqa: N802
@@ -213,7 +217,7 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             self.send_header("Location", "/console")
             self.end_headers()
             return
-        if path in {"/console", "/targets", "/patterns", "/atlas", "/estima", "/settings"} or path.startswith(("/atlas/", "/estima/")):
+        if path in {"/console", "/targets", "/patterns", "/atlas", "/estima", "/collective", "/settings"} or path.startswith(("/atlas/", "/estima/", "/collective/")):
             self._text(HTML, "text/html; charset=utf-8")
             return
         if path == "/assets/app.css":
@@ -252,6 +256,36 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/settings/estima":
             self._json(_estima_configuration(self.server.control_plane))
+            return
+        if path == "/api/estima/stats":
+            client = _estima_client(self.server.control_plane, "read")
+            if client is None:
+                self._atlas_unavailable()
+                return
+            try:
+                self._json(client.stats())
+            except Exception as exc:
+                self._atlas_failure(exc)
+            return
+        if path == "/api/estima/cases":
+            query = parse_qs(urlparse(self.path).query)
+            cluster = (query.get("cluster") or [None])[0]
+            scope = {"cluster": cluster} if cluster else None
+            search = (query.get("query") or [None])[0]
+            cursor = (query.get("cursor") or [None])[0]
+            try:
+                limit = max(1, min(50, int((query.get("limit") or ["20"])[0])))
+            except ValueError:
+                self._json({"error": "limit must be a number", "status": "invalid_request"}, HTTPStatus.BAD_REQUEST)
+                return
+            client = _estima_client(self.server.control_plane, "read")
+            if client is None:
+                self._atlas_unavailable()
+                return
+            try:
+                self._json(client.list_cases(scope=scope, query=search, limit=limit, cursor=cursor))
+            except Exception as exc:
+                self._atlas_failure(exc)
             return
         if path == "/api/estima/patterns":
             query = parse_qs(urlparse(self.path).query)
@@ -439,7 +473,7 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             if path == "/api/estima/retry-failed":
                 retry = getattr(self.server.control_plane, "retry_estima_publications", None) or getattr(self.server.control_plane, "retry_atlas_publications", None)
                 if retry is None:
-                    self._json({"error": "Estima retry is unavailable in this FCAPSule build"}, HTTPStatus.NOT_IMPLEMENTED)
+                    self._json({"error": "Collective retry is unavailable in this FCAPSule build"}, HTTPStatus.NOT_IMPLEMENTED)
                     return
                 self._json(retry(limit=100), HTTPStatus.ACCEPTED)
                 return

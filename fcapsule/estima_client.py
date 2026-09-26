@@ -42,8 +42,11 @@ def validate_atlas_url(value: str) -> str:
 def estima_settings_from_env(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
     env = os.environ if environ is None else environ
     def value(name: str, default: str = "") -> str:
+        current_name = f"FCAPSULE_COLLECTIVE_{name}"
         new_name = f"FCAPSULE_ESTIMA_{name}"
         old_name = f"FCAPSULE_ATLAS_{name}"
+        if current_name in env:
+            return str(env[current_name])
         return str(env[new_name] if new_name in env else env.get(old_name, default))
 
     return {
@@ -94,6 +97,22 @@ class EstimaClient:
 
     def create_case(self, case: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/cases", case)
+
+    def stats(self) -> dict[str, Any]:
+        return self._request("GET", "/v1/stats")
+
+    def list_cases(
+        self, scope: dict[str, Any] | None = None, query: str | None = None,
+        limit: int = 20, cursor: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, str] = {"limit": str(max(1, min(50, int(limit))))}
+        if scope:
+            params["scope"] = json.dumps(scope, separators=(",", ":"), ensure_ascii=True)
+        if query:
+            params["query"] = str(query)[:500]
+        if cursor:
+            params["cursor"] = str(cursor)[:2048]
+        return self._request("GET", "/v1/cases?" + urlencode(params))
 
     def search(
         self, scope: dict[str, Any] | None, query: str = "", limit: int = 10, before: str | None = None,
