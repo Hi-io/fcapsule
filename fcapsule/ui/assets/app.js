@@ -1488,14 +1488,24 @@ function metricChart(item, linkToEvidence = false) {
     sparkline(item) + '<div class="chart-times"><time title="' + safe(formatExactDate(start)) + '">' + shortTime(start) + '</time><span>' + duration + ' min captured</span><time title="' + safe(formatExactDate(end)) + '">' + shortTime(end) + '</time></div><small class="queue-note">' + safe(item.component || 'Affected entity not recorded') + ' · dashed marker: ' + (points.some(point => point.timestamp === item.alert_timestamp) ? 'selected deviation' : 'window extreme') + ', not alert time</small>' +
     (linkToEvidence ? '<button class="evidence-link" data-evidence-link="' + safe(item.evidence_id) + '" data-domain="metrics">Open metric evidence</button>' : '') + '</article>';
 }
-function metricsPanel(report) {
+function alertMetricCoverageNote(report) {
   const captures = report.alert_metric_evidence || [];
   const unavailable = captures.filter(item=>item.status !== 'available' && item.status !== 'partial');
   const partial = captures.filter(item=>item.status === 'partial');
   const unavailableNote = unavailable.length ? '<p class="queue-note">Alert signal unavailable: ' + unavailable.map(item=>safe(item.alertname || 'rule') + ' (' + safe(String(item.reason || 'not captured').replaceAll('_',' ')) + ')').join('; ') + '.</p>' : '';
-  const partialNote = partial.length ? '<p class="queue-note">Alert signal coverage is partial: ' + partial.map(item=>safe(item.alertname || 'rule') + ' (' + safe(String(item.reason || 'some samples unavailable').replaceAll('_',' ')) + ')').join('; ') + '.</p>' : '';
+  const partialNote = partial.length ? '<p class="queue-note">Alert signal coverage is partial: ' + partial.map(item=>{
+    const omitted = Number.isInteger(item.omitted_no_finite_series_count) && item.omitted_no_finite_series_count > 0
+      ? '; ' + Math.min(item.omitted_no_finite_series_count,9999) + ' scoped series had no finite samples' : '';
+    return safe(item.alertname || 'rule') + ' (' + safe(String(item.reason || 'some samples unavailable').replaceAll('_',' ')) + omitted + ')';
+  }).join('; ') + '. Unobserved points are unknown, not healthy evidence.</p>' : '';
+  return unavailableNote + partialNote;
+}
+function metricsPanel(report) {
+  const captures = report.alert_metric_evidence || [];
+  const unavailable = captures.filter(item=>item.status !== 'available' && item.status !== 'partial');
+  const partial = captures.filter(item=>item.status === 'partial');
   const missingNote = !unavailable.length && !partial.length && !(report.pm_signals || []).some(item=>item.signal_origin === 'alert_rule') ? '<p class="queue-note">The alert-condition signal was not retained in this capture. Historical captures are not backfilled.</p>' : '';
-  const coverage = unavailableNote + partialNote + missingNote;
+  const coverage = alertMetricCoverageNote(report) + missingNote;
   return coverage + '<div class="metrics-grid">' + (report.pm_signals || []).map(item => metricChart(item)).join('') + '</div>' + (report.pm_coverage_note ? '<p class="queue-note">' + safe(report.pm_coverage_note) + '</p>' : '');
 }
 function overviewMetrics(report) {
@@ -1516,7 +1526,7 @@ function overviewMetrics(report) {
   const title = chosen.metric === 'up' ? 'Target scrape health' : chosen.label;
   const missing = points.filter(point => point.value == null).length;
   const replica = chosen.labels?.prometheus_replica || chosen.labels?.replica;
-  return '<section class="overview-metrics"><div class="section-heading"><h3>Relevant performance</h3><button class="evidence-link" data-evidence-link="' + safe(chosen.evidence_id) + '" data-domain="metrics">All performance evidence</button></div>' +
+  return '<section class="overview-metrics">' + alertMetricCoverageNote(report) + '<div class="section-heading"><h3>Relevant performance</h3><button class="evidence-link" data-evidence-link="' + safe(chosen.evidence_id) + '" data-domain="metrics">All performance evidence</button></div>' +
     '<article class="metric-preview"><div class="metric-preview-heading"><h4>' + safe(title) + '</h4><span class="queue-note">' + safe(minutes) + ' min captured</span></div>' +
     '<div class="metric-preview-values"><span>' + (rule ? 'Before alert' : 'Reference median') + ' <b>' + safe(value(chosen.baseline_value, chosen.baseline)) + '</b></span><span>Selected <b>' + safe(value(chosen.peak_value, chosen.peak)) + '</b></span>' +
     (rule ? '<span class="threshold-key">Threshold <b>' + safe(chosen.operator + ' ' + value(chosen.threshold, String(chosen.threshold) + (chosen.unit && chosen.unit !== 'state' ? ' ' + chosen.unit : ''))) + '</b></span>' : '') + '</div>' + sparkline(chosen, 640) +
