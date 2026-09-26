@@ -25,6 +25,7 @@ DEFAULT_MODEL_PROFILES = (
 
 EPISODE_JOIN_MINUTES = 15
 EPISODE_RESOURCE_CORRELATION_MINUTES = 2
+MAX_PUBLICATION_REVISION_LINKS = 32
 SEVERITY_RANK = {"info": 0, "warning": 1, "critical": 2}
 
 
@@ -268,6 +269,8 @@ class FCAPSuleStore:
                     outbox_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     instance_id TEXT NOT NULL,
                     episode_id TEXT NOT NULL,
+                    local_episode_id TEXT NOT NULL DEFAULT '',
+                    local_episode_link_status TEXT NOT NULL DEFAULT 'unknown',
                     revision INTEGER NOT NULL,
                     fingerprint TEXT NOT NULL,
                     payload_digest TEXT NOT NULL,
@@ -276,6 +279,10 @@ class FCAPSuleStore:
                     attempts INTEGER NOT NULL DEFAULT 0,
                     next_attempt_at TEXT NOT NULL,
                     last_error TEXT,
+                    investigation_revision_ids TEXT NOT NULL DEFAULT '[]',
+                    investigation_revision_links_truncated INTEGER NOT NULL DEFAULT 0,
+                    remote_case_id TEXT,
+                    receipt_status TEXT NOT NULL DEFAULT 'legacy_receipt_unknown',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     UNIQUE(instance_id, episode_id, payload_digest)
@@ -310,6 +317,20 @@ class FCAPSuleStore:
                     ON atlas_outbox(status, next_attempt_at, created_at);
                 """
             )
+            outbox_columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(atlas_outbox)").fetchall()
+            }
+            for column, definition in (
+                ("local_episode_id", "TEXT NOT NULL DEFAULT ''"),
+                ("local_episode_link_status", "TEXT NOT NULL DEFAULT 'unknown'"),
+                ("investigation_revision_ids", "TEXT NOT NULL DEFAULT '[]'"),
+                ("investigation_revision_links_truncated", "INTEGER NOT NULL DEFAULT 0"),
+                ("remote_case_id", "TEXT"),
+                ("receipt_status", "TEXT NOT NULL DEFAULT 'legacy_receipt_unknown'"),
+            ):
+                if column not in outbox_columns:
+                    connection.execute(f"ALTER TABLE atlas_outbox ADD COLUMN {column} {definition}")
             incident_columns = {
                 str(row["name"])
                 for row in connection.execute("PRAGMA table_info(incidents)").fetchall()
@@ -1504,7 +1525,10 @@ class FCAPSuleStore:
                 (setting_key, setting_value, utc_now()),
             )
 
-    def enqueue_atlas_publication(self, payload: dict[str, Any], pending_limit: int = 1000) -> dict[str, Any]:
+    def enqueue_atlas_publication(
+        self, payload: dict[str, Any], pending_limit: int = 1000, *,
+        local_episode_id: str | None = None, investigation_revision_id: str | None = None,
+    ) -> dict[str, Any]:
         """Persist a compact, already-projected case before any network attempt."""
         envelope = dict(payload)
         envelope.pop("revision", None)
@@ -1517,6 +1541,12 @@ class FCAPSuleStore:
             raise ValueError("Atlas outbox payload needs instance_id, episode_id, and fingerprint")
         if len(serialized.encode("utf-8")) > 24 * 1024:
             raise ValueError("Atlas outbox payload exceeds 24 KiB")
+        local_revision_id = str(investigation_revision_id or "").strip()
+        if len(local_revision_id) > 200:
+            local_revision_id = local_revision_id[:200]
+        local_id = str(local_episode_id or "").strip()
+        if len(local_id) > 200:
+            local_id = local_id[:200]
         now = utc_now()
         cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat().replace("+00:00", "Z")
         with self._connect() as connection:
@@ -1528,6 +1558,44 @@ class FCAPSuleStore:
                 (instance_id, episode_id, digest),
             ).fetchone()
             if existing:
+                revision_ids = _decode(existing["investigation_revision_ids"], [])
+                if not isinstance(revision_ids, list):
+                    revision_ids = []
+                revision_ids = [str(item) for item in revision_ids if isinstance(item, str)]
+                links_truncated = bool(existing["investigation_revision_links_truncated"])
+                if len(revision_ids) > MAX_PUBLICATION_REVISION_LINKS:
+                    revision_ids = revision_ids[-MAX_PUBLICATION_REVISION_LINKS:]
+                    links_truncated = True
+                changed = False
+                if local_revision_id and local_revision_id not in revision_ids:
+                    revision_ids.append(local_revision_id)
+                    changed = True
+                if len(revision_ids) > MAX_PUBLICATION_REVISION_LINKS:
+                    revision_ids = revision_ids[-MAX_PUBLICATION_REVISION_LINKS:]
+                    links_truncated = True
+                if changed or links_truncated != bool(existing["investigation_revision_links_truncated"]):
+                    connection.execute(
+                        "UPDATE atlas_outbox SET investigation_revision_ids = ?, "
+                        "investigation_revision_links_truncated = ?, "
+                        "local_episode_id = CASE WHEN local_episode_id = '' THEN ? ELSE local_episode_id END, "
+                        "local_episode_link_status = CASE WHEN local_episode_id = '' AND ? != '' "
+                        "THEN 'linked' ELSE local_episode_link_status END "
+                        "WHERE outbox_id = ?",
+                        (_json(revision_ids), int(links_truncated), local_id, local_id,
+                         int(existing["outbox_id"])),
+                    )
+                    existing = connection.execute(
+                        "SELECT * FROM atlas_outbox WHERE outbox_id = ?", (int(existing["outbox_id"]),)
+                    ).fetchone()
+                elif local_id and not str(existing["local_episode_id"] or ""):
+                    connection.execute(
+                        "UPDATE atlas_outbox SET local_episode_id = ?, local_episode_link_status = 'linked' "
+                        "WHERE outbox_id = ?",
+                        (local_id, int(existing["outbox_id"])),
+                    )
+                    existing = connection.execute(
+                        "SELECT * FROM atlas_outbox WHERE outbox_id = ?", (int(existing["outbox_id"]),)
+                    ).fetchone()
                 return {**dict(existing), "payload": _decode(existing["payload"], {}), "is_new": False}
             head = connection.execute(
                 "SELECT revision, payload_digest, status FROM atlas_publication_heads "
@@ -1554,11 +1622,15 @@ class FCAPSuleStore:
             connection.execute(
                 """
                 INSERT INTO atlas_outbox
-                    (instance_id, episode_id, revision, fingerprint, payload_digest, payload,
-                     status, attempts, next_attempt_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)
+                    (instance_id, episode_id, local_episode_id, local_episode_link_status,
+                     revision, fingerprint, payload_digest, payload,
+                     status, attempts, next_attempt_at, investigation_revision_ids,
+                     receipt_status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, 'not_yet_confirmed', ?, ?)
                 """,
-                (instance_id, episode_id, revision, fingerprint, digest, _json(envelope), now, now, now),
+                (instance_id, episode_id, local_id, "linked" if local_id else "unknown",
+                 revision, fingerprint, digest, _json(envelope), now,
+                 _json([local_revision_id] if local_revision_id else []), now, now),
             )
             connection.execute(
                 "INSERT INTO atlas_publication_heads (instance_id, episode_id, revision, payload_digest, status) "
@@ -1593,14 +1665,18 @@ class FCAPSuleStore:
             ).fetchall()
         return [{**dict(row), "payload": _decode(row["payload"], {})} for row in rows]
 
-    def complete_atlas_publication(self, outbox_id: int) -> None:
+    def complete_atlas_publication(self, outbox_id: int, remote_case_id: str | None = None) -> None:
+        candidate_id = str(remote_case_id or "").strip()
+        safe_case_id = candidate_id if re.fullmatch(r"[A-Za-z0-9._:-]{1,160}", candidate_id) else None
+        receipt_status = "remote_id_recorded" if safe_case_id else "remote_id_not_returned"
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT instance_id, episode_id, revision FROM atlas_outbox WHERE outbox_id = ?", (int(outbox_id),)
             ).fetchone()
             connection.execute(
-                "UPDATE atlas_outbox SET status = 'sent', last_error = NULL, updated_at = ? WHERE outbox_id = ?",
-                (utc_now(), int(outbox_id)),
+                "UPDATE atlas_outbox SET status = 'sent', last_error = NULL, remote_case_id = ?, "
+                "receipt_status = ?, updated_at = ? WHERE outbox_id = ?",
+                (safe_case_id, receipt_status, utc_now(), int(outbox_id)),
             )
             if row:
                 connection.execute(
@@ -1664,6 +1740,75 @@ class FCAPSuleStore:
         return {"pending_count": pending, "failed_count": failed,
                 "last_error": (str(row["last_error"]) if row else None) or quota_error,
                 "counts": {str(item["status"]): int(item["count"]) for item in counts}}
+
+    @staticmethod
+    def _publication_error_summary(error: str | None) -> str | None:
+        """Return a fixed, safe summary rather than stored exception text."""
+        if not error:
+            return None
+        value = str(error).strip()
+        match = re.fullmatch(r"(?:Estima|Atlas) returned HTTP (\d{3})", value)
+        if match:
+            code = int(match.group(1))
+            if code in {401, 403}:
+                return f"Collective rejected the service credential (HTTP {code})."
+            if 400 <= code < 500:
+                return f"Collective rejected the case (HTTP {code})."
+            return f"Collective service returned HTTP {code}."
+        lowered = value.lower()
+        if "unavailable" in lowered or "timeout" in lowered:
+            return "Collective is unavailable; delivery will retry."
+        if "invalid json" in lowered or "non-object" in lowered:
+            return "Collective returned an invalid response."
+        if "exceeded" in lowered and "response" in lowered:
+            return "Collective returned an oversized response."
+        return "Publication delivery failed; details are hidden."
+
+    def publication_provenance(self, episode_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        """Return bounded local delivery receipts without case payloads or secrets."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM atlas_outbox WHERE local_episode_id = ? "
+                "ORDER BY revision DESC, outbox_id DESC LIMIT ?",
+                (str(episode_id), max(1, min(50, int(limit)))),
+            ).fetchall()
+        results = []
+        for row in rows:
+            item = dict(row)
+            internal_status = str(item.get("status") or "pending")
+            attempts = max(0, int(item.get("attempts") or 0))
+            if internal_status == "sent":
+                status = "published"
+            elif internal_status == "failed":
+                status = "attention_required"
+            elif attempts:
+                status = "retry_scheduled"
+            else:
+                status = "queued"
+            receipt_status = str(item.get("receipt_status") or "legacy_receipt_unknown")
+            if receipt_status not in {
+                "not_yet_confirmed", "remote_id_recorded", "remote_id_not_returned", "legacy_receipt_unknown",
+            }:
+                receipt_status = "legacy_receipt_unknown"
+            revision_ids = _decode(item.get("investigation_revision_ids"), [])
+            if not isinstance(revision_ids, list):
+                revision_ids = []
+            results.append({
+                "episode_id": str(item["local_episode_id"]),
+                "local_episode_link_status": str(item["local_episode_link_status"]),
+                "investigation_revision_ids": [str(value) for value in revision_ids if isinstance(value, str)],
+                "investigation_revision_links_truncated": bool(item["investigation_revision_links_truncated"]),
+                "status": status,
+                "receipt_status": receipt_status,
+                "revision": int(item["revision"]),
+                "created_at": str(item["created_at"]),
+                "updated_at": str(item["updated_at"]),
+                "attempts": attempts,
+                "next_attempt_at": str(item["next_attempt_at"]) if internal_status == "pending" else None,
+                "last_error": self._publication_error_summary(item.get("last_error")),
+                "remote_case_id": item.get("remote_case_id") if receipt_status == "remote_id_recorded" else None,
+            })
+        return results
 
     def overview(self) -> dict[str, Any]:
         applications = self.list_applications()

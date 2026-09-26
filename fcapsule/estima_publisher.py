@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from pathlib import Path
@@ -13,6 +14,23 @@ from fcapsule.estima_projection import project_estima_record
 
 
 TERMINAL_STATES = {"ready", "inconclusive", "incomplete", "not_configured"}
+
+
+def _remote_case_id(response: Any, service_token: str = "") -> str | None:
+    if not isinstance(response, dict):
+        return None
+    candidates = [response]
+    candidates.extend(value for key in ("case", "record", "data")
+                      if isinstance((value := response.get(key)), dict))
+    for candidate in candidates:
+        for key in ("case_id", "id"):
+            value = candidate.get(key)
+            if isinstance(value, (str, int)) and not isinstance(value, bool):
+                value = str(value).strip()
+                if (re.fullmatch(r"[A-Za-z0-9._:-]{1,160}", value)
+                        and not (service_token and value == service_token)):
+                    return value
+    return None
 
 
 class EstimaPublisher:
@@ -184,7 +202,10 @@ class EstimaPublisher:
                 )
                 if payload is None:
                     continue
-                result = self.plane.store.enqueue_atlas_publication(payload)
+                result = self.plane.store.enqueue_atlas_publication(
+                    payload, local_episode_id=episode_id,
+                    investigation_revision_id=state.get("revision_id"),
+                )
                 if result.get("accepted") is False:
                     projection_error = "Pending Estima outbox quota reached"
                     continue
@@ -207,7 +228,7 @@ class EstimaPublisher:
             sent = retried = failed = 0
             for row in self.plane.store.due_atlas_publications(limit=limit):
                 try:
-                    estima.create_case(row["payload"])
+                    response = estima.create_case(row["payload"])
                 except EstimaClientError as error:
                     status = error.status_code
                     permanent = status is not None and 400 <= status < 500 and status not in {408, 425, 429}
@@ -228,7 +249,10 @@ class EstimaPublisher:
                     )
                     retried += 1
                 else:
-                    self.plane.store.complete_atlas_publication(int(row["outbox_id"]))
+                    token = str(self.plane._effective_estima_settings().get("token") or "").strip()
+                    self.plane.store.complete_atlas_publication(
+                        int(row["outbox_id"]), remote_case_id=_remote_case_id(response, token),
+                    )
                     sent += 1
             return {"sent": sent, "retried": retried, "failed": failed}
 
