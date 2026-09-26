@@ -1306,6 +1306,58 @@ function checkObservation(item) {
   return Object.keys(result).length ? 'Source response retained. Open the observation for its details.' : 'No observations returned.';
 }
 
+function memoryContribution(run = {}) {
+  const assessment = run.assessment || {};
+  const ids = value => Array.isArray(value) ? value.filter(id => typeof id === 'string') : [];
+  const hypotheses = Array.isArray(assessment.hypotheses) ? assessment.hypotheses : [];
+  const connections = Array.isArray(assessment.connections) ? assessment.connections : [];
+  const cited = new Set([
+    ...ids(assessment.evidence_ids),
+    ...ids(assessment.historical_comparison?.evidence_ids),
+    ...hypotheses.flatMap(item => ids(item?.evidence_ids)),
+    ...connections.flatMap(item => ids(item?.evidence_ids)),
+  ]);
+  const checks = Array.isArray(run.checks) ? run.checks : [];
+  const used = checks.filter(item => item?.tool === 'historical_episode'
+    && item.status === 'completed' && cited.has(item.id) && item.result?.availability !== 'unavailable')
+    .map(item => {
+      const observations = Array.isArray(item.result?.observations) ? item.result.observations : [];
+      const matched = observations.find(observation => observation && typeof observation === 'object'
+        && observation.source?.matches_current_alert_identity === true);
+      return matched ? {item, matched, episode:item.result.episode || {}} : null;
+    }).filter(Boolean).slice(0,3);
+  if (!used.length) return '';
+
+  const rows = used.map(({item, matched, episode}) => {
+    const selection = episode.member_selection || {};
+    const member = (selection.selected_members || []).find(value => value.matches_current_alert_identity === true);
+    const observation = String(matched.summary || matched.metric_observation?.summary ||
+      matched.configuration?.summary || 'A retained matching observation is available in the source record.').trim().slice(0,300);
+    const relation = member?.target_relation || selection.candidate_relation;
+    let difference = '';
+    if (relation === 'same_workload_different_pod') {
+      const priorTarget = member?.resource?.name;
+      const currentTarget = selection.current_target?.name;
+      difference = 'The retained observation is from a different pod in the same workload' +
+        (priorTarget && currentTarget ? ' (' + priorTarget + ' vs ' + currentTarget + ')' : '') + '.';
+    }
+    const purpose = String(item.distinguishes || item.question || '').trim().slice(0,300);
+    const uncertainty = [item.result?.limitation, selection.limitation, episode.capture_limit]
+      .find(value => typeof value === 'string' && value.trim());
+    const details = [
+      '<div><dt>Matched prior observation</dt><dd>' + safe(observation) + '</dd></div>',
+      (purpose ? '<div><dt>Recorded check purpose</dt><dd>' + safe(purpose) + '</dd></div>' : ''),
+      (difference ? '<div><dt>Difference</dt><dd>' + safe(difference) + '</dd></div>' : ''),
+      (uncertainty ? '<div><dt>Limit</dt><dd>' + safe(uncertainty) + '</dd></div>' : ''),
+    ].join('');
+    const reference = investigationReferenceDescriptor(item, true);
+    return '<section class="history-contribution-item"><span class="text-label">' + safe(episode.reference || episode.episode_id || 'Prior episode') +
+      '</span><dl class="coverage-details">' + details + '</dl>' + investigationReferenceButton(reference) + '</section>';
+  }).join('');
+  return '<details class="history-contribution"><summary>How retained history informed this assessment</summary>' +
+    '<div><p class="queue-note">A cited prior observation can guide a check; it does not establish the same cause.</p>' + rows + '</div></details>';
+}
+
 function investigationProgress(run = {}, compact = false) {
   const checks = run.checks || [];
   const usage = run.usage;
@@ -1538,7 +1590,7 @@ function reportPanel(payload) {
     (evidenceView === 'sources' ? mediaEvidencePanel(payload) + investigationEvidence(ai || {}, payload.media_evidence || []) : evidencePanel(report)) + '</div></div>';
   else if (reportTab === 'timeline') content = timelinePanel(report) + investigationTimeline(ai || {}, payload.media_evidence || [], payload.investigation_revisions || []);
   else if (reportTab === 'investigation') content = '<div class="overview-layout investigation-layout">' + investigationProgress(ai || {}) + briefingPanel(payload, true) + sourceReviewPanel(payload) + '</div>';
-  else content = '<div class="overview-layout report-workspace">' + investigationScope(payload) + '<div class="report-main">' + briefingPanel(payload, false, contextWorkspace) + fallback + (ai?.assessment ? '' : contextWorkspace) + (ai?.assessment ? overviewMetrics(report) : '') + '</div><div class="report-rail">' + investigationProgress(ai || {}, true) + '</div></div>';
+  else content = '<div class="overview-layout report-workspace">' + investigationScope(payload) + '<div class="report-main">' + briefingPanel(payload, false, contextWorkspace) + memoryContribution(ai || {}) + fallback + (ai?.assessment ? '' : contextWorkspace) + (ai?.assessment ? overviewMetrics(report) : '') + '</div><div class="report-rail">' + investigationProgress(ai || {}, true) + '</div></div>';
   return '<section id="incident-report"><div class="report-navigation"><div role="tablist" aria-label="Investigation views">' +
     tabs.map(name=>'<button id="tab-' + name + '" role="tab" data-report-tab="' + name + '" aria-selected="' + (name === reportTab) + '" aria-controls="investigation-panel" tabindex="' + (name === reportTab ? 0 : -1) + '">' + name[0].toUpperCase() + name.slice(1) + '</button>').join('') +
     '</div><div class="report-actions">' + (reportTab === 'overview' ? '' : evidenceAction) + exports + '</div></div><div id="investigation-panel" role="tabpanel" aria-labelledby="tab-' + reportTab + '" tabindex="0">' + content + '</div><div class="report-technical">' + diagnostics + '</div></section>';

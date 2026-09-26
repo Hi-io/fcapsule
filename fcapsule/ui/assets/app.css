@@ -298,6 +298,12 @@ small.cell-note { display:block; color:var(--muted); margin-top:3px; }
 .evidence-disclosure > summary { cursor:pointer; padding:13px 0; color:var(--ink); font-size:13px; font-weight:550; overflow-wrap:anywhere; }
 .evidence-disclosure .detail-count { color:var(--muted); margin-left:12px; font-size:12px; font-weight:400; }
 .disclosure-body { padding:0 0 16px 16px; overflow-wrap:anywhere; }
+.history-contribution { border-top:1px solid var(--line); margin-top:18px; }
+.history-contribution > summary { cursor:pointer; padding:12px 0; color:var(--ink); font-size:13px; font-weight:550; overflow-wrap:anywhere; }
+.history-contribution > div { padding-bottom:8px; }
+.history-contribution-item { border-top:1px solid #e5eaed; padding:10px 0; }
+.history-contribution-item .coverage-details > div { display:grid; grid-template-columns:minmax(120px,.4fr) minmax(0,1fr); align-items:start; gap:14px; }
+.history-contribution-item .coverage-details dd { max-width:none; text-align:left; overflow-wrap:anywhere; }
 .evidence-view { padding:10px 26px 22px; }
 .evidence-view > details > summary { font-size:14px; padding:18px 0; }
 .evidence-record { padding:15px 0; border-bottom:1px solid #e5eaed; }
@@ -350,6 +356,7 @@ small.cell-note { display:block; color:var(--muted); margin-top:3px; }
 @media (max-width:700px) {
   .overview-layout { grid-template-columns:1fr; padding:18px; }
   .overview-layout aside { border-left:0; padding:20px 0 0; border-top:1px solid var(--line); }
+  .history-contribution-item .coverage-details > div { grid-template-columns:1fr; gap:3px; }
   .episode-summary { grid-template-columns:1fr; gap:8px; }
   .episode-state { display:flex; gap:12px; }
   .episode-count { display:none; }
