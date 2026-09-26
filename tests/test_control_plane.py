@@ -190,6 +190,34 @@ class ControlPlaneTests(unittest.TestCase):
             self.assertEqual(rebuilt["report"]["report_version"], "1.3")
             self.assertTrue(rebuilt["report"]["log_patterns"])
 
+    def test_retained_report_survives_restart_after_capture_source_expires(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
+            state_dir = Path(directory) / "state"
+            source = Path(directory) / "source"
+            shutil.copytree(REFERENCE_CASE, source)
+            first = ControlPlane(state_dir)
+            self.addCleanup(first.evidence.shutdown)
+            self.addCleanup(lambda: first.briefing_executor.shutdown(wait=True, cancel_futures=True))
+            incident = first.ingest_case(source, "checkout", "Checkout")
+            first._build_capsule(incident["incident_id"])
+            before = first.incident_report_payload(incident["incident_id"])
+            shutil.rmtree(source)
+
+            with (
+                patch("fcapsule.control_plane.load_case", side_effect=AssertionError("Expired source must not be loaded")),
+                patch("fcapsule.control_plane.read_case_json", side_effect=AssertionError("Expired source must not be read")),
+            ):
+                restarted = ControlPlane(state_dir)
+                self.addCleanup(restarted.evidence.shutdown)
+                self.addCleanup(lambda: restarted.briefing_executor.shutdown(wait=True, cancel_futures=True))
+                after = restarted.incident_report_payload(incident["incident_id"])
+
+            self.assertIsNotNone(before)
+            self.assertIsNotNone(after)
+            self.assertEqual(before["report"], after["report"])
+            self.assertTrue(after["report"]["log_patterns"])
+            self.assertEqual(after["report"]["report_version"], "1.3")
+
     def test_http_streams_large_capsule_and_keeps_cached_report_readable(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
             server = create_app_server("127.0.0.1", 0, Path(directory) / "state")
