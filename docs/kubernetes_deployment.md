@@ -54,19 +54,50 @@ kubectl apply -f deploy/kubernetes/fcapsule.yaml
 kubectl rollout status deployment/fcapsule -n fcapsule
 ```
 
-The application Service is ClusterIP-only. The included Caddy HTTPS sidecar is the remote entry point on `https://<node-ip>:30767`; otherwise, use a localhost port-forward. The console requires the separate `fcapsule-console-auth` Secret described below. Create it before applying the manifest so the first rollout is immediately usable.
+The application Service is ClusterIP-only. For remote HTTPS access, add the optional Caddy proxy and NodePort service described in [HTTPS access](https_access.md); its entry point is `https://<node-ip>:30767`. Otherwise, use a localhost port-forward. The console requires the separate `fcapsule-console-auth` Secret described below. Create it before applying the manifest so the first rollout is immediately usable.
 
 ## Development Overlay
 
-`deploy/kubernetes/dev-overlay.yaml` uses an init container to install the current GitHub `master` branch into an `emptyDir`, then runs it with the same non-root security policy as the base Deployment.
+`deploy/kubernetes/dev-overlay.yaml` uses a `python:3.12-slim` init container to install source into an `emptyDir`; the application container runs that source with the same non-root security policy as the base Deployment. The checked-in overlay currently points at mutable `master.zip`, so applying it unchanged is not reproducible. The tested source revision is `003d3876f1e1f708664bfb7fa7070007f7a57067`. Pin the archive URL to that commit before applying the overlay:
 
 ```bash
+source_sha=003d3876f1e1f708664bfb7fa7070007f7a57067
+source_archive="https://github.com/Hi-io/fcapsule/archive/${source_sha}.zip"
+overlay_patch="$(mktemp)"
+trap 'rm -f "$overlay_patch"' EXIT
+sed "s#https://github.com/Hi-io/fcapsule/archive/refs/heads/master.zip#${source_archive}#" \
+  deploy/kubernetes/dev-overlay.yaml > "$overlay_patch"
+grep -F "$source_archive" "$overlay_patch"
+
+kubectl rollout history deployment/fcapsule -n fcapsule
 kubectl patch deployment fcapsule \
   -n fcapsule \
   --type strategic \
-  --patch-file deploy/kubernetes/dev-overlay.yaml
+  --patch-file "$overlay_patch"
 kubectl rollout status deployment/fcapsule -n fcapsule
 ```
+
+The patch changes the pod template and starts a rollout. Verify the deployed
+init-container source URL and both images from the Deployment template:
+
+```bash
+kubectl -n fcapsule get deployment fcapsule -o jsonpath='{range .spec.template.spec.initContainers[*]}init={.name}{" image="}{.image}{" command="}{.command}{"\n"}{end}{range .spec.template.spec.containers[*]}app={.name}{" image="}{.image}{"\n"}{end}'
+```
+
+The tested development profile uses `python:3.12-slim` for the source installer
+and application container, with the init-container URL ending in the pinned
+SHA above. A plain `kubectl rollout restart` recreates pods from the existing
+template; it does not advance a pinned source revision. To roll back, use the
+known-good revision recorded by `rollout history` before applying the patch:
+
+```bash
+kubectl rollout undo deployment/fcapsule -n fcapsule --to-revision=<known-good-revision>
+kubectl rollout status deployment/fcapsule -n fcapsule
+```
+
+This Deployment rollback leaves the persistent state volume and Secrets intact.
+Record and restore any separately changed ConfigMaps or other resources
+separately; `rollout undo` only restores the Deployment template.
 
 Make source changes on a dedicated branch, not on `master`:
 
@@ -86,13 +117,21 @@ them to the shared instance; do not trigger provider calls or mutate incidents
 during a presentation-only check.
 
 After verification, merge the tested branch (through a reviewed pull request or a
-local merge), then deploy:
+local merge). From a checkout at that exact merged commit, pin and apply the
+development overlay to that commit; a restart by itself would keep the existing
+source pin:
 
 ```bash
-git switch master
-git merge --no-ff feature/your-change
-git push origin master
-kubectl rollout restart deployment/fcapsule -n fcapsule
+source_sha="$(git rev-parse HEAD)"
+source_archive="https://github.com/Hi-io/fcapsule/archive/${source_sha}.zip"
+overlay_patch="$(mktemp)"
+trap 'rm -f "$overlay_patch"' EXIT
+sed "s#https://github.com/Hi-io/fcapsule/archive/refs/heads/master.zip#${source_archive}#" \
+  deploy/kubernetes/dev-overlay.yaml > "$overlay_patch"
+grep -F "$source_archive" "$overlay_patch"
+
+kubectl rollout history deployment/fcapsule -n fcapsule
+kubectl patch deployment fcapsule -n fcapsule --type strategic --patch-file "$overlay_patch"
 kubectl rollout status deployment/fcapsule -n fcapsule
 ```
 
