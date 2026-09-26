@@ -17,6 +17,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse, urlsplit
 
 from fcapsule.control_plane import ControlPlane
+from fcapsule.operational_health import render_operational_metrics
 
 
 HTML = """<!doctype html>
@@ -265,7 +266,15 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
         return False
-
+    def _metrics(self) -> None:
+        encoded = render_operational_metrics(self.server.control_plane).encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(encoded)
     def _payload(self, maximum_bytes: int = 512 * 1024) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
         if not length:
@@ -322,6 +331,9 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             return
         if path == "/healthz":
             self._json({"status": "ok"})
+            return
+        if path == "/metrics":
+            self._metrics()
             return
         if path.startswith("/api/episodes/") and path.endswith("/investigation"):
             episode_id = unquote(path.removeprefix("/api/episodes/").removesuffix("/investigation").rstrip("/"))
