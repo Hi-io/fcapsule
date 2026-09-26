@@ -28,6 +28,43 @@ def wait_for_idle(control_plane: ControlPlane, timeout: float = 15) -> None:
 
 
 class ControlPlaneTests(unittest.TestCase):
+    def test_staging_expiry_skips_active_jobs_and_preserves_retained_capsule(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "DEEPSEEK_API_KEY": "", "FCAPSULE_LIVE_STAGING_TTL_HOURS": "1",
+        }):
+            plane = ControlPlane(Path(directory) / "state")
+            case_dir = plane.live_sources.case_root / "retained-live-case"
+            shutil.copytree(REFERENCE_CASE, case_dir)
+            incident = plane.ingest_case(case_dir, "checkout", "Checkout", source_kind="live")
+            capsule_dir = plane.output_root / incident["incident_id"]
+            capsule_dir.mkdir(parents=True)
+            capsule_file = capsule_dir / "capsule.json"
+            capsule_file.write_text("{}", encoding="utf-8")
+            plane.store.record_capsule({
+                "capsule_id": f"capsule-{incident['incident_id']}",
+                "incident_id": incident["incident_id"],
+                "app_id": incident["app_id"],
+                "output_dir": capsule_dir,
+                "size_bytes": capsule_file.stat().st_size,
+            })
+            old = time.time() - 2 * 3600
+            os.utime(case_dir, (old, old))
+
+            with plane.lock:
+                plane.running = True
+                plane.active_job = "capsule"
+            self.assertEqual(plane.purge_expired_staging(force=True), 0)
+            self.assertTrue(case_dir.is_dir())
+            with plane.lock:
+                plane.running = False
+                plane.active_job = None
+
+            self.assertEqual(plane.purge_expired_staging(force=True), 1)
+            self.assertFalse(case_dir.exists())
+            self.assertTrue(capsule_file.is_file())
+            with self.assertRaisesRegex(FileNotFoundError, "staged live source capture has expired"):
+                plane._build_capsule(incident["incident_id"])
+
     def test_grafana_webhook_requires_explicit_enablement_and_bearer_token(self):
         payload = {"status": "firing", "alerts": [{"status": "firing", "fingerprint": "test-1",
                    "startsAt": "2026-09-25T05:00:00Z", "labels": {"alertname": "GatewayErrors", "namespace": "core", "cnfc": "edge-a"}}]}
