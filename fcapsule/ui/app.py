@@ -38,7 +38,11 @@ HTML = """<!doctype html>
     </nav>
     <div class="system-state" role="status"><i></i><span id="system-state">Connecting</span></div>
   </header>
-  <main id="app" tabindex="-1"><div class="boot">Loading FCAPSule...</div></main>
+  <main id="app" tabindex="-1" aria-busy="true"><div class="boot" role="status" aria-live="polite">
+    <div class="boot-heading"><span class="boot-spinner" aria-hidden="true"></span><span id="boot-label">Loading view</span></div>
+    <div class="boot-track" aria-hidden="true"><span></span></div>
+    <div class="boot-placeholder" aria-hidden="true"><span></span><span></span><span></span></div>
+  </div></main>
   <script src="/assets/app.js"></script>
 </body>
 </html>"""

@@ -192,7 +192,25 @@ details.engineering summary { cursor:pointer; padding:10px 11px; font-weight:650
 .log-pattern p { margin:0 0 8px 18px; color:var(--muted); font-size:12px; }
 .log-lines { margin:0 0 10px 18px; padding:9px; overflow:auto; background:#171f24; color:#dfe9ed; font:11px/1.5 "Cascadia Mono", Consolas, monospace; white-space:pre-wrap; }
 .report-note { color:var(--muted); font-size:12px; margin:0 0 9px; }
-.boot { color:var(--muted); padding:40px; text-align:center; }
+.boot { max-width:760px; padding:25px 0; color:var(--muted); }
+.boot-heading { display:flex; align-items:center; gap:11px; color:var(--ink); font-size:16px; font-weight:650; }
+.boot-spinner { width:18px; height:18px; flex:none; border:2px solid #cbd9df; border-top-color:var(--blue); border-radius:50%; animation:boot-spin .8s linear infinite; }
+.boot-track { height:2px; margin:18px 0 25px; background:#dce4e8; overflow:hidden; }
+.boot-track span { display:block; width:32%; height:100%; background:var(--blue); animation:boot-progress 1.2s ease-in-out infinite; }
+.boot-placeholder { display:grid; gap:12px; }
+.boot-placeholder span { display:block; height:15px; background:#e5eaed; }
+.boot-placeholder span:nth-child(1) { width:36%; height:23px; }
+.boot-placeholder span:nth-child(2) { width:100%; }
+.boot-placeholder span:nth-child(3) { width:72%; }
+.boot-error { padding:26px 0; }
+.boot-error h1 { margin:0 0 6px; font-size:20px; }
+.boot-error p { margin:0 0 17px; color:var(--muted); }
+.navigation-pending main { opacity:.55; transition:opacity .12s ease; }
+.navigation-pending .product-bar { position:relative; }
+.navigation-pending .product-bar::after { content:""; position:absolute; bottom:-3px; left:0; width:30%; height:3px; background:#80c9e9; animation:boot-progress 1.2s ease-in-out infinite; }
+.product-bar nav a.is-pending { background:#202a31; color:#fff; }
+@keyframes boot-spin { to { transform:rotate(360deg); } }
+@keyframes boot-progress { from { transform:translateX(-110%); } to { transform:translateX(340%); } }
 .mono { font-family:"Cascadia Mono", Consolas, monospace; font-size:12px; }
 .right { text-align:right; }
 @media (max-width:1050px) { .grid-2, .report-layout, .target-grid { grid-template-columns:1fr; } .target { border-right:0; border-bottom:1px solid var(--line); } .target:last-child { border-bottom:0; } .report-main { border-right:0; border-bottom:1px solid var(--line); } }

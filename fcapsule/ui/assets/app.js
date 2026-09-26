@@ -1,5 +1,8 @@
 const view = location.pathname.startsWith('/settings') ? 'settings' : location.pathname.startsWith('/targets') ? 'targets' : location.pathname.startsWith('/patterns') ? 'patterns' : (location.pathname.startsWith('/estima') || location.pathname.startsWith('/atlas')) ? 'estima' : 'console';
 const app = document.querySelector('#app');
+const viewLabels = {console:'Operations', targets:'Targets', patterns:'Patterns', estima:'Estima', settings:'Settings'};
+const bootLabel = document.querySelector('#boot-label');
+if (bootLabel) bootLabel.textContent = `Loading ${viewLabels[view]}`;
 const fmt = new Intl.NumberFormat('en-US');
 const pct = value => typeof value === 'number' ? (value * 100).toFixed(1) + '%' : '--';
 const bytes = value => {
@@ -13,7 +16,26 @@ const shortTime = value => value ? new Date(value).toLocaleTimeString([], {hour:
 document.querySelector(`[data-nav="${view}"]`)?.classList.add('active');
 document.querySelector(`[data-nav="${view}"]`)?.setAttribute('aria-current', 'page');
 document.body.dataset.view = view;
-document.title = ({console:'Operations', targets:'Targets', patterns:'Patterns', estima:'Estima', settings:'Settings'})[view] + ' | FCAPSule';
+document.title = viewLabels[view] + ' | FCAPSule';
+
+document.querySelector('.product-bar nav')?.addEventListener('click', event => {
+  const link = event.target.closest('a[data-nav]');
+  if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || link.target || link.hasAttribute('download')) return;
+  const destination = new URL(link.href, location.href);
+  if (destination.origin !== location.origin || destination.href === location.href) return;
+  event.preventDefault();
+  document.body.classList.add('navigation-pending');
+  link.classList.add('is-pending');
+  app.setAttribute('aria-busy', 'true');
+  requestAnimationFrame(() => requestAnimationFrame(() => location.assign(destination.href)));
+});
+window.addEventListener('pageshow', event => {
+  if (event.persisted) {
+    document.body.classList.remove('navigation-pending');
+    document.querySelector('.product-bar nav .is-pending')?.classList.remove('is-pending');
+    app.removeAttribute('aria-busy');
+  }
+});
 let lastState = null;
 let selectedReport = null;
 let selectedEpisodeId = null;
@@ -1734,14 +1756,20 @@ async function refresh() {
     } else if (view === 'patterns' && JSON.stringify([state.overview.patterns, state.overview.related_groups, patternsMode]) !== lastPatternsSignature) {
       renderPatterns(state);
     }
+    app.removeAttribute('aria-busy');
   } catch (_) {
     document.querySelector('.system-state').className = 'system-state error';
     document.querySelector('#system-state').textContent = 'Disconnected';
+    if (app.querySelector('.boot') || app.querySelector('.boot-error')) {
+      app.removeAttribute('aria-busy');
+      app.innerHTML = `<div class="boot-error" role="alert"><h1>${safe(viewLabels[view])} is unavailable</h1><p>Could not connect to FCAPSule. Your data has not been changed.</p><button type="button" id="retry-view">Retry</button></div>`;
+    }
   } finally { refreshing = false; }
 }
 refresh();
 setInterval(refresh, 4000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+app.addEventListener('click', event => { if (event.target.closest('#retry-view')) refresh(); });
 document.addEventListener('click', event => {
   if (!event.target.closest('.export-menu')) {
     document.querySelector('.export-menu')?.removeAttribute('open');
