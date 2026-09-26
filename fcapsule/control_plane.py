@@ -344,6 +344,38 @@ class ControlPlane:
         """Compatibility alias for persisted Atlas outbox records."""
         return self.retry_estima_publications(limit=limit)
 
+    def collective_withdrawal_status(self, episode_id: str) -> dict[str, Any]:
+        withdrawal = self.store.collective_withdrawal_status(episode_id)
+        available = False
+        try:
+            target = self.store.collective_withdrawal_target(episode_id)
+            config = self._effective_estima_settings()
+            available = (
+                bool(config.get("publish_enabled"))
+                and bool(str(config.get("token") or "").strip())
+                and bool(str(config.get("url") or "").strip())
+                and target["instance_id"] == str(config.get("instance_id") or "")
+            )
+        except ValueError:
+            pass
+        return {"available": available and not (withdrawal and withdrawal.get("status") == "withdrawn"),
+                "withdrawal": withdrawal}
+
+    def request_collective_withdrawal(self, episode_id: str) -> dict[str, Any]:
+        if not self.store.get_episode(episode_id):
+            raise KeyError(f"Unknown episode: {episode_id}")
+        config = self._effective_estima_settings()
+        if self.estima_client("publish") is None:
+            raise ValueError("Enable Collective publishing with a valid publisher credential before withdrawing")
+        with self.estima_publisher._lock:
+            withdrawal = self.store.queue_collective_withdrawal(
+                episode_id, str(config.get("instance_id") or ""),
+            )
+        self.estima_publisher.start()
+        self.estima_publisher.wake()
+        status = self.store.collective_withdrawal_status(episode_id)
+        return {"status": status["status"] if status else "pending", "attempts": status["attempts"] if status else 0}
+
     def _refresh_existing_identities(self) -> None:
         """Backfill retained cases when new target identity fields are introduced."""
 
@@ -1220,6 +1252,8 @@ class ControlPlane:
             "media_evidence": self.evidence.list(episode_id) if episode_id else [],
             "investigation_revisions": self.investigator.revisions(episode_id) if episode_id else [],
             "publication_provenance": self.store.publication_provenance(episode_id) if episode_id else [],
+            "episode_id": episode_id,
+            "collective_withdrawal": self.collective_withdrawal_status(episode_id) if episode_id else None,
             "source_disconnected_reviews": self.investigator.source_disconnected_reviews(episode_id) if episode_id else [],
         }
 

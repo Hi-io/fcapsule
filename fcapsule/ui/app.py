@@ -579,6 +579,19 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
                     return
                 self._json(retry(limit=100), HTTPStatus.ACCEPTED)
                 return
+            if path.startswith("/api/episodes/") and path.endswith("/collective-withdrawal"):
+                episode_id = unquote(path.removeprefix("/api/episodes/").removesuffix("/collective-withdrawal").rstrip("/"))
+                request_withdrawal = getattr(self.server.control_plane, "request_collective_withdrawal", None)
+                if request_withdrawal is None:
+                    self._json({"error": "Collective withdrawal is unavailable in this FCAPSule build"}, HTTPStatus.NOT_IMPLEMENTED)
+                    return
+                try:
+                    self._json(request_withdrawal(episode_id), HTTPStatus.ACCEPTED)
+                except KeyError as exc:
+                    self._json({"error": str(exc)}, HTTPStatus.NOT_FOUND)
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
             if path == "/api/sources/test":
                 result = self.server.control_plane.test_source_connections()
                 self._json(result, HTTPStatus.OK if result.get("ok") else HTTPStatus.SERVICE_UNAVAILABLE)

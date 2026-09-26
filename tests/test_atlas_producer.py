@@ -61,12 +61,19 @@ class CapturingAtlas:
         self.calls = []
         self.error = error
         self.response = response if response is not None else {"created": True}
+        self.withdrawals = []
 
     def create_case(self, payload):
         self.calls.append(payload)
         if self.error:
             raise self.error
         return self.response
+
+    def delete_episode(self, episode_id):
+        self.withdrawals.append(episode_id)
+        if self.error:
+            raise self.error
+        return {}
 
 
 class AtlasProjectionTests(unittest.TestCase):
@@ -210,6 +217,19 @@ class AtlasClientTests(unittest.TestCase):
             EstimaClient("https://atlas.example").search(None, "timeout", 50)
         self.assertEqual(json.loads(open_url.call_args.args[0].data)["limit"], 10)
 
+    def test_delete_episode_accepts_collectives_empty_204_response(self):
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.status = 204
+        response.read.return_value = b""
+        with patch("fcapsule.estima_client.urlopen", return_value=response) as open_url:
+            self.assertEqual(EstimaClient("https://collective.example", "token").delete_episode("ep/a"), {})
+        request = open_url.call_args.args[0]
+        self.assertEqual(request.method, "DELETE")
+        self.assertEqual(request.full_url, "https://collective.example/v1/episodes/ep%2Fa")
+        self.assertEqual(request.get_header("Authorization"), "Bearer token")
+
 
 class AtlasOutboxTests(unittest.TestCase):
     def setUp(self):
@@ -295,6 +315,45 @@ class AtlasOutboxTests(unittest.TestCase):
         self.assertEqual(second["revision"], 2)
         self.assertTrue(second["is_new"])
 
+    def test_publication_identity_migration_backfills_only_exact_payload_episode_ids(self):
+        episode, investigation, retained, app = retained_fixture()
+        payload = project_estima_record("instance-a", episode, investigation, retained, app)
+        self.plane.store.enqueue_atlas_publication(payload, local_episode_id=episode["episode_id"])
+        with self.plane.store._connect() as connection:
+            connection.execute("DROP TABLE atlas_publication_identities")
+        upgraded = type(self.plane.store)(self.plane.store.path)
+        self.assertEqual(upgraded.collective_withdrawal_target(episode["episode_id"]), {
+            "instance_id": "instance-a", "episode_id": payload["episode_id"],
+        })
+
+    def test_withdrawal_cancels_an_unsent_publish_and_duplicate_action_is_idempotent(self):
+        with patch.object(self.plane.atlas_publisher, "start"):
+            self.plane.update_atlas_configuration({
+                "url": "https://collective.example", "token": "publisher-token", "publish_enabled": True,
+            })
+        episode = self.add_retained_episode()
+        payload = project_estima_record(
+            self.plane.atlas_configuration()["instance_id"], episode,
+            self.plane.investigator.read(episode["episode_id"]),
+            self.plane.estima_publisher._retained_episode(episode),
+            self.plane.store.get_application(episode["app_id"]),
+        )
+        self.plane.store.enqueue_atlas_publication(payload, local_episode_id=episode["episode_id"])
+        with self.plane.store._connect() as connection:
+            connection.execute("UPDATE atlas_outbox SET next_attempt_at = '2000-01-01T00:00:00Z'")
+        client = CapturingAtlas()
+        with patch.object(self.plane.atlas_publisher, "start"):
+            self.plane.request_collective_withdrawal(episode["episode_id"])
+            self.plane.request_collective_withdrawal(episode["episode_id"])
+        with self.plane.store._connect() as connection:
+            withdrawal_count = connection.execute("SELECT COUNT(*) FROM atlas_withdrawal_outbox").fetchone()[0]
+            publication = connection.execute("SELECT status FROM atlas_outbox").fetchone()
+        self.assertEqual(withdrawal_count, 1)
+        self.assertEqual(publication["status"], "cancelled")
+        self.plane.process_estima_outbox_once(client=client)
+        self.assertEqual(client.calls, [])
+        self.assertEqual(client.withdrawals, [payload["episode_id"]])
+
     def test_identical_publication_links_local_revisions_without_creating_remote_revision(self):
         episode, investigation, retained, app = retained_fixture()
         payload = project_estima_record("instance-a", episode, investigation, retained, app)
@@ -331,6 +390,42 @@ class AtlasOutboxTests(unittest.TestCase):
         self.assertEqual([item["revision"] for item in provenance], [2, 1])
         self.assertEqual(provenance[0]["investigation_revision_ids"], ["investigation-rev-2"])
         self.assertEqual(provenance[1]["investigation_revision_ids"], ["investigation-rev-1"])
+
+    def test_collective_withdrawal_is_owned_idempotent_retryable_and_local_capsule_stays(self):
+        with patch.object(self.plane.atlas_publisher, "start"):
+            self.plane.update_atlas_configuration({
+                "url": "https://collective.example", "token": "publisher-token", "publish_enabled": True,
+            })
+        episode = self.add_retained_episode()
+        client = CapturingAtlas()
+        self.plane.process_estima_outbox_once(client=client)
+        remote_episode_id = client.calls[0]["episode_id"]
+        with self.plane.store._connect() as connection:
+            connection.execute("DELETE FROM atlas_outbox WHERE local_episode_id = ?", (episode["episode_id"],))
+        self.assertEqual(self.plane.store.collective_withdrawal_target(episode["episode_id"])["episode_id"], remote_episode_id)
+        with self.assertRaisesRegex(ValueError, "does not own"):
+            self.plane.store.queue_collective_withdrawal(episode["episode_id"], "another-instance")
+
+        with patch.object(self.plane.atlas_publisher, "start"):
+            result = self.plane.request_collective_withdrawal(episode["episode_id"])
+        self.assertEqual(result["status"], "pending")
+        local_capsule = Path(self.directory.name) / "state" / "capsules" / "incident-local-id" / "capsule.json"
+        self.assertTrue(local_capsule.is_file())
+
+        client.error = EstimaClientError("Estima returned HTTP 503", 503)
+        self.plane.process_estima_outbox_once(client=client)
+        status = self.plane.store.collective_withdrawal_status(episode["episode_id"])
+        self.assertEqual(status["status"], "pending")
+        self.assertEqual(status["attempts"], 1)
+        with self.plane.store._connect() as connection:
+            connection.execute("UPDATE atlas_withdrawal_outbox SET next_attempt_at = '2000-01-01T00:00:00Z'")
+        client.error = None
+        self.plane.process_estima_outbox_once(client=client)
+        self.assertEqual(client.withdrawals, [remote_episode_id, remote_episode_id])
+        self.assertEqual(self.plane.store.collective_withdrawal_status(episode["episode_id"])["status"], "withdrawn")
+        self.assertTrue(local_capsule.is_file())
+        self.assertEqual(self.plane.incident_report_payload("incident-local-id")["collective_withdrawal"]["withdrawal"]["status"], "withdrawn")
+        self.assertEqual(len(client.calls), 1)
 
     def test_publication_revision_links_are_bounded_and_mark_truncation(self):
         episode, investigation, retained, app = retained_fixture()
