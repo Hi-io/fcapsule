@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import shutil
@@ -341,6 +342,133 @@ class ControlPlaneTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=5)
 
+    def test_console_auth_blocks_unauthorized_source_actions_and_rejects_hostile_origins(self):
+        environment = {
+            "FCAPSULE_CONSOLE_USERNAME": "operator",
+            "FCAPSULE_CONSOLE_PASSWORD": "test-password",
+            "FCAPSULE_CONSOLE_AUTH_REQUIRED": "true",
+            "FCAPSULE_LIVE_ENABLED": "false",
+            "FCAPSULE_PROMETHEUS_URL": "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090",
+            "FCAPSULE_OPENSEARCH_URL": "http://opensearch.logging.svc.cluster.local:9200",
+            "FCAPSULE_SOURCE_ALLOWED_ORIGINS": "http://prometheus:9090,http://opensearch:9200",
+        }
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, environment):
+            server = create_app_server("127.0.0.1", 0, Path(directory) / "state")
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_port}"
+                headers = {
+                    "Authorization": "Basic " + base64.b64encode(b"operator:test-password").decode("ascii"),
+                    "Content-Type": "application/json",
+                }
+
+                before = server.control_plane.source_configuration()
+                unauthenticated_update = Request(
+                    f"{base}/api/settings/sources",
+                    data=json.dumps({"cluster_name": "attacker"}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with self.assertRaises(HTTPError) as denied_update:
+                    urlopen(unauthenticated_update, timeout=3)
+                self.assertEqual(denied_update.exception.code, 401)
+                self.assertEqual(server.control_plane.source_configuration()["cluster_name"], before["cluster_name"])
+
+                csrf_update = Request(
+                    f"{base}/api/settings/sources",
+                    data=json.dumps({"cluster_name": "cross-origin"}).encode("utf-8"),
+                    headers={**headers, "Origin": "https://attacker.example"},
+                    method="POST",
+                )
+                with self.assertRaises(HTTPError) as denied_csrf:
+                    urlopen(csrf_update, timeout=3)
+                self.assertEqual(denied_csrf.exception.code, 403)
+                self.assertEqual(server.control_plane.source_configuration()["cluster_name"], before["cluster_name"])
+
+                with patch.object(server.control_plane, "test_source_connections", return_value={"ok": True, "targets": {}}) as probe:
+                    with self.assertRaises(HTTPError) as denied_probe:
+                        urlopen(Request(f"{base}/api/sources/test", data=b"", method="POST"), timeout=3)
+                    self.assertEqual(denied_probe.exception.code, 401)
+                    probe.assert_not_called()
+
+                    health = urlopen(f"{base}/healthz", timeout=3)
+                    self.assertEqual(json.loads(health.read())["status"], "ok")
+
+                    remote_http = Request(
+                        f"{base}/api/state",
+                        headers={**headers, "X-Forwarded-For": "198.51.100.20", "X-Forwarded-Proto": "http"},
+                    )
+                    with self.assertRaises(HTTPError) as insecure_proxy:
+                        urlopen(remote_http, timeout=3)
+                    self.assertEqual(insecure_proxy.exception.code, 403)
+                    remote_https = Request(
+                        f"{base}/api/state",
+                        headers={**headers, "X-Forwarded-For": "198.51.100.20", "X-Forwarded-Proto": "https"},
+                    )
+                    with urlopen(remote_https, timeout=3) as response:
+                        self.assertIn("overview", json.loads(response.read()))
+
+                    payload = {
+                        "prometheus_url": before["prometheus_url"],
+                        "opensearch_url": before["opensearch_url"],
+                        "kubernetes_url": "",
+                        "cluster_name": "authorized-cluster",
+                        "namespaces": ["default"],
+                    }
+                    request = Request(
+                        f"{base}/api/settings/sources",
+                        data=json.dumps(payload).encode("utf-8"),
+                        headers=headers,
+                        method="POST",
+                    )
+                    with urlopen(request, timeout=3) as response:
+                        saved = json.loads(response.read())
+                    self.assertEqual(saved["cluster_name"], "authorized-cluster")
+
+                    with urlopen(Request(f"{base}/api/sources/test", data=b"", headers=headers, method="POST"), timeout=3) as response:
+                        self.assertTrue(json.loads(response.read())["ok"])
+                    probe.assert_called_once_with()
+
+                hostile = {**payload, "prometheus_url": "http://169.254.169.254:80"}
+                hostile_request = Request(
+                    f"{base}/api/settings/sources",
+                    data=json.dumps(hostile).encode("utf-8"),
+                    headers=headers,
+                    method="POST",
+                )
+                with self.assertRaises(HTTPError) as blocked_target:
+                    urlopen(hostile_request, timeout=3)
+                self.assertEqual(blocked_target.exception.code, 400)
+                self.assertEqual(server.control_plane.source_configuration()["cluster_name"], "authorized-cluster")
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_console_auth_required_fails_closed_when_secret_is_missing(self):
+        environment = {
+            "FCAPSULE_CONSOLE_USERNAME": "",
+            "FCAPSULE_CONSOLE_PASSWORD": "",
+            "FCAPSULE_CONSOLE_AUTH_REQUIRED": "true",
+            "FCAPSULE_LIVE_ENABLED": "false",
+        }
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, environment):
+            server = create_app_server("127.0.0.1", 0, Path(directory) / "state")
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_port}"
+                with self.assertRaises(HTTPError) as denied:
+                    urlopen(f"{base}/console", timeout=3)
+                self.assertEqual(denied.exception.code, 401)
+                with urlopen(f"{base}/healthz", timeout=3) as response:
+                    self.assertEqual(json.loads(response.read())["status"], "ok")
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
     def test_source_sync_builds_every_new_incident_report(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
             control_plane = ControlPlane(Path(directory) / "state")
@@ -414,7 +542,15 @@ class ControlPlaneTests(unittest.TestCase):
             self.assertEqual(restored["phases"]["capsule"]["status"], "done")
 
     def test_http_app_exposes_operations_settings_and_state_api(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "DEEPSEEK_API_KEY": "",
+            "FCAPSULE_CONSOLE_USERNAME": "",
+            "FCAPSULE_CONSOLE_PASSWORD": "",
+            "FCAPSULE_CONSOLE_AUTH_REQUIRED": "false",
+            "FCAPSULE_PROMETHEUS_URL": "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090",
+            "FCAPSULE_OPENSEARCH_URL": "http://opensearch.logging.svc.cluster.local:9200",
+            "FCAPSULE_SOURCE_ALLOWED_ORIGINS": "http://prometheus:9090,http://opensearch:9200",
+        }):
             server = create_app_server("127.0.0.1", 0, Path(directory) / "state")
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()

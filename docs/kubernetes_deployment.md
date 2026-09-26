@@ -54,7 +54,7 @@ kubectl apply -f deploy/kubernetes/fcapsule.yaml
 kubectl rollout status deployment/fcapsule -n fcapsule
 ```
 
-The default UI is exposed at `http://<node-ip>:30765`. Change the Service to ClusterIP plus an authenticated Ingress for a shared environment.
+The application Service is ClusterIP-only. The included Caddy HTTPS sidecar is the remote entry point on `https://<node-ip>:30767`; otherwise, use a localhost port-forward. The console requires the separate `fcapsule-console-auth` Secret described below. Create it before applying the manifest so the first rollout is immediately usable.
 
 ## Development Overlay
 
@@ -113,7 +113,9 @@ The base ConfigMap defines:
 - `FCAPSULE_INCIDENT_WINDOW_MINUTES`;
 - `FCAPSULE_AUTO_BUILD_REPORTS`.
 
-The same non-secret values can be changed in **Targets**. UI changes persist on the state volume and override environment defaults after first save. Leaving Kubernetes API URL blank uses the mounted ServiceAccount token and cluster CA.
+The same non-secret values can be changed in **Targets**. UI changes persist on the state volume and override environment defaults after first save. Leaving Kubernetes API URL blank uses the mounted ServiceAccount token and cluster CA. Before upgrading an existing state volume, compare saved Target URLs with the deployment origins and allowlist any intentional custom origins; unsupported saved origins fail closed during source checks until configured. Saving a URL from an untrusted origin reports the required `FCAPSULE_SOURCE_ALLOWED_ORIGINS` setting in the UI.
+
+Configured source URLs are pinned to the origins supplied by their corresponding `FCAPSULE_*_URL` environment values. To use a different Prometheus, OpenSearch, or Kubernetes API origin, add its exact origin (scheme, host, and port) to the comma-separated `FCAPSULE_SOURCE_ALLOWED_ORIGINS` ConfigMap value and restart FCAPSule. Kubernetes API URLs must use HTTPS. The mounted ServiceAccount token is sent only to a trusted Kubernetes origin. Never add an origin that you do not control.
 
 **Additional resource IDs** in Targets map an alert label to a Kubernetes pod label. The default mappings are `cnfc -> cnfc` and `vnfc -> vnfc`; edit the pod label if the cluster uses a qualified key such as `telecom.example.com/cnfc`. A pod-named alert resolves that exact pod first. Otherwise, configured IDs narrow the Kubernetes inventory (multiple IDs intersect); a matching CNFC can capture several replicas in one bounded incident. Workload and Service scope remain available when no configured ID is present. A namespace-free ID is accepted only if all matches are in one namespace. Missing or ambiguous matches appear as unmapped alerts in Targets, not as guessed incidents. At most four matching pods have per-pod metrics, logs and configuration captured; the retained case records the full match count and any omitted pods.
 
@@ -122,6 +124,41 @@ Grafana is an **optional alert input**, not a telemetry store. Set `FCAPSULE_GRA
 Grafana-managed rules are not necessarily available through Prometheus `/api/v1/rules`, so rule-expression evidence may be unavailable for those alerts even when pod metrics are captured. Avoid routing the same rule from both Prometheus polling and Grafana unless two separate source records are desired.
 
 OpenSearch Basic authentication can be supplied through `OPENSEARCH_USERNAME` and `OPENSEARCH_PASSWORD`. Do not place credentials in the ConfigMap.
+
+## Console Authentication
+
+The app requires Basic authentication in Kubernetes. Create a dedicated Secret before rolling out the updated manifest; this avoids changing or replacing the existing `fcapsule-secrets` model/source credentials. Enter the password at the prompt so it is not written in shell history or printed in the command output:
+
+```bash
+umask 077
+auth_file="$(mktemp)"
+trap 'rm -f "$auth_file"' EXIT
+read -r -p "Console username: " console_user
+read -r -s -p "Console password: " console_password
+printf '\n'
+printf 'FCAPSULE_CONSOLE_USERNAME=%s\nFCAPSULE_CONSOLE_PASSWORD=%s\n' "$console_user" "$console_password" > "$auth_file"
+unset console_password
+kubectl -n fcapsule create secret generic fcapsule-console-auth \
+  --from-env-file="$auth_file" --dry-run=client -o yaml | kubectl apply -f -
+```
+
+For a remote browser, configure the TLS Caddy endpoint first and visit
+`https://<certificate-host-or-ip>:30767/console`; the browser displays its normal
+username/password prompt. The backend `fcapsule` Service is ClusterIP-only, so
+port 30765 is no longer reachable through a node IP. `/healthz` remains public
+for Kubernetes probes. A local development server with no console credentials
+continues to allow loopback access only.
+
+The included Caddy sidecar shares the app pod's loopback network and sets the
+forwarded HTTPS scheme itself. If another reverse proxy runs in a different pod,
+set `FCAPSULE_CONSOLE_TRUSTED_PROXY_CIDRS` to only that proxy's source CIDR; the
+app rejects forwarded HTTPS headers from other peers.
+
+On an existing cluster, keep the HTTPS sidecar available while applying the new
+manifest. Provision the auth Secret first, confirm the HTTPS endpoint is healthy,
+then apply `deploy/kubernetes/fcapsule.yaml` and wait for the rollout. The main
+Service becoming ClusterIP removes the plaintext LAN entry point; it does not
+modify the persistent state volume or the existing `fcapsule-secrets` Secret.
 
 ## Model Credential
 
@@ -163,9 +200,10 @@ An incident ID is derived from alert name, start time, namespace, and pod. Repea
 ```bash
 kubectl get pods,pvc,svc -n fcapsule
 kubectl logs deployment/fcapsule -n fcapsule -c fcapsule
-curl http://<node-ip>:30765/healthz
-curl http://<node-ip>:30765/api/state
+curl --cacert /path/to/trusted-root.crt https://<certificate-host-or-ip>:30767/healthz
 ```
+
+Use the browser login to inspect `/api/state`; it contains operational data and is authenticated like the rest of the console.
 
 In **Targets**, all three targets should be healthy. **Application coverage** should show each currently discovered workload, its pods, and FM/PM/LOG/CFG status. A removed workload disappears from current coverage after the next sync while its incident history remains available in Operations.
 
@@ -176,12 +214,12 @@ Alternatively, use a localhost port-forward. The browser requires a secure conte
 and normal microphone permission in addition to a validated audio model.
 
 - one replica, SQLite, and in-process background threads;
-- no UI authentication or authorization;
-- TLS termination is optional through a separate reverse proxy, not native to the application;
+- one shared Basic-auth account is configured through a Kubernetes Secret; per-user roles are not implemented;
+- TLS terminates at the optional Caddy reverse proxy, not in the application;
 - no durable job queue or distributed locking;
 - OpenSearch mapping currently targets Filebeat Kubernetes fields;
 - Prometheus queries assume kube-state-metrics and container metrics;
 - trace backends are not yet connected;
-- the NodePort and hostPath manifests are development defaults.
+- the hostPath manifest is a single-node development default.
 
 Use a single replica until metadata and jobs move to shared transactional services. Do not expose the current UI directly to an untrusted network.
