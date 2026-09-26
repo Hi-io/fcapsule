@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,12 @@ def _environment_limit(name: str, default: int, minimum: int, maximum: int) -> i
 
 MAX_CASE_INPUT_BYTES = _environment_limit("FCAPSULE_CASE_MAX_INPUT_BYTES", 16 * 1024 * 1024, 1024 * 1024, 64 * 1024 * 1024)
 MAX_CASE_CACHE_INPUT_BYTES = 2 * 1024 * 1024
+_CASE_ID = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}\Z")
+_WINDOWS_RESERVED_CASE_IDS = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{number}" for number in range(1, 10)),
+    *(f"LPT{number}" for number in range(1, 10)),
+}
 _CASE_CACHE_LOCK = threading.RLock()
 _CASE_CACHE: tuple[Path, tuple[tuple[str, int, int], ...], CaseBundle] | None = None
 
@@ -75,6 +82,15 @@ def _validate_metadata(raw: Any) -> dict[str, Any]:
     for field in ("case_id", "case_title", "service", "cluster", "namespace", "window"):
         if field not in metadata:
             raise CaseValidationError(f"metadata.{field} is required")
+    case_id = metadata["case_id"]
+    reserved_name = isinstance(case_id, str) and case_id.split(".", 1)[0].upper() in _WINDOWS_RESERVED_CASE_IDS
+    if (
+        not isinstance(case_id, str)
+        or not _CASE_ID.fullmatch(case_id)
+        or case_id.endswith(".")
+        or reserved_name
+    ):
+        raise CaseValidationError("metadata.case_id must be a 1-128 character filesystem-safe identifier")
     window = require_mapping(metadata["window"], "metadata.window")
     start = parse_timestamp(window.get("start"), "metadata.window.start")
     end = parse_timestamp(window.get("end"), "metadata.window.end")
