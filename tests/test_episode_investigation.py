@@ -77,7 +77,7 @@ class InvestigationEngineTests(unittest.TestCase):
             "recurrence do not prove a shared cause",
             "missing samples are unknown, not healthy or zero",
             "image observation/upload times distinct",
-            "Later data supports an earlier cause only if it shows the mechanism existed then",
+            "Later-only observations cannot establish an earlier failure's cause",
             "alert_rule_logic",
             "arbitrary PromQL",
             "dependency checks require a declared Service",
