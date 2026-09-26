@@ -1183,6 +1183,7 @@ class ControlPlane:
             "investigation": self.investigator.for_incident(incident_id),
             "media_evidence": self.evidence.list(episode_id) if episode_id else [],
             "investigation_revisions": self.investigator.revisions(episode_id) if episode_id else [],
+            "publication_provenance": self.store.publication_provenance(episode_id) if episode_id else [],
             "source_disconnected_reviews": self.investigator.source_disconnected_reviews(episode_id) if episode_id else [],
         }
 

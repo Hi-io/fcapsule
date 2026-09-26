@@ -192,6 +192,38 @@ retrieval and empty states are distinct, with refresh/retry controls.
    Estima outage. Confirm local capture, local history and investigation still
    work and that missing shared context is labeled accurately.
 
+### Publication provenance
+
+Incident report data includes a bounded `publication_provenance` list for
+outbox records linked to that local episode. Each entry ties the minimized
+Collective revision to up to 32 local investigation revision IDs, delivery
+state, attempt count and timestamps. `investigation_revision_links_truncated`
+marks entries whose older revision links exceed that bound. Local episode and
+investigation revision IDs are kept in FCAPSule's SQLite state; they are not
+added to the Collective request.
+The report does not expose the queued payload, service credential, or raw
+exception text. A validated remote case ID is retained only when the successful
+response provides one.
+
+Delivery `status` values are `queued` (durably waiting, no failure yet),
+`retry_scheduled` (a transient failure is waiting for backoff),
+`attention_required` (a permanent failure is quarantined), and `published`
+(the service returned a successful response). `receipt_status` distinguishes
+`not_yet_confirmed`, `remote_id_recorded`, `remote_id_not_returned`, and
+`legacy_receipt_unknown`. A successful response without a recognizable case ID
+is still `published`; it is not proof that the remote case is absent. A repeated
+identical projection keeps its Collective revision and accumulates local
+investigation revision links; a changed projection receives a new revision.
+Retries reuse the same outbox projection and revision, matching the remote
+idempotency key.
+
+Older outbox rows are retained during schema migration. They have no recoverable
+local episode link or response receipt, so `local_episode_link_status` and the
+receipt remain explicitly unknown rather than being guessed. An empty incident-level list
+means no linked delivery receipt is available; it does not prove that no remote
+record exists. Deleting a local incident also does not delete a published
+Collective case.
+
 ## Evaluation and Limits
 
 Evaluate relevance and false matches on a fixed, reviewed dataset with negative
