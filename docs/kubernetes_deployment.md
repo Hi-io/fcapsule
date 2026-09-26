@@ -58,7 +58,18 @@ The application Service is ClusterIP-only. For remote HTTPS access, add the opti
 
 ## Development Overlay
 
-`deploy/kubernetes/dev-overlay.yaml` uses a `python:3.12-slim` init container to install source into an `emptyDir`; the application container runs that source with the same non-root security policy as the base Deployment. The checked-in overlay currently points at mutable `master.zip`, so applying it unchanged is not reproducible. The tested source revision is `003d3876f1e1f708664bfb7fa7070007f7a57067`. Pin the archive URL to that commit before applying the overlay:
+`deploy/kubernetes/dev-overlay.yaml` uses the `install-source` init container with
+`python:3.12-slim` to install source into an `emptyDir`; the application container
+runs that source with the same non-root security policy as the base Deployment.
+The checked-in overlay points at mutable `master.zip`, so applying it unchanged
+is not reproducible. The tested source revision is
+`003d3876f1e1f708664bfb7fa7070007f7a57067`. The current live Deployment also
+uses the `install-source` init-container name and pins its GitHub archive URL
+to that SHA. Do not apply the checked-in overlay unchanged to the live
+Deployment: strategic merge matches by name, so it would replace the pinned URL
+with mutable `master.zip`. Inspect the live template and preserve or update its
+existing source URL as described below. Pin the overlay URL before applying it
+to a fresh/base Deployment as well:
 
 ```bash
 source_sha=003d3876f1e1f708664bfb7fa7070007f7a57067
@@ -77,21 +88,45 @@ kubectl patch deployment fcapsule \
 kubectl rollout status deployment/fcapsule -n fcapsule
 ```
 
-The patch changes the pod template and starts a rollout. Verify the deployed
-init-container source URL and both images from the Deployment template:
+This overlay patch is for a fresh/base Deployment that does not already have a
+source installer. It changes the pod template and starts a rollout. Inspect the
+live init-container names, images, commands, and app image before changing an
+existing Deployment:
 
 ```bash
 kubectl -n fcapsule get deployment fcapsule -o jsonpath='{range .spec.template.spec.initContainers[*]}init={.name}{" image="}{.image}{" command="}{.command}{"\n"}{end}{range .spec.template.spec.containers[*]}app={.name}{" image="}{.image}{"\n"}{end}'
 ```
 
-The tested development profile uses `python:3.12-slim` for the source installer
-and application container, with the init-container URL ending in the pinned
-SHA above. A plain `kubectl rollout restart` recreates pods from the existing
-template; it does not advance a pinned source revision. To roll back, use the
-known-good revision recorded by `rollout history` before applying the patch:
+For an existing Deployment, copy the exact current URL from the inspection
+output and the source init container's zero-based `initContainers` array index.
+The guarded JSON Patch below verifies the name, image, and current URL before
+replacing only command element 7. Do not reuse an index or current URL from a
+different Deployment layout.
 
 ```bash
-kubectl rollout undo deployment/fcapsule -n fcapsule --to-revision=<known-good-revision>
+source_sha=003d3876f1e1f708664bfb7fa7070007f7a57067
+source_archive="https://github.com/Hi-io/fcapsule/archive/${source_sha}.zip"
+init_index=observed-index # replace with the inspected numeric array index
+current_archive='<copy-exact-current-archive-url-from-inspection>'
+kubectl rollout history deployment/fcapsule -n fcapsule
+patch="[\
+{\"op\":\"test\",\"path\":\"/spec/template/spec/initContainers/${init_index}/name\",\"value\":\"install-source\"},\
+{\"op\":\"test\",\"path\":\"/spec/template/spec/initContainers/${init_index}/image\",\"value\":\"python:3.12-slim\"},\
+{\"op\":\"test\",\"path\":\"/spec/template/spec/initContainers/${init_index}/command/7\",\"value\":\"${current_archive}\"},\
+{\"op\":\"replace\",\"path\":\"/spec/template/spec/initContainers/${init_index}/command/7\",\"value\":\"${source_archive}\"}]"
+kubectl patch deployment fcapsule -n fcapsule --type=json --patch "$patch"
+kubectl rollout status deployment/fcapsule -n fcapsule
+```
+
+The tested live profile uses `python:3.12-slim` for the source installer and
+application container, with the init-container URL ending in the pinned SHA
+above. A plain `kubectl rollout restart` recreates pods from the existing
+template; it does not advance a pinned source revision. To roll back, use the
+known-good revision recorded by `rollout history` before changing the template:
+
+```bash
+known_good_revision=your-known-good-revision # replace with the recorded numeric revision
+kubectl rollout undo deployment/fcapsule -n fcapsule --to-revision="$known_good_revision"
 kubectl rollout status deployment/fcapsule -n fcapsule
 ```
 
@@ -119,7 +154,10 @@ during a presentation-only check.
 After verification, merge the tested branch (through a reviewed pull request or a
 local merge). From a checkout at that exact merged commit, pin and apply the
 development overlay to that commit; a restart by itself would keep the existing
-source pin:
+source pin. First confirm the live init-container name and image using the
+inspection command above. If the source installer is not named `install-source`,
+use the guarded JSON Patch procedure above with the observed name and array index
+instead of applying this overlay:
 
 ```bash
 source_sha="$(git rev-parse HEAD)"
