@@ -83,9 +83,10 @@ python -m fcapsule.cli status
 python -m fcapsule.cli ingest-case --case /path/to/normalized-case --app-id payments-api --app-name "Payments API"
 python -m fcapsule.cli investigate --case /path/to/normalized-case --out ./.fcapsule/capsules/example
 python -m fcapsule.cli import-archive --archive /path/to/fcapsule_incident-123.zip --state-dir ./.fcapsule
+python -m fcapsule.cli repack-legacy-archive --archive /path/to/legacy.zip --out /path/to/repacked.zip --accept-unverified-origin
 ```
 
-See [importing a retained capsule archive](docs/capsule_archive_import.md) for its trust, retention and read-only boundaries.
+See [importing a retained capsule archive](docs/capsule_archive_import.md) for its trust, retention, legacy repack and read-only boundaries.
 
 Offline comparison uses the same capsule input for each selected model. It is useful for testing provider choice, latency, token use and answer quality without turning the operator console into a benchmark:
 

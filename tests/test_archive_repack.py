@@ -114,8 +114,13 @@ class LegacyArchiveRepackTests(unittest.TestCase):
             root = Path(directory)
             legacy = self._legacy_archive(root)
             output = root / "repacked.zip"
+            with ZipFile(legacy) as archive:
+                expanded_bytes = sum(info.file_size for info in archive.infolist())
+            self.assertLess(legacy.stat().st_size, expanded_bytes)
             with self.assertRaisesRegex(ValueError, "repack limit"):
-                repack_legacy_archive(legacy, output, accept_unverified_origin=True, max_bytes=1)
+                repack_legacy_archive(
+                    legacy, output, accept_unverified_origin=True, max_bytes=expanded_bytes - 1,
+                )
             self.assertFalse(output.exists())
 
             output.write_bytes(b"keep")

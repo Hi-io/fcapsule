@@ -8,8 +8,9 @@ import re
 import shutil
 import stat
 import tempfile
+import zlib
 from pathlib import Path
-from zipfile import BadZipFile, ZipFile
+from zipfile import ZIP_DEFLATED, ZIP_STORED, BadZipFile, ZipFile
 
 from fcapsule.io.archive_writer import ARCHIVE_FILES, MANIFEST_NAME, create_archive, verify_archive
 
@@ -20,12 +21,16 @@ LEGACY_REPACK_WARNING = (
 )
 _REQUIRED_IMPORT_FILES = {"capsule.json", "evidence.json", "incident_report.json"}
 _OMIT_ON_REPACK = {"dashboard.html"}
+_JSON_FILE_LIMITS = {"capsule.json": 8 * 1024 * 1024, "incident_report.json": 2 * 1024 * 1024}
 
 
 def _validate_import_files(directory: Path) -> None:
     missing = [name for name in sorted(_REQUIRED_IMPORT_FILES) if not (directory / name).is_file()]
     if missing:
         raise ValueError("Legacy archive is missing import files: " + ", ".join(missing))
+    for name, limit in _JSON_FILE_LIMITS.items():
+        if (directory / name).stat().st_size > limit:
+            raise ValueError(f"Legacy archive {name} exceeds the validation limit of {limit} bytes")
     try:
         capsule = json.loads((directory / "capsule.json").read_text(encoding="utf-8"))
         report = json.loads((directory / "incident_report.json").read_text(encoding="utf-8"))
@@ -91,6 +96,8 @@ def repack_legacy_archive(
                     raise ValueError(f"Legacy archive contains an unsupported path: {name}")
                 if info.flag_bits & 0x1:
                     raise ValueError(f"Legacy archive contains an encrypted file: {name}")
+                if info.compress_type not in {ZIP_STORED, ZIP_DEFLATED}:
+                    raise ValueError(f"Legacy archive uses an unsupported compression method: {name}")
                 if type(info.file_size) is not int or info.file_size < 0:
                     raise ValueError(f"Legacy archive has an invalid size for {name}")
                 total_declared += info.file_size
@@ -132,6 +139,6 @@ def repack_legacy_archive(
                     if created_output:
                         output.unlink(missing_ok=True)
                     raise
-    except BadZipFile as exc:
+    except (BadZipFile, EOFError, zlib.error) as exc:
         raise ValueError("Legacy capsule archive is not a valid ZIP file") from exc
     return output
