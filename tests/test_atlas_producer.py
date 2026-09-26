@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +11,7 @@ from unittest.mock import Mock, patch
 from fcapsule.estima_client import EstimaClient, EstimaClientError, estima_client_from_env, estima_settings_from_env, validate_estima_url
 from fcapsule.estima_projection import project_estima_record
 from fcapsule.control_plane import ControlPlane
+from fcapsule.store import FCAPSuleStore
 
 
 STAMP = "2026-09-26T03:00:00Z"
@@ -55,15 +57,16 @@ def retained_fixture(pod: str = "queue-7", category: str = "scrape_health"):
 
 
 class CapturingAtlas:
-    def __init__(self, error: Exception | None = None):
+    def __init__(self, error: Exception | None = None, response: dict | None = None):
         self.calls = []
         self.error = error
+        self.response = response if response is not None else {"created": True}
 
     def create_case(self, payload):
+        self.calls.append(payload)
         if self.error:
             raise self.error
-        self.calls.append(payload)
-        return {"created": True}
+        return self.response
 
 
 class AtlasProjectionTests(unittest.TestCase):
@@ -238,7 +241,8 @@ class AtlasOutboxTests(unittest.TestCase):
                               "runtime_seconds": 1})
         state_path = self.plane.investigator.path(episode["episode_id"])
         state_path.parent.mkdir(parents=True, exist_ok=True)
-        state_path.write_text(json.dumps({"episode_id": episode["episode_id"], "status": "ready",
+        state_path.write_text(json.dumps({"episode_id": episode["episode_id"], "revision_id": "investigation-revision-local",
+                                          "status": "ready",
                                           "finished_at": STAMP, "assessment": {"likely_mechanism": "The queue may be saturated.",
                                           "evidence_ids": ["Q001"]},
                                           "findings": [{"category": "queue_saturation", "evidence_ids": ["Q001"]}]}),
@@ -291,6 +295,121 @@ class AtlasOutboxTests(unittest.TestCase):
         self.assertEqual(second["revision"], 2)
         self.assertTrue(second["is_new"])
 
+    def test_identical_publication_links_local_revisions_without_creating_remote_revision(self):
+        episode, investigation, retained, app = retained_fixture()
+        payload = project_estima_record("instance-a", episode, investigation, retained, app)
+        first = self.plane.store.enqueue_atlas_publication(
+            payload, local_episode_id=episode["episode_id"], investigation_revision_id="investigation-rev-1",
+        )
+        duplicate = self.plane.store.enqueue_atlas_publication(
+            payload, local_episode_id=episode["episode_id"], investigation_revision_id="investigation-rev-2",
+        )
+        self.assertEqual(first["revision"], duplicate["revision"])
+        self.assertFalse(duplicate["is_new"])
+        provenance = self.plane.store.publication_provenance(episode["episode_id"])
+        self.assertEqual(provenance[0]["status"], "queued")
+        self.assertEqual(provenance[0]["local_episode_link_status"], "linked")
+        self.assertEqual(provenance[0]["receipt_status"], "not_yet_confirmed")
+        self.assertEqual(provenance[0]["investigation_revision_ids"], [
+            "investigation-rev-1", "investigation-rev-2",
+        ])
+        self.assertNotIn("payload", provenance[0])
+
+    def test_changed_publication_links_new_remote_revision_to_new_investigation_revision(self):
+        episode, investigation, retained, app = retained_fixture()
+        payload = project_estima_record("instance-a", episode, investigation, retained, app)
+        first = self.plane.store.enqueue_atlas_publication(
+            payload, local_episode_id=episode["episode_id"], investigation_revision_id="investigation-rev-1",
+        )
+        changed = {**payload, "summary": payload["summary"] + " Updated observation."}
+        second = self.plane.store.enqueue_atlas_publication(
+            changed, local_episode_id=episode["episode_id"], investigation_revision_id="investigation-rev-2",
+        )
+        self.assertEqual(first["revision"], 1)
+        self.assertEqual(second["revision"], 2)
+        provenance = self.plane.store.publication_provenance(episode["episode_id"])
+        self.assertEqual([item["revision"] for item in provenance], [2, 1])
+        self.assertEqual(provenance[0]["investigation_revision_ids"], ["investigation-rev-2"])
+        self.assertEqual(provenance[1]["investigation_revision_ids"], ["investigation-rev-1"])
+
+    def test_publication_revision_links_are_bounded_and_mark_truncation(self):
+        episode, investigation, retained, app = retained_fixture()
+        payload = project_estima_record("instance-a", episode, investigation, retained, app)
+        for revision in range(40):
+            self.plane.store.enqueue_atlas_publication(
+                payload, local_episode_id=episode["episode_id"],
+                investigation_revision_id=f"investigation-rev-{revision}",
+            )
+        provenance = self.plane.store.publication_provenance(episode["episode_id"])[0]
+        self.assertEqual(len(provenance["investigation_revision_ids"]), 32)
+        self.assertEqual(provenance["investigation_revision_ids"][0], "investigation-rev-8")
+        self.assertEqual(provenance["investigation_revision_ids"][-1], "investigation-rev-39")
+        self.assertTrue(provenance["investigation_revision_links_truncated"])
+
+    def test_successful_publish_without_case_id_is_not_presented_as_a_remote_receipt(self):
+        with patch.object(self.plane.atlas_publisher, "start"):
+            self.plane.update_atlas_configuration({
+                "url": "https://collective.example", "token": "supersecret",
+                "instance_id": "producer-a", "publish_enabled": True,
+            })
+        episode = self.add_retained_episode()
+        client = CapturingAtlas(response={"case_id": "supersecret"})
+        result = self.plane.process_estima_outbox_once(client=client)
+        self.assertEqual(result["sent"], 1)
+        self.assertNotEqual(client.calls[0]["episode_id"], episode["episode_id"])
+        self.assertNotIn(episode["episode_id"], json.dumps(client.calls[0]))
+        self.assertNotIn("local_episode_id", client.calls[0])
+        self.assertNotIn("investigation_revision_id", client.calls[0])
+        provenance = self.plane.store.publication_provenance(episode["episode_id"])
+        self.assertEqual(provenance[0]["status"], "published")
+        self.assertEqual(provenance[0]["receipt_status"], "remote_id_not_returned")
+        self.assertIsNone(provenance[0]["remote_case_id"])
+        self.assertNotIn("supersecret", json.dumps(provenance))
+        report = self.plane.incident_report_payload("incident-local-id")
+        self.assertEqual(report["publication_provenance"], provenance)
+
+    def test_retry_receipt_survives_store_reopen_and_idempotent_redelivery(self):
+        with patch.object(self.plane.atlas_publisher, "start"):
+            self.plane.update_atlas_configuration({
+                "url": "https://collective.example", "instance_id": "producer-a", "publish_enabled": True,
+            })
+        episode = self.add_retained_episode()
+        unavailable = CapturingAtlas(EstimaClientError(
+            "Estima request unavailable (TimeoutError) Authorization: Bearer supersecret",
+        ))
+        failed = self.plane.process_estima_outbox_once(client=unavailable)
+        self.assertEqual(failed["retried"], 1)
+        reopened = type(self.plane.store)(self.plane.store.path)
+        retry = reopened.publication_provenance(episode["episode_id"])[0]
+        self.assertEqual(retry["status"], "retry_scheduled")
+        self.assertEqual(retry["attempts"], 1)
+        self.assertEqual(retry["receipt_status"], "not_yet_confirmed")
+        self.assertEqual(retry["last_error"], "Collective is unavailable; delivery will retry.")
+        self.assertNotIn("supersecret", json.dumps(retry))
+        report = self.plane.incident_report_payload("incident-local-id")
+        self.assertEqual(report["investigation"]["status"], "ready")
+        self.assertEqual(report["publication_provenance"][0]["status"], "retry_scheduled")
+        with reopened._connect() as connection:
+            row = connection.execute(
+                "SELECT outbox_id FROM atlas_outbox WHERE local_episode_id = ?",
+                (episode["episode_id"],),
+            ).fetchone()
+        with reopened._connect() as connection:
+            connection.execute(
+                "UPDATE atlas_outbox SET next_attempt_at = '2000-01-01T00:00:00Z' WHERE outbox_id = ?",
+                (row["outbox_id"],),
+            )
+        delivered = CapturingAtlas(response={"case": {"case_id": "collective-case-9"}})
+        result = self.plane.process_estima_outbox_once(client=delivered)
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual(delivered.calls[0]["revision"], unavailable.calls[0]["revision"])
+        self.assertEqual(delivered.calls[0], unavailable.calls[0])
+        self.assertNotIn(episode["episode_id"], json.dumps(delivered.calls[0]))
+        receipt = reopened.publication_provenance(episode["episode_id"])[0]
+        self.assertEqual(receipt["status"], "published")
+        self.assertEqual(receipt["receipt_status"], "remote_id_recorded")
+        self.assertEqual(receipt["remote_case_id"], "collective-case-9")
+
     def test_pre_ledger_upgrade_uses_global_outbox_high_water(self):
         episode, investigation, retained, app = retained_fixture()
         payload = project_estima_record("instance-a", episode, investigation, retained, app)
@@ -300,6 +419,54 @@ class AtlasOutboxTests(unittest.TestCase):
             connection.execute("DELETE FROM atlas_publication_heads")
         changed = {**payload, "summary": payload["summary"] + " New fact."}
         self.assertGreater(self.plane.store.enqueue_atlas_publication(changed)["revision"], first["revision"])
+
+    def test_legacy_outbox_migration_keeps_rows_with_explicit_unknown_local_link(self):
+        state_dir = Path(self.directory.name) / "legacy-outbox"
+        state_dir.mkdir()
+        database_path = state_dir / "fcapsule.db"
+        with sqlite3.connect(database_path) as connection:
+            connection.execute(
+                """
+                CREATE TABLE atlas_outbox (
+                    outbox_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    instance_id TEXT NOT NULL,
+                    episode_id TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    fingerprint TEXT NOT NULL,
+                    payload_digest TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    next_attempt_at TEXT NOT NULL,
+                    last_error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(instance_id, episode_id, payload_digest)
+                )
+                """
+            )
+            connection.execute(
+                """INSERT INTO atlas_outbox
+                   (instance_id, episode_id, revision, fingerprint, payload_digest, payload,
+                    status, attempts, next_attempt_at, last_error, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ("instance-old", "ep-hashed-old", 3, "fp-old", "digest-old",
+                 '{"instance_id":"instance-old","episode_id":"ep-hashed-old","revision":3}',
+                 "sent", 0, STAMP, None, STAMP, STAMP),
+            )
+        connection.close()
+
+        store = FCAPSuleStore(database_path)
+        with store._connect() as connection:
+            row = connection.execute("SELECT * FROM atlas_outbox WHERE outbox_id = 1").fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["local_episode_id"], "")
+        self.assertEqual(row["local_episode_link_status"], "unknown")
+        self.assertEqual(row["investigation_revision_ids"], "[]")
+        self.assertEqual(row["investigation_revision_links_truncated"], 0)
+        self.assertEqual(row["receipt_status"], "legacy_receipt_unknown")
+        self.assertIsNone(row["remote_case_id"])
+        self.assertEqual(store.publication_provenance("episode-local-id"), [])
 
     def test_runtime_settings_mask_token_and_manual_drain_publishes_queued_projection(self):
         with patch.object(self.plane.atlas_publisher, "start"):
