@@ -17,8 +17,10 @@ transcribe a recording. This does not make the node IP a secure origin.
 ## Optional HTTPS for a Private Network
 
 The optional Caddy sidecar terminates TLS on port 8443 and forwards requests to
-FCAPSule on localhost. It does not change HTTP access used by existing integrations.
-It adds a NodePort on 30767; adapt that port to your deployment if it is occupied.
+FCAPSule on localhost. It adds the remote HTTPS entry point on NodePort 30767;
+the application Service itself is ClusterIP-only, so there is no plaintext app
+NodePort. The console asks for the Basic-auth credentials from the
+`fcapsule-console-auth` Secret after the TLS connection is established.
 
 1. Obtain a certificate with the host name or node IP in its subject alternative
    names. For a private development cluster, a local CA such as mkcert is suitable.
@@ -36,9 +38,12 @@ kubectl -n fcapsule patch deployment/fcapsule --type=strategic \
 kubectl -n fcapsule rollout status deployment/fcapsule
 ```
 
-3. Open `https://<certificate-host-or-ip>:30767/console`. There must be no
-   certificate warning. The browser still asks for normal microphone permission;
-   HTTPS cannot grant that permission automatically.
+3. Create the console-auth Secret as described in
+   [Kubernetes deployment](kubernetes_deployment.md#console-authentication), then
+   open `https://<certificate-host-or-ip>:30767/console`. There must be no
+   certificate warning. The browser asks for the console username and password,
+   then for normal microphone permission; HTTPS cannot grant that permission
+   automatically.
 
 The patch retains the existing application container, init containers, volumes,
 and node placement. Apply it after the base deployment and development overlay.
@@ -50,10 +55,10 @@ time, after active investigations finish. Monitor certificate expiry yourself;
 this static-certificate example does not provide automatic renewal.
 
 Do not use browser flags that treat arbitrary insecure origins as secure, disable
-certificate validation, or share a CA private key to make recording work. TLS is
-not authentication: FCAPSule still requires a trusted network or an authenticating
-reverse proxy before broader exposure. A production ingress with managed
-certificates is preferable when that infrastructure is already available.
+certificate validation, or share a CA private key to make recording work. The
+application requires Basic authentication in Kubernetes, and the backend Service
+is private to the cluster. A production ingress with managed certificates is
+preferable when that infrastructure is already available.
 
 To remove the optional proxy, remove its container and three `https-*` volumes
 from the deployment, then delete only `service/fcapsule-https`,

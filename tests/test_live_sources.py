@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -258,6 +259,7 @@ class LiveSourceTests(unittest.TestCase):
             _resolve_alert_pod(orders + [unrelated], "shop", {"service": "shared"}, orders + [unrelated])
         )
 
+    @patch.dict("os.environ", {"FCAPSULE_SOURCE_ALLOWED_ORIGINS": "http://prometheus:9090,http://opensearch:9200"})
     def test_live_capture_uses_explicit_target_workload_for_a_shared_monitoring_service(self):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory)
@@ -929,6 +931,7 @@ class LiveSourceTests(unittest.TestCase):
         self.assertEqual(monitors[2]["namespace_selector"]["status"], "unknown")
         self.assertFalse(monitors[2]["selector_complete"])
 
+    @patch.dict("os.environ", {"FCAPSULE_SOURCE_ALLOWED_ORIGINS": "http://prometheus:9090,http://opensearch:9200"})
     def test_source_configuration_is_validated_and_persisted(self):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory)
@@ -960,6 +963,23 @@ class LiveSourceTests(unittest.TestCase):
             self.assertTrue((state / "source-settings.json").is_file())
             with self.assertRaises(ValueError):
                 coordinator.update_configuration({"prometheus_url": "prometheus:9090"})
+            with self.assertRaisesRegex(ValueError, "blocked IP"):
+                coordinator.update_configuration({"prometheus_url": "http://127.0.0.1:9090"})
+            with self.assertRaisesRegex(ValueError, "HTTPS"):
+                coordinator.update_configuration({"kubernetes_url": "http://kubernetes.default.svc"})
+
+    def test_kubernetes_service_account_token_is_pinned_to_the_configured_api_origin(self):
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "fcapsule.adapters.kubernetes_adapter.SERVICE_ACCOUNT", Path(directory)
+        ), patch.dict(os.environ, {
+            "FCAPSULE_KUBERNETES_TOKEN": "test-token",
+            "KUBERNETES_SERVICE_HOST": "10.43.0.1",
+            "KUBERNETES_SERVICE_PORT_HTTPS": "443",
+        }):
+            adapter = KubernetesAdapter()
+            self.assertEqual(adapter.base_url, "https://10.43.0.1:443")
+            with self.assertRaisesRegex(ValueError, "origin is not trusted"):
+                KubernetesAdapter("https://attacker.example")
 
     def test_live_case_persists_opensearch_coverage_metadata(self):
         with tempfile.TemporaryDirectory() as directory:

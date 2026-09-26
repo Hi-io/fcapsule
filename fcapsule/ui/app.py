@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-import json
+import base64
+import binascii
 import hmac
+import ipaddress
+import json
 import mimetypes
 import os
 import tempfile
@@ -11,7 +14,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse, urlsplit
 
 from fcapsule.control_plane import ControlPlane
 
@@ -176,6 +179,89 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encoded)
 
+    def _authorize(self, path: str, method: str) -> bool:
+        if path == "/healthz" or (method == "POST" and path == "/api/webhooks/grafana"):
+            return True
+
+        if method in {"POST", "DELETE"}:
+            origin = self.headers.get("Origin")
+            fetch_site = self.headers.get("Sec-Fetch-Site", "").lower()
+            if origin:
+                parsed_origin = urlsplit(origin)
+                expected_scheme = self.headers.get("X-Forwarded-Proto", "http").strip().lower()
+                expected_host = self.headers.get("Host", "").lower()
+                if (parsed_origin.scheme.lower() != expected_scheme or parsed_origin.netloc.lower() != expected_host
+                        or parsed_origin.username is not None or parsed_origin.password is not None):
+                    self._json({"error": "Cross-origin console requests are not allowed"}, HTTPStatus.FORBIDDEN)
+                    return False
+            elif fetch_site in {"cross-site", "same-site"}:
+                self._json({"error": "Cross-origin console requests are not allowed"}, HTTPStatus.FORBIDDEN)
+                return False
+
+        username = os.environ.get("FCAPSULE_CONSOLE_USERNAME", "")
+        password = os.environ.get("FCAPSULE_CONSOLE_PASSWORD", "")
+        configured = bool(username and password)
+        required = os.environ.get("FCAPSULE_CONSOLE_AUTH_REQUIRED", "false").lower() in {"1", "true", "yes"}
+        try:
+            peer = ipaddress.ip_address(self.client_address[0].split("%", 1)[0])
+        except (ValueError, IndexError):
+            peer = None
+        loopback = peer is not None and peer.is_loopback
+        forwarded_clients = []
+        for value in self.headers.get("X-Forwarded-For", "").split(","):
+            try:
+                forwarded_clients.append(ipaddress.ip_address(value.strip().split("%", 1)[0]))
+            except ValueError:
+                continue
+        forwarded_remote = any(not address.is_loopback for address in forwarded_clients)
+        forwarded_proto = self.headers.get("X-Forwarded-Proto", "").strip().lower()
+
+        # The app speaks HTTP. Remote Basic credentials are accepted only from a
+        # configured HTTPS reverse proxy; loopback remains available for dev/port-forward.
+        if loopback and forwarded_remote and forwarded_proto != "https":
+            self._json({"error": "Console access requires HTTPS"}, HTTPStatus.FORBIDDEN)
+            return False
+        if not loopback:
+            trusted_proxies = []
+            for value in os.environ.get("FCAPSULE_CONSOLE_TRUSTED_PROXY_CIDRS", "").split(","):
+                try:
+                    if value.strip():
+                        trusted_proxies.append(ipaddress.ip_network(value.strip(), strict=False))
+                except ValueError:
+                    continue
+            trusted_proxy = peer is not None and any(peer in network for network in trusted_proxies)
+            if not trusted_proxy or forwarded_proto != "https":
+                self._json({"error": "Console access requires HTTPS"}, HTTPStatus.FORBIDDEN)
+                return False
+
+        if not configured:
+            if loopback and not required:
+                return True
+            return self._unauthorized()
+
+        authorization = self.headers.get("Authorization", "")
+        scheme, separator, encoded = authorization.partition(" ")
+        if separator and scheme.lower() == "basic":
+            try:
+                supplied = base64.b64decode(encoded.strip(), validate=True).decode("utf-8")
+            except (binascii.Error, UnicodeDecodeError, ValueError):
+                supplied = ""
+            expected = f"{username}:{password}"
+            if hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8")):
+                return True
+        return self._unauthorized()
+
+    def _unauthorized(self) -> bool:
+        self.send_response(HTTPStatus.UNAUTHORIZED)
+        self.send_header("WWW-Authenticate", 'Basic realm="FCAPSule", charset="UTF-8"')
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
+        body = b'{"error":"Unauthorized"}'
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        return False
+
     def _payload(self, maximum_bytes: int = 512 * 1024) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
         if not length:
@@ -208,6 +294,8 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         path = _canonical_memory_path(urlparse(self.path).path)
+        if not self._authorize(path, "GET"):
+            return
         if path == "/":
             self.send_response(HTTPStatus.FOUND)
             self.send_header("Location", "/console")
@@ -361,6 +449,8 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = _canonical_memory_path(urlparse(self.path).path)
+        if not self._authorize(path, "POST"):
+            return
         try:
             if path == "/api/webhooks/grafana":
                 config = self.server.control_plane.source_configuration()
@@ -517,6 +607,8 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
+        if not self._authorize(path, "DELETE"):
+            return
         try:
             if path.startswith("/api/episodes/"):
                 episode_id = unquote(path.removeprefix("/api/episodes/").rstrip("/"))
