@@ -64,6 +64,19 @@ test('missing and legacy receipts are not turned into guessed Collective links',
   assert.doesNotMatch(legacy, /old-id|href="\/collective\?case=/);
 });
 
+test('withdrawal is explicit, status-bearing, and preserves the local capsule', () => {
+  const published = render([record({status:'published'})], 'local-episode', {available:true});
+  assert.match(published, /data-withdraw-collective="local-episode"/);
+  assert.match(published, /Withdraw shared Collective knowledge/);
+  assert.match(published, /local reports and the capsule are not deleted/i);
+  assert.doesNotMatch(render([record({status:'published'})], 'local-episode', {available:false}), /data-withdraw-collective/);
+  const done = render([record({status:'published'})], 'local-episode', {available:false,withdrawal:{status:'withdrawn'}});
+  assert.match(done, /Shared Collective knowledge withdrawn/);
+  assert.doesNotMatch(done, /data-withdraw-collective/);
+  assert.match(render([], 'local-episode', {available:true}), /data-withdraw-collective="local-episode"/);
+  assert.match(source, /Permanently withdraw every shared Collective revision/);
+});
+
 test('report overview renders episode-level provenance beside investigation history', () => {
-  assert.match(source, /memoryContribution\(ai \|\| \{\}\) \+ publicationProvenance\(payload\.publication_provenance \|\| \[\]\)/);
+  assert.match(source, /publicationProvenance\(payload\.publication_provenance \|\| \[\], payload\.episode_id, payload\.collective_withdrawal\)/);
 });

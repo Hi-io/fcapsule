@@ -78,6 +78,8 @@ class EstimaClient:
         try:
             with urlopen(request, timeout=self.timeout_seconds) as response:
                 body = response.read(512 * 1024 + 1)
+                if response.status == 204 and not body:
+                    return {}
         except HTTPError as error:
             raise EstimaClientError(f"Estima returned HTTP {error.code}", status_code=error.code) from None
         except (URLError, TimeoutError, OSError) as error:
@@ -154,6 +156,10 @@ class EstimaClient:
             if "HTTP 404" in str(error):
                 return None
             raise
+
+    def delete_episode(self, episode_id: str) -> dict[str, Any]:
+        """Withdraw all revisions owned by this publisher; Collective makes repeats safe."""
+        return self._request("DELETE", f"/v1/episodes/{quote(str(episode_id), safe='')}")
 
 
 def estima_client_from_config(

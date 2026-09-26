@@ -343,6 +343,7 @@ function renderConsole(state) {
   document.querySelectorAll('[data-archive]').forEach(button => button.addEventListener('click', () => changeEpisodeState(button.dataset.archive, 'archive')));
   document.querySelectorAll('[data-restore]').forEach(button => button.addEventListener('click', () => changeEpisodeState(button.dataset.restore, 'restore')));
   document.querySelectorAll('[data-delete]').forEach(button => button.addEventListener('click', () => deleteEpisode(button.dataset.delete)));
+  document.querySelectorAll('[data-withdraw-collective]').forEach(button => button.addEventListener('click', () => withdrawCollective(button.dataset.withdrawCollective, button)));
   const animated = animateEpisodeId && document.querySelector('.episode.is-open .episode-body');
   if (animated && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
     animated.animate([{opacity:0, transform:'translateY(-6px)'},{opacity:1, transform:'translateY(0)'}], {duration:180, easing:'ease-out'});
@@ -1358,14 +1359,15 @@ function memoryContribution(run = {}) {
     '<div><p class="queue-note">A cited prior observation can guide a check; it does not establish the same cause.</p>' + rows + '</div></details>';
 }
 
-function publicationProvenance(items = []) {
+function publicationProvenance(items = [], episodeId = '', withdrawalState = null) {
   const records = Array.isArray(items) ? items.slice(0,20) : [];
-  if (!records.length) return '';
+  if (!records.length && !withdrawalState?.available && !withdrawalState?.withdrawal) return '';
   const statusLabels = {
     published:'Collective response succeeded',
     retry_scheduled:'Retry scheduled',
     attention_required:'Failed; attention required',
     queued:'Queued; not yet sent',
+    cancelled:'Cancelled for withdrawal',
   };
   const receiptLabels = {
     not_yet_confirmed:'No successful response recorded',
@@ -1375,7 +1377,9 @@ function publicationProvenance(items = []) {
   };
   const label = item => statusLabels[item.status] || 'Delivery status unavailable';
   const latest = records[0];
-  const summary = records.length + ' recent revision' + (records.length === 1 ? '' : 's') + ' · latest: ' + label(latest);
+  const summary = records.length
+    ? records.length + ' recent revision' + (records.length === 1 ? '' : 's') + ' · latest: ' + label(latest)
+    : 'No recent local delivery receipts';
   const rows = records.map(item => {
     const revision = Number(item.revision);
     const revisionLabel = Number.isFinite(revision) && revision > 0 ? 'Revision ' + fmt.format(revision) : 'Revision unavailable';
@@ -1392,7 +1396,34 @@ function publicationProvenance(items = []) {
     const reason = reasonText ? '<p class="publication-reason">' + safe(reasonText) + '</p>' : '';
     return '<li class="publication-record"><div class="publication-record-head"><strong>' + safe(revisionLabel) + '</strong><span class="publication-status" data-status="' + safe(item.status) + '">' + safe(label(item)) + '</span></div><div class="publication-record-meta">' + receipt + (attemptLabel ? '<small>' + safe(attemptLabel) + '</small>' : '') + '</div>' + reason + '</li>';
   }).join('');
-  return '<details class="publication-provenance"><summary><strong>Collective publication</strong><span>' + safe(summary) + '</span></summary><ol>' + rows + '</ol></details>';
+  const withdrawal = withdrawalState?.withdrawal;
+  const withdrawalStatus = withdrawal?.status === 'withdrawn'
+    ? '<p class="queue-note" role="status">Shared Collective knowledge withdrawn. This local capsule and its reports remain.</p>'
+    : withdrawal?.status === 'pending'
+      ? '<p class="queue-note" role="status">Collective withdrawal queued; local capsule remains.</p>'
+      : withdrawal?.status === 'failed'
+        ? '<p class="queue-note" role="status">Collective withdrawal needs attention. ' + safe(withdrawal.last_error || 'Retry when the publisher is available.') + '</p>' : '';
+  const canWithdraw = withdrawalState?.available && episodeId && withdrawal?.status !== 'withdrawn' && withdrawal?.status !== 'pending';
+  const action = canWithdraw
+    ? '<div class="actions"><button type="button" class="danger" data-withdraw-collective="' + safe(episodeId) + '">' + (withdrawal?.status === 'failed' ? 'Retry Collective withdrawal' : 'Withdraw shared Collective knowledge') + '</button></div>'
+    : '';
+  const boundary = withdrawalState?.available || withdrawal
+    ? '<div class="publication-withdrawal">' + withdrawalStatus + (action ? '<p class="queue-note">This permanently removes every shared revision for this episode. Local reports and the capsule are not deleted.</p>' + action : '') + '</div>' : '';
+  return '<details class="publication-provenance"><summary><strong>Collective publication</strong><span>' + safe(summary) + '</span></summary>' + (rows ? '<ol>' + rows + '</ol>' : '') + boundary + '</details>';
+}
+
+async function withdrawCollective(episodeId, button) {
+  if (!confirm('Permanently withdraw every shared Collective revision for this episode? The local capsule and reports will remain.')) return;
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/episodes/' + encodeURIComponent(episodeId) + '/collective-withdrawal', {method:'POST'});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Unable to request Collective withdrawal');
+    refresh();
+  } catch (error) {
+    alert(error.message || 'Unable to request Collective withdrawal');
+    button.disabled = false;
+  }
 }
 
 function investigationProgress(run = {}, compact = false) {
@@ -1637,7 +1668,7 @@ function reportPanel(payload) {
     (evidenceView === 'sources' ? mediaEvidencePanel(payload) + investigationEvidence(ai || {}, payload.media_evidence || []) : evidencePanel(report)) + '</div></div>';
   else if (reportTab === 'timeline') content = timelinePanel(report) + investigationTimeline(ai || {}, payload.media_evidence || [], payload.investigation_revisions || []);
   else if (reportTab === 'investigation') content = '<div class="overview-layout investigation-layout">' + investigationProgress(ai || {}) + briefingPanel(payload, true) + sourceReviewPanel(payload) + '</div>';
-  else content = '<div class="overview-layout report-workspace">' + investigationScope(payload) + '<div class="report-main">' + briefingPanel(payload, false, contextWorkspace) + memoryContribution(ai || {}) + publicationProvenance(payload.publication_provenance || []) + fallback + (ai?.assessment ? '' : contextWorkspace) + (ai?.assessment ? overviewMetrics(report) : '') + '</div><div class="report-rail">' + investigationProgress(ai || {}, true) + '</div></div>';
+  else content = '<div class="overview-layout report-workspace">' + investigationScope(payload) + '<div class="report-main">' + briefingPanel(payload, false, contextWorkspace) + memoryContribution(ai || {}) + publicationProvenance(payload.publication_provenance || [], payload.episode_id, payload.collective_withdrawal) + fallback + (ai?.assessment ? '' : contextWorkspace) + (ai?.assessment ? overviewMetrics(report) : '') + '</div><div class="report-rail">' + investigationProgress(ai || {}, true) + '</div></div>';
   return '<section id="incident-report"><div class="report-navigation"><div role="tablist" aria-label="Investigation views">' +
     tabs.map(name=>'<button id="tab-' + name + '" role="tab" data-report-tab="' + name + '" aria-selected="' + (name === reportTab) + '" aria-controls="investigation-panel" tabindex="' + (name === reportTab ? 0 : -1) + '">' + name[0].toUpperCase() + name.slice(1) + '</button>').join('') +
     '</div><div class="report-actions">' + (reportTab === 'overview' ? '' : evidenceAction) + exports + '</div></div><div id="investigation-panel" role="tabpanel" aria-labelledby="tab-' + reportTab + '" tabindex="0">' + content + '</div><div class="report-technical">' + diagnostics + '</div></section>';

@@ -189,6 +189,9 @@ class EstimaPublisher:
                 if any(signal.get("source_kind") == "imported" for signal in episode.get("signals", [])):
                     self._seen[episode_id] = self._signature(episode)
                     continue
+                if self.plane.store.collective_withdrawal_status(episode_id):
+                    self._seen[episode_id] = self._signature(episode)
+                    continue
                 signature = self._signature(episode)
                 if self._seen.get(episode_id) == signature:
                     continue
@@ -229,6 +232,34 @@ class EstimaPublisher:
             if estima is None:
                 return {"sent": 0, "retried": 0, "failed": 0}
             sent = retried = failed = 0
+            current_instance = str(self.plane._effective_estima_settings().get("instance_id") or "")
+            for row in self.plane.store.due_collective_withdrawals(limit=limit):
+                try:
+                    if str(row["instance_id"]) != current_instance:
+                        self.plane.store.defer_collective_withdrawal(
+                            str(row["local_episode_id"]), "Publisher instance mismatch", 300, permanent=True,
+                        )
+                        failed += 1
+                        continue
+                    estima.delete_episode(str(row["episode_id"]))
+                except EstimaClientError as error:
+                    permanent = error.status_code is not None and 400 <= error.status_code < 500 and error.status_code not in {408, 425, 429}
+                    attempts = int(row.get("attempts", 0)) + 1
+                    self.plane.store.defer_collective_withdrawal(
+                        str(row["local_episode_id"]), str(error), min(300, 2 ** min(attempts, 8)), permanent=permanent,
+                    )
+                    failed += 1 if permanent else 0
+                    retried += 0 if permanent else 1
+                except Exception as error:
+                    attempts = int(row.get("attempts", 0)) + 1
+                    self.plane.store.defer_collective_withdrawal(
+                        str(row["local_episode_id"]), f"Estima withdrawal unavailable ({type(error).__name__})",
+                        min(300, 2 ** min(attempts, 8)),
+                    )
+                    retried += 1
+                else:
+                    self.plane.store.complete_collective_withdrawal(str(row["local_episode_id"]))
+                    sent += 1
             for row in self.plane.store.due_atlas_publications(limit=limit):
                 try:
                     response = estima.create_case(row["payload"])

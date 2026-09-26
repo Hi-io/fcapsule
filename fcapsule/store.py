@@ -297,6 +297,27 @@ class FCAPSuleStore:
                     PRIMARY KEY (instance_id, episode_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS atlas_withdrawal_outbox (
+                    local_episode_id TEXT PRIMARY KEY,
+                    instance_id TEXT NOT NULL,
+                    episode_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    next_attempt_at TEXT NOT NULL,
+                    last_error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(instance_id, episode_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS atlas_publication_identities (
+                    local_episode_id TEXT NOT NULL,
+                    instance_id TEXT NOT NULL,
+                    episode_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(local_episode_id, instance_id, episode_id)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_incidents_app_time
                     ON incidents(app_id, started_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_capsules_app_time
@@ -331,6 +352,17 @@ class FCAPSuleStore:
             ):
                 if column not in outbox_columns:
                     connection.execute(f"ALTER TABLE atlas_outbox ADD COLUMN {column} {definition}")
+            for row in connection.execute(
+                "SELECT local_episode_id, instance_id, episode_id, payload, created_at "
+                "FROM atlas_outbox WHERE local_episode_id != ''"
+            ).fetchall():
+                payload = _decode(row["payload"], {})
+                if isinstance(payload, dict) and str(payload.get("episode_id") or "") == str(row["episode_id"]):
+                    connection.execute(
+                        "INSERT OR IGNORE INTO atlas_publication_identities "
+                        "(local_episode_id, instance_id, episode_id, created_at) VALUES (?, ?, ?, ?)",
+                        (str(row["local_episode_id"]), str(row["instance_id"]), str(row["episode_id"]), str(row["created_at"])),
+                    )
             incident_columns = {
                 str(row["name"])
                 for row in connection.execute("PRAGMA table_info(incidents)").fetchall()
@@ -1619,6 +1651,16 @@ class FCAPSuleStore:
         now = utc_now()
         cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat().replace("+00:00", "Z")
         with self._connect() as connection:
+            if local_id:
+                connection.execute(
+                    "INSERT OR IGNORE INTO atlas_publication_identities "
+                    "(local_episode_id, instance_id, episode_id, created_at) VALUES (?, ?, ?, ?)",
+                    (local_id, instance_id, episode_id, now),
+                )
+            if local_id and connection.execute(
+                "SELECT 1 FROM atlas_withdrawal_outbox WHERE local_episode_id = ?", (local_id,)
+            ).fetchone():
+                return {"accepted": True, "is_new": False, "status": "withdrawal_requested"}
             connection.execute(
                 "DELETE FROM atlas_outbox WHERE status != 'pending' AND created_at < ?", (cutoff,)
             )
@@ -1791,6 +1833,119 @@ class FCAPSuleStore:
             )
         return len(ids)
 
+    def collective_withdrawal_target(self, local_episode_id: str) -> dict[str, str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT instance_id, episode_id FROM atlas_publication_identities "
+                "WHERE local_episode_id = ? ORDER BY created_at DESC LIMIT 5000",
+                (str(local_episode_id),),
+            ).fetchall()
+        identities = {(str(row["instance_id"]), str(row["episode_id"])) for row in rows}
+        if not identities:
+            raise ValueError("No retained Collective publication is available to withdraw")
+        if len(identities) != 1:
+            raise ValueError("This episode has publications from multiple Collective instances; withdraw each with its matching publisher")
+        instance_id, episode_id = next(iter(identities))
+        return {"instance_id": instance_id, "episode_id": episode_id}
+
+    def queue_collective_withdrawal(self, local_episode_id: str, instance_id: str) -> dict[str, Any]:
+        local_id = str(local_episode_id)
+        target = self.collective_withdrawal_target(local_id)
+        if target["instance_id"] != str(instance_id):
+            raise ValueError("The configured Collective publisher does not own this local publication")
+        now = utc_now()
+        with self._connect() as connection:
+            existing = connection.execute(
+                "SELECT * FROM atlas_withdrawal_outbox WHERE local_episode_id = ?", (local_id,)
+            ).fetchone()
+            if existing:
+                if existing["instance_id"] != target["instance_id"] or existing["episode_id"] != target["episode_id"]:
+                    raise ValueError("A different Collective withdrawal is already recorded for this episode")
+                if existing["status"] == "failed":
+                    connection.execute(
+                        "UPDATE atlas_withdrawal_outbox SET status = 'pending', attempts = 0, "
+                        "next_attempt_at = ?, last_error = NULL, updated_at = ? WHERE local_episode_id = ?",
+                        (now, now, local_id),
+                    )
+                connection.execute(
+                    "UPDATE atlas_outbox SET status = 'cancelled', last_error = NULL, updated_at = ? "
+                    "WHERE local_episode_id = ? AND status IN ('pending', 'failed')", (now, local_id),
+                )
+                result = connection.execute(
+                    "SELECT * FROM atlas_withdrawal_outbox WHERE local_episode_id = ?", (local_id,)
+                ).fetchone()
+                return dict(result)
+            connection.execute(
+                "INSERT INTO atlas_withdrawal_outbox "
+                "(local_episode_id, instance_id, episode_id, status, attempts, next_attempt_at, created_at, updated_at) "
+                "VALUES (?, ?, ?, 'pending', 0, ?, ?, ?)",
+                (local_id, target["instance_id"], target["episode_id"], now, now, now),
+            )
+            connection.execute(
+                "UPDATE atlas_outbox SET status = 'cancelled', last_error = NULL, updated_at = ? "
+                "WHERE local_episode_id = ? AND status IN ('pending', 'failed')", (now, local_id),
+            )
+            return dict(connection.execute(
+                "SELECT * FROM atlas_withdrawal_outbox WHERE local_episode_id = ?", (local_id,)
+            ).fetchone())
+
+    def collective_withdrawal_status(self, local_episode_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM atlas_withdrawal_outbox WHERE local_episode_id = ?", (str(local_episode_id),)
+            ).fetchone()
+        if not row:
+            return None
+        status = str(row["status"])
+        return {
+            "status": "withdrawn" if status == "sent" else status,
+            "attempts": max(0, int(row["attempts"])),
+            "last_error": self._withdrawal_error_summary(row["last_error"]),
+            "updated_at": str(row["updated_at"]),
+        }
+
+    def due_collective_withdrawals(self, limit: int = 10) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM atlas_withdrawal_outbox WHERE status = 'pending' AND next_attempt_at <= ? "
+                "ORDER BY created_at LIMIT ?", (utc_now(), max(1, min(50, int(limit)))),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def complete_collective_withdrawal(self, local_episode_id: str) -> None:
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE atlas_withdrawal_outbox SET status = 'sent', last_error = NULL, updated_at = ? "
+                "WHERE local_episode_id = ?", (now, str(local_episode_id)),
+            )
+
+    def defer_collective_withdrawal(
+        self, local_episode_id: str, error: str, delay_seconds: int, *, permanent: bool = False,
+    ) -> None:
+        now = utc_now()
+        next_at = (datetime.now(timezone.utc) + timedelta(seconds=max(1, min(3600, delay_seconds)))).isoformat().replace("+00:00", "Z")
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE atlas_withdrawal_outbox SET status = ?, attempts = attempts + 1, next_attempt_at = ?, "
+                "last_error = ?, updated_at = ? WHERE local_episode_id = ?",
+                ("failed" if permanent else "pending", next_at, str(error)[:240], now, str(local_episode_id)),
+            )
+
+    @staticmethod
+    def _withdrawal_error_summary(error: str | None) -> str | None:
+        if not error:
+            return None
+        match = re.fullmatch(r"(?:Estima|Atlas) returned HTTP (\d{3})", str(error).strip())
+        if match:
+            code = int(match.group(1))
+            if code in {401, 403}:
+                return f"Collective rejected the publisher credential (HTTP {code})."
+            if 400 <= code < 500:
+                return f"Collective rejected the withdrawal (HTTP {code})."
+            return f"Collective returned HTTP {code}; withdrawal will retry."
+        return "Collective is unavailable; withdrawal will retry."
+
     def atlas_outbox_status(self) -> dict[str, Any]:
         with self._connect() as connection:
             counts = connection.execute(
@@ -1850,6 +2005,8 @@ class FCAPSuleStore:
                 status = "published"
             elif internal_status == "failed":
                 status = "attention_required"
+            elif internal_status == "cancelled":
+                status = "cancelled"
             elif attempts:
                 status = "retry_scheduled"
             else:

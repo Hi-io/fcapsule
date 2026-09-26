@@ -50,6 +50,7 @@ class FakeControlPlane:
             "last_error": "",
         }
         self.updated = None
+        self.withdrawal_episode = None
         self.investigator = SimpleNamespace(stopping=False)
         self.briefing_executor = SimpleNamespace(shutdown=lambda **_: None)
         self.evidence = SimpleNamespace(shutdown=lambda **_: None)
@@ -72,6 +73,10 @@ class FakeControlPlane:
     def retry_atlas_publications(self, limit=100):
         self.retry_limit = limit
         return {"status": "queued", "limit": limit}
+
+    def request_collective_withdrawal(self, episode_id):
+        self.withdrawal_episode = episode_id
+        return {"status": "pending", "attempts": 0}
 
 
 class AtlasUIRouteTests(unittest.TestCase):
@@ -175,6 +180,12 @@ class AtlasUIRouteTests(unittest.TestCase):
         self.assertEqual(status, 202)
         self.assertEqual(result["status"], "queued")
         self.assertEqual(self.plane.retry_limit, 100)
+
+    def test_explicit_collective_withdrawal_route_uses_local_episode_id(self):
+        status, result = self.request("POST", "/api/episodes/local%2Fepisode/collective-withdrawal")
+        self.assertEqual(status, 202)
+        self.assertEqual(result["status"], "pending")
+        self.assertEqual(self.plane.withdrawal_episode, "local/episode")
 
 
 if __name__ == "__main__":
