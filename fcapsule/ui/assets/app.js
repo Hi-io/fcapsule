@@ -1437,8 +1437,13 @@ function metricChart(item, linkToEvidence = false) {
     (linkToEvidence ? '<button class="evidence-link" data-evidence-link="' + safe(item.evidence_id) + '" data-domain="metrics">Open metric evidence</button>' : '') + '</article>';
 }
 function metricsPanel(report) {
-  const unavailable = (report.alert_metric_evidence || []).filter(item=>item.status !== 'available');
-  const coverage = unavailable.length ? '<p class="queue-note">Alert signal unavailable: ' + unavailable.map(item=>safe(item.alertname || 'rule') + ' (' + safe(String(item.reason || 'not captured').replaceAll('_',' ')) + ')').join('; ') + '.</p>' : !(report.pm_signals || []).some(item=>item.signal_origin === 'alert_rule') ? '<p class="queue-note">The alert-condition signal was not retained in this capture. Historical captures are not backfilled.</p>' : '';
+  const captures = report.alert_metric_evidence || [];
+  const unavailable = captures.filter(item=>item.status !== 'available' && item.status !== 'partial');
+  const partial = captures.filter(item=>item.status === 'partial');
+  const unavailableNote = unavailable.length ? '<p class="queue-note">Alert signal unavailable: ' + unavailable.map(item=>safe(item.alertname || 'rule') + ' (' + safe(String(item.reason || 'not captured').replaceAll('_',' ')) + ')').join('; ') + '.</p>' : '';
+  const partialNote = partial.length ? '<p class="queue-note">Alert signal coverage is partial: ' + partial.map(item=>safe(item.alertname || 'rule') + ' (' + safe(String(item.reason || 'some samples unavailable').replaceAll('_',' ')) + ')').join('; ') + '.</p>' : '';
+  const missingNote = !unavailable.length && !partial.length && !(report.pm_signals || []).some(item=>item.signal_origin === 'alert_rule') ? '<p class="queue-note">The alert-condition signal was not retained in this capture. Historical captures are not backfilled.</p>' : '';
+  const coverage = unavailableNote + partialNote + missingNote;
   return coverage + '<div class="metrics-grid">' + (report.pm_signals || []).map(item => metricChart(item)).join('') + '</div>' + (report.pm_coverage_note ? '<p class="queue-note">' + safe(report.pm_coverage_note) + '</p>' : '');
 }
 function overviewMetrics(report) {

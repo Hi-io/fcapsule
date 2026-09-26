@@ -1594,6 +1594,23 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertNotIn("metric_observation", row)
         self.assertNotIn("never-private", json.dumps(row))
 
+    def test_partial_rule_metrics_keep_top_level_capture_limitation_in_prompt_context(self):
+        self.entries[0]["report"]["alert_metric_evidence"] = [{
+            "alertname": "WorkerErrors", "status": "partial", "reason": "incomplete_sample_coverage",
+            "omitted_no_finite_series_count": 1,
+        }]
+        item = self.entries[0]["report"]["supporting_evidence"][0]
+        item.update(signal_origin="alert_rule", alertname="WorkerErrors", metric_observation={
+            "metric": "worker_errors", "threshold": 3, "operator": ">",
+            "condition": {"observed_samples": 2, "missing_samples": 1},
+        })
+
+        row = episode_context({"episode_id": "episode"}, self.entries)["evidence"][0]
+
+        self.assertIn("metric capture partial: incomplete_sample_coverage", row["limitation"])
+        self.assertIn("1 scoped series had no finite samples", row["limitation"])
+        self.assertIn("unknown, not healthy evidence", row["limitation"])
+
     def test_episode_context_retains_only_explicit_discovery_identities(self):
         self.entries[0]["report"]["fault_alerts"] = [
             {"name": "MetricsMissing", "rule": {"labels": {
