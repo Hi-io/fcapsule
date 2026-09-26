@@ -55,7 +55,7 @@ supported alongside the Collective names and routes. See [Collective integration
 
 Keys entered in Settings are saved in plaintext in `state_dir/.env` and loaded into the process environment. They are not returned by settings APIs, stored in SQLite or included in capsule archives. A root `.env` or mounted environment Secret can also supply credentials. Git ignores `.env` and managed state, but that is not encryption or access control.
 
-The Kubernetes console requires Basic Auth; standalone development without console credentials is loopback-only. The app does not terminate TLS. Remote HTTPS uses the optional Caddy proxy with operator-managed certificates, which must be rotated and renewed by the operator. Basic Auth does not provide per-user roles or SSO, and the application has no audit trail. Keep filesystem/PVC access restricted and protect backups; do not expose the reference service to the public Internet.
+Console login is disabled by default. Anyone who can reach the HTTPS endpoint can read retained reports and change settings, so restrict access to a trusted network. Optional Basic Auth can be enabled with `FCAPSULE_CONSOLE_AUTH_REQUIRED=true` and dedicated credentials, but it does not provide per-user roles or SSO. The app does not terminate TLS. Remote HTTPS uses the optional Caddy proxy with operator-managed certificates, which must be rotated and renewed by the operator. The application has no audit trail. Keep filesystem/PVC access restricted and protect backups; do not expose the reference service to the public Internet.
 
 ## Traces
 

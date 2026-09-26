@@ -193,6 +193,7 @@ class OperationalHealthTests(unittest.TestCase):
             with patch.dict(os.environ, {
                 "FCAPSULE_CONSOLE_USERNAME": "operator",
                 "FCAPSULE_CONSOLE_PASSWORD": "private-password",
+                "FCAPSULE_CONSOLE_AUTH_REQUIRED": "true",
             }):
                 connection = HTTPConnection("127.0.0.1", server.server_port)
                 connection.request("GET", "/metrics")

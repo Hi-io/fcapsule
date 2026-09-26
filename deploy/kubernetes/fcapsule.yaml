@@ -91,9 +91,6 @@ spec:
             - secretRef:
                 name: fcapsule-secrets
                 optional: true
-            - secretRef:
-                name: fcapsule-console-auth
-                optional: true
           ports:
             - name: http
               containerPort: 8765
@@ -151,7 +148,7 @@ data:
   FCAPSULE_POLL_INTERVAL_SECONDS: "30"
   FCAPSULE_INCIDENT_WINDOW_MINUTES: "10"
   FCAPSULE_AUTO_BUILD_REPORTS: "true"
-  FCAPSULE_CONSOLE_AUTH_REQUIRED: "true"
+  FCAPSULE_CONSOLE_AUTH_REQUIRED: "false"
 ---
 apiVersion: v1
 kind: Service

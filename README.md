@@ -98,7 +98,7 @@ See [provider operations](docs/llm_provider_operations.md), [evaluation plan](EV
 
 ## Current Boundaries
 
-FCAPSule is working single-replica software for a trusted environment, not an Internet-facing managed service. The Kubernetes console requires Basic Auth; standalone development without console credentials is loopback-only. The app does not terminate TLS: remote HTTPS uses the optional Caddy proxy with operator-managed certificates. Basic Auth does not provide per-user roles or SSO, and SQLite and in-process workers are not distributed. Masking is heuristic, not a guarantee of anonymization. Historical matching is deliberately conservative and cannot equate every failure across changed workloads. Investigation quality still requires review on real incidents.
+FCAPSule is working single-replica software for a trusted environment, not an Internet-facing managed service. Console login is disabled by default, so anyone who can reach the HTTPS endpoint can read reports and change settings; restrict network access accordingly. Basic Auth can be enabled explicitly but does not provide per-user roles or SSO. The app does not terminate TLS: remote HTTPS uses the optional Caddy proxy with operator-managed certificates. SQLite and in-process workers are not distributed. Masking is heuristic, not a guarantee of anonymization. Historical matching is deliberately conservative and cannot equate every failure across changed workloads. Investigation quality still requires review on real incidents.
 
 Cross-instance case sharing through Collective is a distinct, optional integration.
 It is disabled by default and requires the independently deployed Collective service.

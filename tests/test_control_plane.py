@@ -446,6 +446,46 @@ class ControlPlaneTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=5)
 
+    def test_console_login_disabled_even_when_credentials_are_present(self):
+        environment = {
+            "FCAPSULE_CONSOLE_USERNAME": "operator",
+            "FCAPSULE_CONSOLE_PASSWORD": "unused-password",
+            "FCAPSULE_CONSOLE_AUTH_REQUIRED": "false",
+            "FCAPSULE_LIVE_ENABLED": "false",
+        }
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, environment):
+            server = create_app_server("127.0.0.1", 0, Path(directory) / "state")
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_port}"
+                with urlopen(f"{base}/console", timeout=3) as response:
+                    self.assertEqual(response.status, 200)
+                remote_https = Request(
+                    f"{base}/api/state",
+                    headers={"X-Forwarded-For": "198.51.100.20", "X-Forwarded-Proto": "https"},
+                )
+                with urlopen(remote_https, timeout=3) as response:
+                    self.assertIn("overview", json.loads(response.read()))
+                remote_http = Request(
+                    f"{base}/api/state",
+                    headers={"X-Forwarded-For": "198.51.100.20", "X-Forwarded-Proto": "http"},
+                )
+                with self.assertRaises(HTTPError) as denied_http:
+                    urlopen(remote_http, timeout=3)
+                self.assertEqual(denied_http.exception.code, 403)
+                cross_origin = Request(
+                    f"{base}/api/sources/test", data=b"", method="POST",
+                    headers={"Origin": "https://other.example"},
+                )
+                with self.assertRaises(HTTPError) as denied_origin:
+                    urlopen(cross_origin, timeout=3)
+                self.assertEqual(denied_origin.exception.code, 403)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
     def test_console_auth_required_fails_closed_when_secret_is_missing(self):
         environment = {
             "FCAPSULE_CONSOLE_USERNAME": "",

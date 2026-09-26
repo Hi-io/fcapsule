@@ -239,9 +239,9 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
                 self._json({"error": "Console access requires HTTPS"}, HTTPStatus.FORBIDDEN)
                 return False
 
+        if not required:
+            return True
         if not configured:
-            if loopback and not required:
-                return True
             return self._unauthorized()
 
         authorization = self.headers.get("Authorization", "")

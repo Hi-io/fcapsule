@@ -19,8 +19,8 @@ transcribe a recording. This does not make the node IP a secure origin.
 The optional Caddy sidecar terminates TLS on port 8443 and forwards requests to
 FCAPSule on localhost. It adds the remote HTTPS entry point on NodePort 30767;
 the application Service itself is ClusterIP-only, so there is no plaintext app
-NodePort. The console asks for the Basic-auth credentials from the
-`fcapsule-console-auth` Secret after the TLS connection is established.
+NodePort. Console login is disabled by default. Restrict the NodePort to a
+trusted network; anyone who can reach it can access reports and settings.
 
 1. Obtain a certificate with the host name or node IP in its subject alternative
    names. For a private development cluster, a local CA such as mkcert is suitable.
@@ -38,12 +38,10 @@ kubectl -n fcapsule patch deployment/fcapsule --type=strategic \
 kubectl -n fcapsule rollout status deployment/fcapsule
 ```
 
-3. Create the console-auth Secret as described in
-   [Kubernetes deployment](kubernetes_deployment.md#console-authentication), then
-   open `https://<certificate-host-or-ip>:30767/console`. There must be no
-   certificate warning. The browser asks for the console username and password,
-   then for normal microphone permission; HTTPS cannot grant that permission
-   automatically.
+3. Open `https://<certificate-host-or-ip>:30767/console`. There must be no
+   certificate warning. The browser asks for normal microphone permission when
+   recording; HTTPS cannot grant that permission automatically. Optional console
+   authentication is described in [Kubernetes deployment](kubernetes_deployment.md#console-authentication).
 
 The patch retains the existing application container, init containers, volumes,
 and node placement. Apply it after the base deployment and development overlay.
@@ -56,8 +54,8 @@ this static-certificate example does not provide automatic renewal.
 
 Do not use browser flags that treat arbitrary insecure origins as secure, disable
 certificate validation, or share a CA private key to make recording work. The
-application requires Basic authentication in Kubernetes, and the backend Service
-is private to the cluster. A production ingress with managed certificates is
+backend Service is private to the cluster, but the optional HTTPS NodePort has
+no login by default. A production ingress with managed certificates and access controls is
 preferable when that infrastructure is already available.
 
 To remove the optional proxy, remove its container and three `https-*` volumes

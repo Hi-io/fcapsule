@@ -54,7 +54,7 @@ kubectl apply -f deploy/kubernetes/fcapsule.yaml
 kubectl rollout status deployment/fcapsule -n fcapsule
 ```
 
-The application Service is ClusterIP-only. For remote HTTPS access, add the optional Caddy proxy and NodePort service described in [HTTPS access](https_access.md); its entry point is `https://<node-ip>:30767`. Otherwise, use a localhost port-forward. The console requires the separate `fcapsule-console-auth` Secret described below. Create it before applying the manifest so the first rollout is immediately usable.
+The application Service is ClusterIP-only. For remote HTTPS access, add the optional Caddy proxy and NodePort service described in [HTTPS access](https_access.md); its entry point is `https://<node-ip>:30767`. Otherwise, use a localhost port-forward. Console login is disabled by default; limit access to the HTTPS NodePort to a trusted network.
 
 ## Development Overlay
 
@@ -195,7 +195,7 @@ OpenSearch Basic authentication can be supplied through `OPENSEARCH_USERNAME` an
 
 ## Console Authentication
 
-The app requires Basic authentication in Kubernetes. Create a dedicated Secret before rolling out the updated manifest; this avoids changing or replacing the existing `fcapsule-secrets` model/source credentials. Enter the password at the prompt so it is not written in shell history or printed in the command output:
+Console login is disabled by default. To enable optional Basic Auth, set `FCAPSULE_CONSOLE_AUTH_REQUIRED` to `"true"` in the runtime ConfigMap, add an optional `secretRef` for `fcapsule-console-auth` to the FCAPSule container's `envFrom`, and create that Secret. Enter the password at the prompt so it is not written in shell history or printed in the command output:
 
 ```bash
 umask 077
@@ -211,11 +211,11 @@ kubectl -n fcapsule create secret generic fcapsule-console-auth \
 ```
 
 For a remote browser, configure the TLS Caddy endpoint first and visit
-`https://<certificate-host-or-ip>:30767/console`; the browser displays its normal
-username/password prompt. The backend `fcapsule` Service is ClusterIP-only, so
-port 30765 is no longer reachable through a node IP. `/healthz` remains public
-for Kubernetes probes. A local development server with no console credentials
-continues to allow loopback access only.
+`https://<certificate-host-or-ip>:30767/console`. No username or password is
+requested unless Basic Auth was explicitly enabled. The backend `fcapsule`
+Service is ClusterIP-only, so port 30765 is no longer reachable through a node
+IP. `/healthz` remains public for Kubernetes probes. The unauthenticated
+console has no per-user permissions; use a network boundary before exposing it.
 
 The included Caddy sidecar shares the app pod's loopback network and sets the
 forwarded HTTPS scheme itself. If another reverse proxy runs in a different pod,
@@ -223,8 +223,8 @@ set `FCAPSULE_CONSOLE_TRUSTED_PROXY_CIDRS` to only that proxy's source CIDR; the
 app rejects forwarded HTTPS headers from other peers.
 
 On an existing cluster, keep the HTTPS sidecar available while applying the new
-manifest. Provision the auth Secret first, confirm the HTTPS endpoint is healthy,
-then apply `deploy/kubernetes/fcapsule.yaml` and wait for the rollout. The main
+manifest. Confirm the HTTPS endpoint is healthy, then apply
+`deploy/kubernetes/fcapsule.yaml` and wait for the rollout. The main
 Service becoming ClusterIP removes the plaintext LAN entry point; it does not
 modify the persistent state volume or the existing `fcapsule-secrets` Secret.
 
