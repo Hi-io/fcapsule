@@ -343,6 +343,7 @@ function renderConsole(state) {
   document.querySelectorAll('[data-archive]').forEach(button => button.addEventListener('click', () => changeEpisodeState(button.dataset.archive, 'archive')));
   document.querySelectorAll('[data-restore]').forEach(button => button.addEventListener('click', () => changeEpisodeState(button.dataset.restore, 'restore')));
   document.querySelectorAll('[data-delete]').forEach(button => button.addEventListener('click', () => deleteEpisode(button.dataset.delete)));
+  document.querySelectorAll('[data-forget]').forEach(button => button.addEventListener('click', () => forgetEpisode(button.dataset.forget, button)));
   document.querySelectorAll('[data-withdraw-collective]').forEach(button => button.addEventListener('click', () => withdrawCollective(button.dataset.withdrawCollective, button)));
   const animated = animateEpisodeId && document.querySelector('.episode.is-open .episode-body');
   if (animated && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -1024,6 +1025,26 @@ async function deleteEpisode(id) {
   selectedReport = null; selectedEpisodeId = null; await refresh();
 }
 
+async function forgetEpisode(id, button) {
+  if (!confirm('Permanently delete every incident, report, capsule and attachment in this episode, including its published Collective memory? Other episodes and knowledge already copied into other investigations are not erased. This cannot be undone.')) return;
+  button.disabled = true;
+  button.textContent = 'Removing shared memory...';
+  try {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const response = await fetch(`/api/episodes/${encodeURIComponent(id)}/forget`, {method:'POST'});
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Unable to delete episode');
+      if (result.status === 'deleted') {
+        selectedReport = null; selectedEpisodeId = null;
+        requestSequence++; updateLocation(); await refresh(); return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    }
+    alert('Collective withdrawal is still pending. Local records remain. Use this action again to finish deleting after withdrawal completes.');
+  } catch (error) { alert(error.message || 'Unable to delete episode'); }
+  finally { button.disabled = false; button.textContent = 'Delete episode and shared memory'; }
+}
+
 async function separateRelatedEpisode(groupId, episodeId) {
   if (!confirm('Keep this episode separate from the automatic related-condition cue?')) return;
   const response = await fetch(`/api/related-groups/${encodeURIComponent(groupId)}/episodes/${encodeURIComponent(episodeId)}/separate`, {method:'POST'});
@@ -1661,6 +1682,7 @@ function reportPanel(payload) {
   const fallback = ai?.status !== 'ready' ? '<section class="observed-summary"><h3>Alert context</h3><p>' + safe(report.fault_alerts?.[0]?.description || incident.summary) + '</p></section>' : '';
   const d = report.engineering_diagnostics;
   const diagnostics = disclosure('diagnostics', 'Engineering diagnostics', '<dl class="coverage-details"><div><dt>Selected evidence</dt><dd>' + d.selected_evidence + '</dd></div><div><dt>Log reduction</dt><dd>' + pct(d.log_compression_ratio) + '</dd></div><div><dt>Signal preservation</dt><dd>' + pct(d.important_signal_preservation) + '</dd></div><div><dt>Grounding</dt><dd>' + pct(d.hypothesis_grounding_score) + '</dd></div><div><dt>Runtime</dt><dd>' + Number(d.runtime_seconds || 0).toFixed(2) + 's</dd></div></dl><p class="queue-note">Rule-based hypothesis: ' + safe(report.primary_hypothesis.statement) + '</p>');
+  const deletion = disclosure('episode-deletion', 'Delete episode', '<p class="queue-note">Permanently remove this episode and its shared Collective memory. Other episodes, exported copies and evidence already copied into other investigations remain.</p><button type="button" class="danger" data-forget="' + safe(payload.episode_id) + '">Delete episode and shared memory</button>');
   const tabs = ['overview','investigation','evidence','timeline'];
   let content;
   if (reportTab === 'evidence') content = (sourceReturn?.episodeId === selectedEpisodeId ? '<div class="source-return"><button type="button" data-return-source>Back to ' + safe(sourceReturn.tab) + '</button></div>' : '') +
@@ -1671,7 +1693,7 @@ function reportPanel(payload) {
   else content = '<div class="overview-layout report-workspace">' + investigationScope(payload) + '<div class="report-main">' + briefingPanel(payload, false, contextWorkspace) + memoryContribution(ai || {}) + publicationProvenance(payload.publication_provenance || [], payload.episode_id, payload.collective_withdrawal) + fallback + (ai?.assessment ? '' : contextWorkspace) + (ai?.assessment ? overviewMetrics(report) : '') + '</div><div class="report-rail">' + investigationProgress(ai || {}, true) + '</div></div>';
   return '<section id="incident-report"><div class="report-navigation"><div role="tablist" aria-label="Investigation views">' +
     tabs.map(name=>'<button id="tab-' + name + '" role="tab" data-report-tab="' + name + '" aria-selected="' + (name === reportTab) + '" aria-controls="investigation-panel" tabindex="' + (name === reportTab ? 0 : -1) + '">' + name[0].toUpperCase() + name.slice(1) + '</button>').join('') +
-    '</div><div class="report-actions">' + (reportTab === 'overview' ? '' : evidenceAction) + exports + '</div></div><div id="investigation-panel" role="tabpanel" aria-labelledby="tab-' + reportTab + '" tabindex="0">' + content + '</div><div class="report-technical">' + diagnostics + '</div></section>';
+    '</div><div class="report-actions">' + (reportTab === 'overview' ? '' : evidenceAction) + exports + '</div></div><div id="investigation-panel" role="tabpanel" aria-labelledby="tab-' + reportTab + '" tabindex="0">' + content + '</div><div class="report-technical">' + diagnostics + deletion + '</div></section>';
 }
 
 function renderPatterns(state) {

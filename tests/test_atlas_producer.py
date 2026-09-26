@@ -269,6 +269,40 @@ class AtlasOutboxTests(unittest.TestCase):
                               encoding="utf-8")
         return episode
 
+    def test_forget_local_episode_removes_capsule_history_and_recall(self):
+        episode = self.add_retained_episode()
+        episode_id = episode["episode_id"]
+        revision = self.plane.investigator.revision_path(episode_id, "old")
+        revision.parent.mkdir(parents=True)
+        revision.write_text("{}")
+        self.assertEqual(self.plane.forget_episode(episode_id)["status"], "deleted")
+        self.assertIsNone(self.plane.store.get_episode(episode_id))
+        self.assertEqual(self.plane.store.list_patterns(), [])
+        self.assertFalse(revision.exists())
+        self.assertFalse((Path(self.directory.name) / "state/capsules/incident-local-id").exists())
+
+    def test_forget_waits_for_confirmed_shared_withdrawal(self):
+        with patch.object(self.plane.atlas_publisher, "start"):
+            self.plane.update_atlas_configuration({
+                "url": "https://collective.example", "token": "publisher-token", "publish_enabled": True,
+            })
+            episode = self.add_retained_episode()
+            client = CapturingAtlas()
+            self.plane.process_estima_outbox_once(client=client)
+            self.assertEqual(self.plane.forget_episode(episode["episode_id"])["status"], "pending")
+        self.assertIsNotNone(self.plane.store.get_episode(episode["episode_id"]))
+        self.plane.process_estima_outbox_once(client=client)
+        self.assertEqual(self.plane.forget_episode(episode["episode_id"])["status"], "deleted")
+        self.assertEqual(len(client.withdrawals), 1)
+        self.assertEqual(self.plane.store.publication_provenance(episode["episode_id"]), [])
+
+    def test_forget_rejects_unfinished_investigation(self):
+        episode = self.add_retained_episode()
+        with patch.object(self.plane.investigator, "read", return_value={"status": "running"}):
+            with self.assertRaisesRegex(ValueError, "finish"):
+                self.plane.forget_episode(episode["episode_id"])
+        self.assertIsNotNone(self.plane.store.get_episode(episode["episode_id"]))
+
     def test_instance_ids_are_unique_and_stable_per_state_directory(self):
         one = self.plane.atlas_configuration()["instance_id"]
         self.assertEqual(one, self.plane.atlas_configuration()["instance_id"])

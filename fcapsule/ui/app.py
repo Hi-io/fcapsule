@@ -579,6 +579,11 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
                     return
                 self._json(retry(limit=100), HTTPStatus.ACCEPTED)
                 return
+            if path.startswith("/api/episodes/") and path.endswith("/forget"):
+                episode_id = unquote(path.removeprefix("/api/episodes/").removesuffix("/forget").rstrip("/"))
+                result = self.server.control_plane.forget_episode(episode_id)
+                self._json(result, HTTPStatus.ACCEPTED if result["status"] == "pending" else HTTPStatus.OK)
+                return
             if path.startswith("/api/episodes/") and path.endswith("/collective-withdrawal"):
                 episode_id = unquote(path.removeprefix("/api/episodes/").removesuffix("/collective-withdrawal").rstrip("/"))
                 request_withdrawal = getattr(self.server.control_plane, "request_collective_withdrawal", None)

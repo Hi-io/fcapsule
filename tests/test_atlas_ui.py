@@ -78,6 +78,10 @@ class FakeControlPlane:
         self.withdrawal_episode = episode_id
         return {"status": "pending", "attempts": 0}
 
+    def forget_episode(self, episode_id):
+        self.withdrawal_episode = episode_id
+        return {"status": "pending"}
+
 
 class AtlasUIRouteTests(unittest.TestCase):
     def setUp(self):
@@ -183,6 +187,12 @@ class AtlasUIRouteTests(unittest.TestCase):
 
     def test_explicit_collective_withdrawal_route_uses_local_episode_id(self):
         status, result = self.request("POST", "/api/episodes/local%2Fepisode/collective-withdrawal")
+        self.assertEqual(status, 202)
+        self.assertEqual(result["status"], "pending")
+        self.assertEqual(self.plane.withdrawal_episode, "local/episode")
+
+    def test_forget_route_reports_pending_until_shared_withdrawal_finishes(self):
+        status, result = self.request("POST", "/api/episodes/local%2Fepisode/forget")
         self.assertEqual(status, 202)
         self.assertEqual(result["status"], "pending")
         self.assertEqual(self.plane.withdrawal_episode, "local/episode")

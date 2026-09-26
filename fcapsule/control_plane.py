@@ -745,6 +745,31 @@ class ControlPlane:
             self.current_incident_id = active[0]["incident_id"] if active else None
         return episode
 
+    def forget_episode(self, episode_id: str) -> dict[str, Any]:
+        """Withdraw shared recall before removing the local episode and its artifacts."""
+        with self.estima_publisher._lock:
+            episode = self.store.get_episode(episode_id)
+            if not episode:
+                raise KeyError(f"Unknown episode: {episode_id}")
+            if episode.get("status") == "active":
+                raise ValueError("Resolve the alert before deleting; an active source can capture it again")
+            if self.investigator.read(episode_id).get("status") in {"queued", "running"}:
+                raise ValueError("Wait for the investigation to finish before deleting")
+            if self.store.has_collective_publication(episode_id):
+                state = self.store.collective_withdrawal_status(episode_id)
+                if not state or state["status"] != "withdrawn":
+                    if state and state["status"] == "failed":
+                        raise ValueError("Collective withdrawal failed. Resolve it in Collective publication before deleting")
+                    if not state:
+                        self.request_collective_withdrawal(episode_id)
+                    return {"status": "pending", "message": "Waiting for Collective withdrawal; local records remain"}
+            with self.briefing_lock:
+                self.delete_episode(episode_id)
+                self._remove_managed_tree(self.investigator.path(episode_id).with_suffix(""))
+                self._remove_managed_tree(self.investigator.source_review_path(episode_id, "unused").parent)
+                self.store.remove_forgotten_publication_payloads(episode_id)
+            return {"status": "deleted"}
+
     def delete_episode(self, episode_id: str) -> None:
         incident_ids = self.store.episode_incident_ids(episode_id)
         if not incident_ids:

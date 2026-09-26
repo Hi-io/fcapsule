@@ -1833,6 +1833,17 @@ class FCAPSuleStore:
             )
         return len(ids)
 
+    def remove_forgotten_publication_payloads(self, local_episode_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute("DELETE FROM atlas_outbox WHERE local_episode_id = ?", (local_episode_id,))
+
+    def has_collective_publication(self, local_episode_id: str) -> bool:
+        with self._connect() as connection:
+            return connection.execute(
+                "SELECT 1 FROM atlas_publication_identities WHERE local_episode_id = ? LIMIT 1",
+                (local_episode_id,),
+            ).fetchone() is not None
+
     def collective_withdrawal_target(self, local_episode_id: str) -> dict[str, str]:
         with self._connect() as connection:
             rows = connection.execute(
