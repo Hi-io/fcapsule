@@ -34,6 +34,24 @@ class CaseLoaderTests(unittest.TestCase):
             with self.assertRaisesRegex(CaseValidationError, "invalid timestamp"):
                 load_case(target)
 
+    def test_case_id_must_be_a_bounded_filesystem_safe_identifier(self):
+        invalid_ids = (
+            "../outside", r"..\..\outside", "x" * 129, "", "case.", "CON", "NUL.txt", None, 123,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            for index, case_id in enumerate(invalid_ids):
+                with self.subTest(case_id=case_id):
+                    target = Path(directory) / f"case-{index}"
+                    shutil.copytree(REFERENCE_CASE, target)
+                    metadata = target / "metadata.yaml"
+                    value = json.dumps(case_id) if isinstance(case_id, str) else "null" if case_id is None else str(case_id)
+                    metadata.write_text(
+                        metadata.read_text(encoding="utf-8").replace("case_id: case_001", f"case_id: {value}"),
+                        encoding="utf-8",
+                    )
+                    with self.assertRaisesRegex(CaseValidationError, "filesystem-safe identifier"):
+                        load_case(target)
+
     def test_reuses_small_unchanged_case_parse_and_invalidates_on_file_change(self):
         from fcapsule.io import case_loader
 
