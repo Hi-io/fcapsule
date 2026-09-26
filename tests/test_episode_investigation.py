@@ -486,15 +486,34 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertFalse(state["usage"]["complete"])
 
     def test_provider_balance_failure_is_inconclusive_and_does_not_leak_provider_detail(self):
-        state, _ = self.run_case([RuntimeError("OpenRouter API returned HTTP 402: insufficient credit balance")])
+        # Include the provider-status digits in a timestamp to prove the leak
+        # assertion is scoped to user-visible/error fields, not the whole state.
+        with patch("fcapsule.episode_investigation.now", return_value="2026-09-26T12:34:56.402000Z"):
+            state, _ = self.run_case([RuntimeError("OpenRouter API returned HTTP 402: insufficient credit balance")])
 
         self.assertEqual(state["status"], "inconclusive")
         self.assertEqual(state["error_type"], "RuntimeError")
         self.assertEqual(state["assessment"]["provenance"], "deterministic_abstention")
         self.assertEqual(state["checks"][0]["status"], "completed")
         self.assertEqual(state["calls"][0]["status"], "failed")
-        self.assertNotIn("402", json.dumps(state))
-        self.assertNotIn("balance", json.dumps(state).lower())
+        self.assertIn(".402", state["started_at"])
+
+        call_error_fields = ("error", "error_message", "error_type", "message", "validation_error")
+        user_visible_errors = {
+            "message": state.get("message"),
+            "assessment": state.get("assessment"),
+            "error_type": state.get("error_type"),
+            "validation_error": state.get("validation_error"),
+            "draft_validation_error": state.get("draft_validation_error"),
+            "review": state.get("review"),
+            "call_errors": [
+                {key: call[key] for key in call_error_fields if key in call}
+                for call in state.get("calls", [])
+            ],
+        }
+        rendered_errors = json.dumps(user_visible_errors).lower()
+        self.assertNotIn("402", rendered_errors)
+        self.assertNotIn("balance", rendered_errors)
 
     def test_one_schema_repair_uses_existing_budget_and_keeps_rejected_decision(self):
         state, client = self.run_case([{"action": "check", "tool": "review_omitted", "arguments": {}, "question": "Other failures?", "distinguishes": "A competing cause"},
