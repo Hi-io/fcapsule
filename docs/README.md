@@ -7,6 +7,7 @@ Start with the [product overview](../README.md) or [Observability With Memory](p
 | Need | Guide |
 | --- | --- |
 | Use the incident queue, reports, Patterns, Targets, Collective and Settings | [Operations](operations.md) |
+| Restore and register a retained capsule archive locally | [Capsule archive import](capsule_archive_import.md) |
 | Install and iterate on the single-replica Kubernetes service | [Kubernetes deployment](kubernetes_deployment.md) |
 | Configure providers and understand model-call limits | [LLM provider operations](llm_provider_operations.md) |
 | Use a microphone from a trusted browser context | [HTTPS and microphone access](https_access.md) |
