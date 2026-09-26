@@ -1358,6 +1358,43 @@ function memoryContribution(run = {}) {
     '<div><p class="queue-note">A cited prior observation can guide a check; it does not establish the same cause.</p>' + rows + '</div></details>';
 }
 
+function publicationProvenance(items = []) {
+  const records = Array.isArray(items) ? items.slice(0,20) : [];
+  if (!records.length) return '';
+  const statusLabels = {
+    published:'Collective response succeeded',
+    retry_scheduled:'Retry scheduled',
+    attention_required:'Failed; attention required',
+    queued:'Queued; not yet sent',
+  };
+  const receiptLabels = {
+    not_yet_confirmed:'No successful response recorded',
+    remote_id_not_returned:'No Collective record ID returned',
+    remote_id_recorded:'Collective record ID unavailable',
+    legacy_receipt_unknown:'Receipt unavailable for this older record',
+  };
+  const label = item => statusLabels[item.status] || 'Delivery status unavailable';
+  const latest = records[0];
+  const summary = records.length + ' recent revision' + (records.length === 1 ? '' : 's') + ' · latest: ' + label(latest);
+  const rows = records.map(item => {
+    const revision = Number(item.revision);
+    const revisionLabel = Number.isFinite(revision) && revision > 0 ? 'Revision ' + fmt.format(revision) : 'Revision unavailable';
+    const attempts = Number(item.attempts);
+    const attemptLabel = Number.isFinite(attempts) && attempts > 0 ? fmt.format(attempts) + ' attempt' + (attempts === 1 ? '' : 's') : '';
+    const caseId = item.receipt_status === 'remote_id_recorded' && typeof item.remote_case_id === 'string'
+      ? item.remote_case_id.trim().slice(0,300) : '';
+    const receipt = caseId
+      ? '<a class="publication-receipt" href="/collective?case=' + safe(encodeURIComponent(caseId)) + '">Open Collective record <code>' + safe(caseId) + '</code></a>'
+      : '<span class="publication-receipt">' + safe(receiptLabels[item.receipt_status] || 'Receipt status unavailable') + '</span>';
+    const needsReason = ['retry_scheduled','attention_required'].includes(item.status);
+    const reasonText = needsReason ? (typeof item.last_error === 'string' && item.last_error.trim()
+      ? item.last_error.trim().slice(0,240) : 'No failure detail was recorded.') : '';
+    const reason = reasonText ? '<p class="publication-reason">' + safe(reasonText) + '</p>' : '';
+    return '<li class="publication-record"><div class="publication-record-head"><strong>' + safe(revisionLabel) + '</strong><span class="publication-status" data-status="' + safe(item.status) + '">' + safe(label(item)) + '</span></div><div class="publication-record-meta">' + receipt + (attemptLabel ? '<small>' + safe(attemptLabel) + '</small>' : '') + '</div>' + reason + '</li>';
+  }).join('');
+  return '<details class="publication-provenance"><summary><strong>Collective publication</strong><span>' + safe(summary) + '</span></summary><ol>' + rows + '</ol></details>';
+}
+
 function investigationProgress(run = {}, compact = false) {
   const checks = run.checks || [];
   const usage = run.usage;
@@ -1600,7 +1637,7 @@ function reportPanel(payload) {
     (evidenceView === 'sources' ? mediaEvidencePanel(payload) + investigationEvidence(ai || {}, payload.media_evidence || []) : evidencePanel(report)) + '</div></div>';
   else if (reportTab === 'timeline') content = timelinePanel(report) + investigationTimeline(ai || {}, payload.media_evidence || [], payload.investigation_revisions || []);
   else if (reportTab === 'investigation') content = '<div class="overview-layout investigation-layout">' + investigationProgress(ai || {}) + briefingPanel(payload, true) + sourceReviewPanel(payload) + '</div>';
-  else content = '<div class="overview-layout report-workspace">' + investigationScope(payload) + '<div class="report-main">' + briefingPanel(payload, false, contextWorkspace) + memoryContribution(ai || {}) + fallback + (ai?.assessment ? '' : contextWorkspace) + (ai?.assessment ? overviewMetrics(report) : '') + '</div><div class="report-rail">' + investigationProgress(ai || {}, true) + '</div></div>';
+  else content = '<div class="overview-layout report-workspace">' + investigationScope(payload) + '<div class="report-main">' + briefingPanel(payload, false, contextWorkspace) + memoryContribution(ai || {}) + publicationProvenance(payload.publication_provenance || []) + fallback + (ai?.assessment ? '' : contextWorkspace) + (ai?.assessment ? overviewMetrics(report) : '') + '</div><div class="report-rail">' + investigationProgress(ai || {}, true) + '</div></div>';
   return '<section id="incident-report"><div class="report-navigation"><div role="tablist" aria-label="Investigation views">' +
     tabs.map(name=>'<button id="tab-' + name + '" role="tab" data-report-tab="' + name + '" aria-selected="' + (name === reportTab) + '" aria-controls="investigation-panel" tabindex="' + (name === reportTab ? 0 : -1) + '">' + name[0].toUpperCase() + name.slice(1) + '</button>').join('') +
     '</div><div class="report-actions">' + (reportTab === 'overview' ? '' : evidenceAction) + exports + '</div></div><div id="investigation-panel" role="tabpanel" aria-labelledby="tab-' + reportTab + '" tabindex="0">' + content + '</div><div class="report-technical">' + diagnostics + '</div></section>';
