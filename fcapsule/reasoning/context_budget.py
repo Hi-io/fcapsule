@@ -621,7 +621,7 @@ def _discovery_observation(result: dict[str, Any]) -> dict[str, Any]:
         str(target.get("scrape_pool") or "")
         for target in result.get("active_targets", [])
         if isinstance(target, dict)
-        and str(target.get("health") or "") == "down"
+        # Recovery changes health, not the identity of the monitor we investigate.
         and ((target_service and str(target.get("service") or "") == target_service)
              or (pods and str(target.get("pod") or "") in pods))
         and target.get("scrape_pool")

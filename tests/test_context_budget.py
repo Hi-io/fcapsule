@@ -41,10 +41,12 @@ class ContextBudgetTests(unittest.TestCase):
             ],
         }
 
-        observation = _discovery_observation(result)
-
-        self.assertEqual(observation["monitor_selection"][0]["name"], "exporter")
-        self.assertEqual(observation["monitor_selection"][0]["targets"][0]["scrape_path"], "/metrics-v2")
+        for health, path in (("down", "/metrics-v2"), ("up", "/metrics"), ("unknown", "/metrics")):
+            with self.subTest(health=health):
+                down_target.update(health=health, scrape_path=path, last_error="404" if health == "down" else "")
+                observation = _discovery_observation(result)
+                self.assertEqual(observation["monitor_selection"][0]["name"], "exporter")
+                self.assertEqual(observation["monitor_selection"][0]["targets"][0]["scrape_path"], path)
 
     def test_log_diagnostics_stay_paired_with_representative_events_in_model_context(self):
         context = {"episode_id": "diag-pair", "live_capture": True, "evidence": [{
