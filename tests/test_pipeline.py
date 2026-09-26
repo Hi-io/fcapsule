@@ -1,9 +1,11 @@
+import hashlib
 import json
 import tempfile
 import unittest
 from pathlib import Path
-from zipfile import ZipFile
+from zipfile import ZIP_DEFLATED, ZipFile
 
+from fcapsule.io.archive_writer import verify_archive
 from fcapsule.pipeline import investigate_case
 from fcapsule.incident_report import build_incident_report
 from fcapsule.models.schemas import CaseBundle
@@ -52,7 +54,33 @@ class PipelineRegressionTests(unittest.TestCase):
             with ZipFile(output / "fcapsule_case_001.zip") as archive:
                 names = set(archive.namelist())
             self.assertNotIn("opensearch_logs.json", names)
-            self.assertEqual(names, {"capsule.md", "capsule.json", "evidence.json", "evaluation.json", "baselines.json"})
+            self.assertEqual(names, {"capsule.md", "capsule.json", "evidence.json", "evaluation.json", "baselines.json", "capsule_manifest.json"})
+
+    def test_archive_manifest_is_versioned_and_detects_tampering(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output"
+            investigate_case(REFERENCE_CASE, output)
+            archive_path = output / "fcapsule_case_001.zip"
+            manifest = verify_archive(archive_path)
+            self.assertEqual(manifest["format"], "fcapsule.capsule_archive")
+            self.assertEqual(manifest["format_version"], 1)
+            with ZipFile(archive_path) as archive:
+                archived_files = set(archive.namelist()) - {"capsule_manifest.json"}
+                self.assertEqual(archived_files, {item["path"] for item in manifest["files"]})
+                for item in manifest["files"]:
+                    content = archive.read(item["path"])
+                    self.assertEqual(item["size_bytes"], len(content))
+                    self.assertEqual(item["sha256"], hashlib.sha256(content).hexdigest())
+
+            tampered_path = Path(directory) / "tampered.zip"
+            with ZipFile(archive_path) as source, ZipFile(tampered_path, "w", compression=ZIP_DEFLATED) as target:
+                for name in source.namelist():
+                    content = source.read(name)
+                    if name == "capsule.md":
+                        content = bytes([content[0] ^ 1]) + content[1:]
+                    target.writestr(name, content)
+            with self.assertRaisesRegex(ValueError, "integrity check failed"):
+                verify_archive(tampered_path)
 
     def test_incident_report_surfaces_generic_kubernetes_metrics(self):
         anomaly = {
