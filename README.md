@@ -1,6 +1,6 @@
 # FCAPSule
 
-**FCAPSule investigates; Estima remembers.** An AI investigator for the observability stack you already have, with an optional memory of past incidents.
+**FCAPSule investigates; Collective remembers.** An AI investigator for the observability stack you already have, with an optional memory of past incidents.
 
 An alert tells a monitoring team that something is wrong. The explanation is usually scattered across logs, metrics, workload configuration and earlier incidents, often in systems with different retention windows. FCAPSule joins those observations around the incident, lets a bounded AI investigator ask follow-up questions, and preserves the evidence and reasoning in an inspectable capsule.
 
@@ -26,7 +26,7 @@ For the full product narrative, see [Observability With Memory](docs/product_val
 2. A firing alert opens a bounded capture. FCAPSule preserves selected fault, performance, log and configuration evidence and builds a report even if the model provider is unavailable.
 3. **Operations** presents the episode, affected resource, observed impact and AI investigation. Follow citations into the captured evidence or the investigator's checks; add evidence or export the report when needed.
 4. **Patterns** shows recurring issues and links back to separate episodes. An eligible earlier capsule can become bounded context for a new investigation.
-5. Optionally connect **Estima** in Settings. Its independent API and PostgreSQL store minimized, versioned cases from participating instances; the Estima view lets engineers inspect observations, hypotheses and provenance without treating similarity as a verified cause.
+5. Optionally connect **Collective** in Settings. Its independent API and PostgreSQL store minimized, versioned cases from participating instances; the Collective view lets engineers inspect observations, hypotheses and provenance without treating similarity as a verified cause.
 6. **Settings** also controls FCAPSule incident retention and model configuration. Offline model comparisons remain an evaluation workflow, not an operator dashboard.
 
 ![Investigation activity with diagnostic checks and retained-history comparison](docs/assets/product/ai-investigation-lab.png)
@@ -36,13 +36,20 @@ The model's assessment is a supported hypothesis, not a certified root cause or 
 ## Evidence and Memory
 
 Each FCAPSule instance retains its own capsules and uses conservative same-instance
-history. An independent, opt-in **Estima** service can share compact cases across
+history. An independent, opt-in **Collective** service can share compact cases across
 participating instances; it is disabled by default and does not replace local
 history or turn a similar case into a shared-cause finding. FCAPSule runs the
 models and interprets any retrieved context using its own provider configuration.
-Estima stores and returns cases; it does not run LLMs, receive provider keys or
-incur token charges. See the [Estima integration guide](docs/estima.md) for its
+Collective stores and returns cases; it does not run LLMs, receive provider keys or
+incur token charges. See the [Collective integration guide](docs/collective.md) for its
 privacy boundary, API, operator limits and evaluation plan.
+
+The Collective page and local API use `/collective`, `/api/settings/collective`
+and `/api/collective/*`. Existing `/estima` and `/atlas` page paths, `/api/estima/*`
+and `/api/settings/estima` routes, `FCAPSULE_ESTIMA_*` settings and
+`estima-settings.json` state remain compatible. New configuration can use
+`FCAPSULE_COLLECTIVE_*`; when both names are set, Collective settings take
+precedence.
 
 | Source | What FCAPSule uses today |
 | --- | --- |
@@ -65,7 +72,7 @@ python -m pip install -e .
 python -m fcapsule.cli serve
 ```
 
-Open `http://127.0.0.1:8765/console`. Targets, Patterns and Settings are linked in the UI. On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`. No external source is connected until configured in Targets or through environment variables. The CLI works without the web interface.
+Open `http://127.0.0.1:8765/console`. Collective, Targets, Patterns and Settings are linked in the UI. On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`. No external source is connected until configured in Targets or through environment variables. The CLI works without the web interface.
 
 To deploy the single-replica reference service in Kubernetes, follow the [Kubernetes guide](docs/kubernetes_deployment.md). It uses read-only Kubernetes access, a persistent state volume and configurable Prometheus/OpenSearch URLs. FCAPSule Lab is a [separate workload project](https://github.com/Hi-io/fcapsule-lab), not a runtime dependency.
 
@@ -89,12 +96,12 @@ See [provider operations](docs/llm_provider_operations.md), [evaluation plan](EV
 
 FCAPSule is working single-replica software for a trusted environment, not an Internet-facing managed service. The reference HTTP server has no built-in authentication, authorization or TLS; SQLite and in-process workers are not distributed. Masking is heuristic, not a guarantee of anonymization. Historical matching is deliberately conservative and cannot equate every failure across changed workloads. Investigation quality still requires review on real incidents.
 
-Cross-instance case sharing through Estima is a distinct, optional integration.
-It is disabled by default and requires the independently deployed Estima service.
+Cross-instance case sharing through Collective is a distinct, optional integration.
+It is disabled by default and requires the independently deployed Collective service.
 The current API uses a shared bearer token without per-instance authorization, and
 has no remote delete endpoint or automated case-retention policy. Do not treat it
 as a production multi-tenant service. Local incident capture and investigation
-must remain useful when Estima is unavailable. Estima has its own API and
+must remain useful when Collective is unavailable. Collective has its own API and
 PostgreSQL lifecycle; it is not an FCAPSule model runtime or source of provider
 credentials.
 

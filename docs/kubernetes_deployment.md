@@ -4,8 +4,8 @@
 
 FCAPSule runs beside an existing observability stack. It does not install or replace Prometheus, OpenSearch, Filebeat, Grafana, or Alertmanager. Its pod reads bounded data from those systems, resolves the affected Kubernetes workload, and retains derived incident evidence on a persistent state volume.
 
-For connecting an FCAPSule deployment to an independently operated Estima API,
-see [Estima Kubernetes integration](estima_kubernetes_integration.md). Estima's
+For connecting an FCAPSule deployment to an independently operated Collective API,
+see [Collective Kubernetes integration](collective_kubernetes_integration.md). Collective's
 service and PostgreSQL database are deployed from its own repository, not from
 this FCAPSule deployment.
 

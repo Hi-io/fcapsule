@@ -36,18 +36,19 @@ The optional episode investigation sends compact retained evidence, configuratio
 
 The investigation retains its bounded context, public check questions, observations, structured model decisions, validation failures and usage metadata. It does not retain private model deliberation. Completed/incomplete investigations are included in the capsule ZIP. Source errors are recorded generically to avoid persisting request credentials. Offline evaluation separately records prompts/responses. Citation validation checks reference integrity, not factual entailment or causal truth. The tool does not execute remediation. Prometheus/OpenSearch retention is not inferred.
 
-## Estima Sharing
+## Collective Sharing
 
 When explicitly enabled, the FCAPSule client can send a bounded, minimized case
-projection to the separately operated Estima API or retrieve historical
-candidates. Estima stores and returns records; it does not call an LLM, receive
+projection to the separately operated Collective API or retrieve historical
+candidates. Collective stores and returns records; it does not call an LLM, receive
 provider keys or incur model-token usage. A FCAPSule provider call that interprets
 retrieved context remains an ordinary investigation request and may incur
-provider charges. The Estima bearer token is service authentication, not a model
+provider charges. The Collective bearer token is service authentication, not a model
 credential. Remote cases have a separate lifecycle: local incident deletion does
-not remove a published Estima record. Review the outgoing projection and remote
+not remove a published Collective record. Review the outgoing projection and remote
 retention/access/deletion policy before enabling sharing; masking does not promise
-anonymity. See [Estima integration](estima.md).
+anonymity. Legacy `FCAPSULE_ESTIMA_*` settings and `/estima` routes remain
+supported alongside the Collective names and routes. See [Collective integration](collective.md).
 
 ## Secrets and Deployment
 

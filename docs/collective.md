@@ -1,13 +1,17 @@
-# Estima Integration
+# Collective Integration
 
-**FCAPSule investigates; Estima remembers.** Estima is an independent, opt-in
+**FCAPSule investigates; Collective remembers.** Collective is an independent, opt-in
 shared memory service with its own repository, HTTP API and PostgreSQL database:
-[Hi-io/estima](https://github.com/Hi-io/estima). FCAPSule remains responsible for
+[service repository](https://github.com/Hi-io/estima). FCAPSule remains responsible for
 collecting evidence, running any configured LLM investigation, and deciding what
-minimized knowledge to publish. Estima validates, stores and retrieves that
+minimized knowledge to publish. Collective validates, stores and retrieves that
 knowledge; it does not run LLMs, need model-provider API keys, interpret cases or
 incur model-token charges. Any interpretation of retrieved cases happens in the
 requesting FCAPSule instance, under that instance's model configuration and cost.
+
+Collective is the current product name. Earlier FCAPSule releases called this
+integration Estima, so existing configuration, local API paths and saved settings
+continue to work during the rename.
 
 The integration is optional and disabled unless read and/or publication are
 enabled. A service outage, missing configuration or empty result must not prevent
@@ -24,7 +28,7 @@ sources -> evidence -> local LLM           sources -> evidence -> local LLM
           | minimize and publish                       | retrieve candidates
           +-------------------+-------------------------+
                               v
-                    Estima HTTP API
+                  Collective HTTP API
                               |
                               v
                        PostgreSQL
@@ -33,16 +37,16 @@ sources -> evidence -> local LLM           sources -> evidence -> local LLM
 - **FCAPSule investigates.** It owns source access, incident capture, per-instance
   capsules, local history, model calls and the interpretation of current and
   retrieved evidence. Provider credentials stay in FCAPSule.
-- **Estima remembers.** It accepts versioned, bounded case records, preserves
+- **Collective remembers.** It accepts versioned, bounded case records, preserves
   observations separately from hypotheses, and returns historical candidates with
   provenance. It does not inspect Prometheus, OpenSearch, Kubernetes or live
   incident sources, and it does not execute actions.
-- **Operators choose what to share.** Estima reads and publication are separate
+- **Operators choose what to share.** Collective reads and publication are separate
   opt-ins. Published records are a minimized projection, not a capsule archive,
   telemetry backup or proof of anonymization.
 - **Instances remain independent.** Shared records do not merge episodes, assert
   a common workload identity or establish a shared cause. Local investigation
-  continues when Estima is unavailable.
+  continues when Collective is unavailable.
 
 ## Facts, Hypotheses and Similarity
 
@@ -71,22 +75,22 @@ validates input shape and recognized secret patterns, but it is not a complete D
 system or an anonymization guarantee. Rare values, timestamps, topology and
 combinations of observations may still identify an environment.
 
-The `FCAPSULE_ESTIMA_TOKEN` is a credential for the Estima service API; it is not
-an LLM API key and is not used for model inference. Estima does not receive
+The `FCAPSULE_COLLECTIVE_TOKEN` is a credential for the Collective service API; it
+is not an LLM API key and is not used for model inference. Collective does not receive
 FCAPSule provider keys. Conversely, whenever FCAPSule's configured provider
 interprets a retrieved record, that is an ordinary FCAPSule model call and may
 incur provider usage and charges.
 
-Estima has an independent data lifecycle. Deleting a local incident does not
+Collective has an independent data lifecycle. Deleting a local incident does not
 delete a previously published remote case. Agree on remote retention, deletion,
-backup and export procedures with the Estima operator before sharing real cases.
+backup and export procedures with the Collective operator before sharing real cases.
 The current API does not provide a per-case delete endpoint or automatic case
 retention policy.
 
 ## API Contract
 
-The FCAPSule client speaks Estima's versioned `/v1` API. See the
-[Estima repository](https://github.com/Hi-io/estima) for the service's authoritative
+The FCAPSule client speaks Collective's versioned `/v1` API. See the
+[service repository](https://github.com/Hi-io/estima) for the service's authoritative
 API and deployment contract.
 
 | Operation | Route | Behavior and limit |
@@ -114,34 +118,37 @@ implemented and verified.
 
 ## FCAPSule Configuration
 
-Configure the Estima endpoint, service token and stable producer identity in
+Configure the Collective endpoint, service token and stable producer identity in
 FCAPSule Settings or through environment defaults:
 
 | Environment variable | Purpose |
 | --- | --- |
-| `FCAPSULE_ESTIMA_URL` | Base URL of the separately operated Estima API. |
-| `FCAPSULE_ESTIMA_TOKEN` | Estima bearer token; not a provider key. |
-| `FCAPSULE_ESTIMA_INSTANCE_ID` | Stable identity for this publishing FCAPSule state directory; use a distinct value per independent instance. |
-| `FCAPSULE_ESTIMA_READ` | Opt in to retrieval. Off by default. |
-| `FCAPSULE_ESTIMA_PUBLISH` | Opt in to publishing. Off by default. |
+| `FCAPSULE_COLLECTIVE_URL` | Base URL of the separately operated Collective API. |
+| `FCAPSULE_COLLECTIVE_TOKEN` | Collective bearer token; not a provider key. |
+| `FCAPSULE_COLLECTIVE_INSTANCE_ID` | Stable identity for this publishing FCAPSule state directory; use a distinct value per independent instance. |
+| `FCAPSULE_COLLECTIVE_READ` | Opt in to retrieval. Off by default. |
+| `FCAPSULE_COLLECTIVE_PUBLISH` | Opt in to publishing. Off by default. |
 
-Saved Settings override environment defaults. The token is saved in the
-owner-readable local state file `estima-settings.json`; if absent, FCAPSule
-migrates legacy `atlas-settings.json` settings without removing that file. Keep
+Saved Settings override environment defaults. For compatibility, the token is
+saved in the owner-readable local state file `estima-settings.json`; if absent,
+FCAPSule migrates legacy `atlas-settings.json` settings without removing that file. Keep
 the ID stable for one instance's publishing history, and do not clone a state
 directory into multiple independent publishers without assigning distinct IDs.
-The ID is an attribution field, not an authentication credential. Legacy
-`FCAPSULE_ATLAS_*` environment variables remain fallbacks for compatibility; use
-the `FCAPSULE_ESTIMA_*` names for new configuration.
+The ID is an attribution field, not an authentication credential. Existing
+`FCAPSULE_ESTIMA_*` environment variables remain supported, and legacy
+`FCAPSULE_ATLAS_*` names remain fallbacks. When both are set, use the
+`FCAPSULE_COLLECTIVE_*` values; they take precedence.
 
-The FCAPSule page is `/estima`; its local API uses `/api/settings/estima` and
-`/api/estima/*`. Old `/atlas` paths remain compatibility aliases during the
-transition. These are FCAPSule-local routes; Estima's remote API remains `/v1`.
+The FCAPSule page is `/collective`, and its preferred local API uses
+`/api/settings/collective` and `/api/collective/*`. The previous `/estima` page,
+`/api/settings/estima` and `/api/estima/*` paths remain compatibility aliases;
+older `/atlas` paths remain supported as well. These are FCAPSule-local routes.
+The remote Collective API continues to use `/v1`.
 
 The client requires HTTPS except for localhost and in-cluster `.svc` DNS names.
 Use a trusted TLS ingress/proxy for remote endpoints. The client applies bounded
 request timeouts and response sizes and keeps a local SQLite outbox for retryable
-publication. Publication does not hold up live capture. Watch the Estima status
+publication. Publication does not hold up live capture. Watch the Collective status
 in FCAPSule for unavailable service or failed/pending delivery; neither is the
 same as "no relevant case found."
 
@@ -149,7 +156,7 @@ same as "no relevant case found."
 
 ### Explore Collective Memory
 
-The Estima page presents retained knowledge as an interactive map and an
+The Collective page presents retained knowledge as an interactive map and an
 equivalent list. Larger colored nodes are repeated typed observations; smaller
 nodes are retained cases. An edge means that the case contains the observation's
 same domain, key, typed value and unit. It is not a causal link or an inferred
@@ -161,7 +168,7 @@ source provenance. Pattern details explain the shared observation and list
 recent members. Direct case and pattern links remain shareable. Zoom, pan,
 keyboard selection and a list alternative support different exploration styles.
 
-The time control filters the **event times of loaded cases**, not when Estima
+The time control filters the **event times of loaded cases**, not when Collective
 learned or ingested them. The instance control isolates contributions visible in
 the loaded records. These controls only change the presentation; they do not
 publish, modify, delete or re-investigate anything, and make no model calls.
@@ -172,15 +179,15 @@ set of recent members. Search can add up to 10 matching cases. Counts explicitly
 refer to the loaded view, except pattern totals labeled across memory. Revisions
 of one producer/episode are deduplicated to the newest loaded revision. Pattern
 totals must not be summed to infer a global incident count. There is no claim that
-the map contains every record stored by Estima. Loading, unavailable, partial
+the map contains every record stored by Collective. Loading, unavailable, partial
 retrieval and empty states are distinct, with refresh/retry controls.
 
 ### Connect Instances
 
-1. Obtain the endpoint and bearer token from the Estima operator. Review who may
+1. Obtain the endpoint and bearer token from the Collective operator. Review who may
    publish and search, what data may leave each instance, and the remote lifecycle.
 2. Configure each FCAPSule instance with the same approved endpoint and token,
-   but a distinct, stable `FCAPSULE_ESTIMA_INSTANCE_ID`.
+   but a distinct, stable `FCAPSULE_COLLECTIVE_INSTANCE_ID`.
 3. Keep both reads and publication disabled while validating connectivity, schema
    compatibility and the outgoing minimized projection with synthetic cases.
 4. Enable only the desired action. Publishing and searching can be opted into
@@ -189,13 +196,13 @@ retrieval and empty states are distinct, with refresh/retry controls.
    from hypotheses. Continue checking current incident evidence; do not treat
    similarity as a verified root cause.
 6. Test timeout, authentication failure, incompatible responses and complete
-   Estima outage. Confirm local capture, local history and investigation still
+   Collective outage. Confirm local capture, local history and investigation still
    work and that missing shared context is labeled accurately.
 
 ## Evaluation and Limits
 
 Evaluate relevance and false matches on a fixed, reviewed dataset with negative
-controls, independent reviewers and a no-Estima/local-history baseline. Measure
+controls, independent reviewers and a no-Collective/local-history baseline. Measure
 latency, outages, payload size, privacy exposure and source-expiry behavior.
 Report dataset composition, API/schema version, retrieval settings, protocol,
 uncertainty and limitations. A successful request or repeated observation pattern
@@ -206,6 +213,6 @@ A synthetic two-instance smoke test was recorded on 2026-09-25 UTC using the
 earlier Atlas-branded integrated prototype and an isolated PostgreSQL-backed
 service. It exercised publication, retrieval, provenance, separate hypotheses,
 source expiry and unavailable-service behavior. That snapshot does not certify the
-new independent Estima repository/deployment, access isolation, relevance across
+current independent Collective deployment, access isolation, relevance across
 varied incidents or production readiness. Keep screenshots and test records in
 ignored `local_reports/`, not in the repository.

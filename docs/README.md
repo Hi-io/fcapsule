@@ -6,20 +6,20 @@ Start with the [product overview](../README.md) or [Observability With Memory](p
 
 | Need | Guide |
 | --- | --- |
-| Use the incident queue, reports, Patterns, Targets and Settings | [Operations](operations.md) |
+| Use the incident queue, reports, Patterns, Targets, Collective and Settings | [Operations](operations.md) |
 | Install and iterate on the single-replica Kubernetes service | [Kubernetes deployment](kubernetes_deployment.md) |
 | Configure providers and understand model-call limits | [LLM provider operations](llm_provider_operations.md) |
 | Use a microphone from a trusted browser context | [HTTPS and microphone access](https_access.md) |
 | Understand capture storage, masking, credentials and deletion | [Privacy and retention](data_privacy.md) |
-| Connect to shared cross-instance case memory | [Estima integration](estima.md) |
+| Connect to shared cross-instance case memory | [Collective integration](collective.md) |
 
 The [separate FCAPSule Lab](https://github.com/Hi-io/fcapsule-lab) generates test workloads. It is not installed or required by FCAPSule.
 
 ## Understand the System
 
 - [Architecture](architecture.md) and [engineering design](../PROJECT_DESIGN.md): runtime components, source ownership and deployment shape.
-- [Estima integration](estima.md): the opt-in FCAPSule client, external API contract, privacy boundary, operator workflow and evaluation plan. Estima is an independent service with its own repository and PostgreSQL database; production guarantees remain unverified.
-- [Estima Kubernetes integration](estima_kubernetes_integration.md): configure FCAPSule clients to reach an independently deployed Estima service. It does not deploy Estima or its database from this repository.
+- [Collective integration](collective.md): the opt-in FCAPSule client, external API contract, privacy boundary, operator workflow and evaluation plan. Collective is an independent service with its own repository and PostgreSQL database; production guarantees remain unverified.
+- [Collective Kubernetes integration](collective_kubernetes_integration.md): configure FCAPSule clients to reach an independently deployed Collective service. It does not deploy Collective or its database from this repository.
 - [AI investigation techniques](ai_investigation_techniques.md): the actual read-only tools, evidence selection, model calls, grounding checks and limitations.
 - [Historical capsule retrieval](historical_capsule_retrieval.md): how retained evidence can inform a later incident without treating an old model answer as fact.
 - [Optional image and audio evidence](multimodal_evidence.md): capability gates, provenance and reviewed reassessment.
