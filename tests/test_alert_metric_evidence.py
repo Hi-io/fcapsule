@@ -511,6 +511,30 @@ class AlertMetricCaptureTests(unittest.TestCase):
         self.assertEqual([item["status"] for item in evidence["sample_coverage"]], ["complete", "unavailable"])
         self.assertEqual(evidence["sample_coverage"][1]["missing_samples"], 5)
 
+    def test_nonfinite_series_cannot_be_hidden_by_another_finite_series(self):
+        results = [
+            {"metric": {**LABELS, "instance": "observed"}, "values": [
+                [START.timestamp() + offset * 15, "1"] for offset in range(5)
+            ]},
+            {"metric": {**LABELS, "instance": "stale"}, "values": [
+                [START.timestamp(), "NaN"], [START.timestamp() + 15, "+Inf"],
+                [START.timestamp() + 30, "-Inf"],
+            ]},
+        ]
+
+        captured = self.collect(results=results)
+        evidence = captured["alert_evidence"]
+
+        self.assertEqual(evidence["status"], "partial")
+        self.assertEqual(evidence["reason"], "incomplete_sample_coverage")
+        self.assertEqual(evidence["omitted_no_finite_series_count"], 1)
+        self.assertEqual(len(captured["series"]), 1)
+        self.assertEqual(captured["series"][0]["labels"]["instance"], "observed")
+        self.assertEqual([item["status"] for item in evidence["sample_coverage"]], ["complete", "unavailable"])
+        self.assertEqual(evidence["sample_coverage"][1]["observed_samples"], 0)
+        self.assertEqual(evidence["sample_coverage"][1]["missing_samples"], 5)
+        self.assertEqual(evidence["sample_coverage"][1]["reason"], "no_finite_samples")
+
     def test_no_query_for_unsupported_rules_or_model_annotations(self):
         captured = self.collect(query="up == 0 or vector(1)")
         self.assertEqual(captured["alert_evidence"]["status"], "unavailable")

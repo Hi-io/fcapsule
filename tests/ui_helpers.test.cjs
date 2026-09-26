@@ -327,6 +327,7 @@ test('overview previews one relevant series and links to all retained performanc
   const render = helper('overviewMetrics','evidencePanel', {
     safe:value=>String(value ?? ''), icon:()=>'', sparkline:()=>'<svg></svg>',
     shortTime:value=>value, formatExactDate:value=>value,
+    alertMetricCoverageNote:helper('alertMetricCoverageNote','metricsPanel',{safe:value=>String(value ?? '')}),
   });
   const values = [{timestamp:'2026-09-23T00:00:00Z',value:1},{timestamp:'2026-09-23T00:10:00Z',value:2}];
   const signals = [
@@ -343,6 +344,23 @@ test('overview previews one relevant series and links to all retained performanc
   assert.match(html, /All performance evidence/);
   assert.equal((html.match(/<svg>/g) || []).length, 1);
   assert.equal(render({pm_signals:[{...signals[0],signal_origin:'alert_rule',values:[{value:null},{value:null}]}]}), '');
+});
+
+test('overview charts disclose partial alert coverage and dropped non-finite series', () => {
+  const code = source.slice(source.indexOf('function alertMetricCoverageNote('), source.indexOf('function evidencePanel('));
+  const render = vm.runInNewContext(code + '\n({overviewMetrics,metricsPanel})', {
+    safe:value=>String(value ?? ''), icon:()=>'', sparkline:()=>'<svg></svg>',
+    shortTime:value=>value, formatExactDate:value=>value, metricChart:()=>'',
+  });
+  const report = {
+    alert_metric_evidence:[{alertname:'TargetDown',status:'partial',reason:'incomplete_sample_coverage',omitted_no_finite_series_count:1}],
+    pm_signals:[{signal_origin:'alert_rule',evidence_id:'metric-a',metric:'up',label:'Target health',component:'pod-a',
+      values:[{timestamp:'2026-09-23T00:00:00Z',value:0},{timestamp:'2026-09-23T00:10:00Z',value:0}]}],
+  };
+  const overview = render.overviewMetrics(report);
+  assert.match(overview,/Alert signal coverage is partial: TargetDown \(incomplete sample coverage; 1 scoped series had no finite samples\)/);
+  assert.match(overview,/Unobserved points are unknown, not healthy evidence/);
+  assert.match(render.metricsPanel(report),/Alert signal coverage is partial/);
 });
 
 test('metric chart distinguishes the reference period and selected deviation', () => {
@@ -494,7 +512,8 @@ test('a corrected attachment can be reviewed again without claiming it changed t
 });
 
 test('missing alert series is not presented as a healthy graph', () => {
-  const render=helper('metricsPanel','overviewMetrics',{safe:value=>String(value),metricChart:()=>''});
+  const render=helper('metricsPanel','overviewMetrics',{safe:value=>String(value),metricChart:()=>'',
+    alertMetricCoverageNote:helper('alertMetricCoverageNote','metricsPanel',{safe:value=>String(value)})});
   assert.match(render({pm_signals:[]}),/not retained.*not backfilled/);
   assert.match(render({alert_metric_evidence:[{alertname:'Condition',status:'unavailable',reason:'query_failed'}]}),/Condition \(query failed\)/);
   const partial=render({alert_metric_evidence:[{alertname:'Condition',status:'partial',reason:'incomplete_sample_coverage'}],pm_signals:[{signal_origin:'alert_rule'}]});
