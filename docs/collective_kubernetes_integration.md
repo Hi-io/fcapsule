@@ -1,7 +1,7 @@
 # Collective Integration in Kubernetes
 
 Collective is a separately operated service, with its own repository, HTTP API and
-PostgreSQL database: [service repository](https://github.com/Hi-io/estima). This guide
+PostgreSQL database: [service repository](https://github.com/Hi-io/collective). This guide
 covers the FCAPSule client side only. It does not install Collective or PostgreSQL
 from the FCAPSule repository. Follow the service repository for deployment,
 database migrations, backups and lifecycle operations.
@@ -34,15 +34,18 @@ FCAPSULE_COLLECTIVE_PUBLISH=false
 ```
 
 Do not put the Collective token or FCAPSule provider keys in a ConfigMap. Mount
-`FCAPSULE_COLLECTIVE_TOKEN` from the cluster's approved Secret manager. This token
-authenticates FCAPSule to Collective; it is not an LLM API key. Provider keys remain
-in the normal FCAPSule Secret and are never needed by Collective. The endpoint is a
-placeholder: use the actual Collective address issued by its operator.
+`FCAPSULE_COLLECTIVE_TOKEN` from the cluster's approved Secret manager. Use a
+publisher credential provisioned for this `instance_id`, or a read-only credential
+when publication is disabled. This authenticates FCAPSule to Collective; it is not
+an LLM API key. Provider keys remain in the normal FCAPSule Secret and are never
+needed by Collective. The endpoint is a placeholder: use the actual Collective
+address issued by its operator.
 
 Reads and publication are independent opt-ins and are off by default. Enable one
 or both only after reviewing the outgoing case projection and the Collective sharing
 policy. Assign each FCAPSule instance a different stable
-`FCAPSULE_COLLECTIVE_INSTANCE_ID`, even when instances share one endpoint and token.
+`FCAPSULE_COLLECTIVE_INSTANCE_ID`; obtain a publisher credential bound to that ID
+for each publishing instance.
 Saved Settings override environment defaults. Current client settings are in
 `estima-settings.json` for compatibility; older state migrates values from
 `atlas-settings.json` when this file does not exist. `FCAPSULE_ESTIMA_*` settings
@@ -57,13 +60,13 @@ plain-HTTP bearer-token endpoint to an untrusted network.
 
 ## Shared-Service Boundary
 
-Any number of FCAPSule instances can point to the same Collective endpoint. Its
-current API uses a shared bearer token and does not provide per-instance
-authorization or tenant isolation. A shared endpoint is therefore a trust
-boundary, not a multi-tenant partition. Restrict network reachability and token
-distribution to approved participants; do not combine mutually untrusted
-organizations on one deployment until the service's authorization model supports
-and verifies that arrangement.
+Any number of FCAPSule instances can point to the same Collective endpoint. Use a
+distinct instance-bound publisher credential for each publishing instance, or a
+read-only reader credential where appropriate. Publishers and readers can still
+read cases across the deployment, so this is a single-organization trust boundary,
+not tenant isolation. Restrict network reachability and credential distribution to
+approved participants; do not combine mutually untrusted organizations on one
+deployment.
 
 The FCAPSule repo contains no Collective Deployment, database credentials, or
 PostgreSQL storage manifest. Collective's operator is responsible for selecting
@@ -73,7 +76,7 @@ does not establish that FCAPSule sources or provider calls are healthy.
 
 ## Verify and Operate
 
-1. Deploy Collective using the instructions in its [service repository](https://github.com/Hi-io/estima).
+1. Deploy Collective using the instructions in its [service repository](https://github.com/Hi-io/collective).
 2. From each FCAPSule namespace, verify DNS/TLS reachability to the configured
    endpoint and use `GET /healthz` as an initial service check.
 3. Configure the token and a unique instance ID on each FCAPSule. Confirm the
@@ -87,9 +90,9 @@ does not establish that FCAPSule sources or provider calls are healthy.
    storage, access, retention, backup and health controls.
 
 FCAPSule currently uses bounded API requests and a local retryable outbox; a
-successful connection does not guarantee every case has been published. Deleting
-an incident locally does not delete its remote Collective copy. The current service
-API has no per-case delete endpoint or automatic retention policy, so agree on
+successful connection does not guarantee every case has been published. The
+Collective service supports explicit episode withdrawal and optional retention
+expiry, but neither is triggered by deleting a local FCAPSule incident. Agree on
 remote disposal procedures before sending real operational data.
 
 This integration test does not prove search relevance, diagnostic accuracy,

@@ -35,7 +35,7 @@ The owner needs to see which applications are protected, whether their FM, PM, l
 - **Retention is operational context.** A trace source available for the next few minutes is a time-sensitive action, not a storage implementation detail.
 - **No model contest in the operator workflow.** Model selection is an administrator and evaluation concern. The runtime uses the configured model, while users see grounded findings and evidence rather than scores, latency, or token counts.
 - **Technical evaluation stays available, but out of the way.** Compression, signal-preservation, grounding, and model-evaluation details may be exposed in an expandable engineering diagnostics section for maintainers and research reports.
-- **Do not become a telemetry warehouse.** Sources remain authoritative. Current live capture stages bounded raw inputs until incident cleanup; the compact export excludes those inputs. A shorter staging lifetime remains a privacy/storage improvement.
+- **Do not become a telemetry warehouse.** Sources remain authoritative. Current live capture stages bounded raw inputs that become eligible for independent cleanup after a configurable TTL (24 hours by default); the compact export excludes those inputs. The cleanup is not an exact deletion scheduler, and a shorter TTL or explicit rebuild guarantees may still be appropriate for a deployment.
 
 ## Required Operator Experience
 

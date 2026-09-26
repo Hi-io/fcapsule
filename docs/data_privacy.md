@@ -8,13 +8,13 @@ Prometheus, OpenSearch and Kubernetes remain the source systems of record. FCAPS
 
 | Layer | Contents | Lifetime |
 |---|---|---|
-| `state_dir/live-cases/<id>/` | Bounded source logs, PM samples, alerts, metadata and configuration snapshot | Until managed incident deletion or retention cleanup |
+| `state_dir/live-cases/<id>/` | Bounded source logs, PM samples, alerts, metadata and configuration snapshot | Independently eligible for cleanup after the configured staging TTL (24 hours by default) |
 | `state_dir/capsules/<id>/` | Selected evidence, masked log examples, metric trends, report, assessment, evaluation and ZIP | Same incident lifetime |
 | `state_dir/investigations/<episode-hash>.json` | Episode context, scrubbed check results, structured decisions, assessments and usage | Invalidated when an episode member is deleted; up to three previous attempts retained |
 | `state_dir/evidence/<attachment-hash>/` | Optional uploaded image/audio, stored owner-readable; derived extraction, note and correction are separately retained in SQLite/manifest | Same incident lifetime; raw media is excluded from default export |
 | `state_dir/fcapsule.db` | Application registry, episodes, incident/capsule metadata and non-secret settings | Incident records are cleaned up; registry/settings persist |
 
-Live capture is **not memory-only**. Staged inputs may contain sensitive logs and metrics. An independent staging TTL is not implemented. External `ingest-case` directories are referenced without copying; FCAPSule never deletes an input directory outside its managed state directory.
+Live capture is **not memory-only**. Staged inputs may contain sensitive logs and metrics. They become eligible for independent cleanup after 24 hours by default; set `FCAPSULE_LIVE_STAGING_TTL_HOURS` to configure a value from 1 hour to 365 days. Cleanup runs during control-plane snapshots, no more than once per minute, and removes at most 100 staged cases per pass, so expiry is not an exact deletion deadline. External `ingest-case` directories are referenced without copying; FCAPSule never deletes an input directory outside its managed state directory.
 
 The ZIP contains derived artifacts, including representative log lines, retained chart values, an evidence manifest and portable investigation revision details. It excludes normalized raw input files, raw uploaded image/audio, raw trace spans and the provider credential. Offline comparison prompts/responses can exist alongside artifacts when explicitly requested, but are not included in the ZIP allowlist.
 
@@ -45,16 +45,17 @@ provider keys or incur model-token usage. A FCAPSule provider call that interpre
 retrieved context remains an ordinary investigation request and may incur
 provider charges. The Collective bearer token is service authentication, not a model
 credential. Remote cases have a separate lifecycle: local incident deletion does
-not remove a published Collective record. Review the outgoing projection and remote
-retention/access/deletion policy before enabling sharing; masking does not promise
-anonymity. Legacy `FCAPSULE_ESTIMA_*` settings and `/estima` routes remain
+not automatically withdraw a published Collective record. The service supports
+explicit episode withdrawal and optional retention expiry; review the outgoing
+projection and remote retention/access/withdrawal policy before enabling sharing;
+masking does not promise anonymity. Legacy `FCAPSULE_ESTIMA_*` settings and `/estima` routes remain
 supported alongside the Collective names and routes. See [Collective integration](collective.md).
 
 ## Secrets and Deployment
 
 Keys entered in Settings are saved in plaintext in `state_dir/.env` and loaded into the process environment. They are not returned by settings APIs, stored in SQLite or included in capsule archives. A root `.env` or mounted environment Secret can also supply credentials. Git ignores `.env` and managed state, but that is not encryption or access control.
 
-The HTTP service has no built-in authentication, authorization, TLS or audit trail. Keep it on a trusted network, restrict filesystem/PVC access and protect backups. Use an authenticated TLS proxy and scoped source credentials before shared deployment. Do not expose the reference NodePort to the public Internet.
+The Kubernetes console requires Basic Auth; standalone development without console credentials is loopback-only. The app does not terminate TLS. Remote HTTPS uses the optional Caddy proxy with operator-managed certificates, which must be rotated and renewed by the operator. Basic Auth does not provide per-user roles or SSO, and the application has no audit trail. Keep filesystem/PVC access restricted and protect backups; do not expose the reference service to the public Internet.
 
 ## Traces
 

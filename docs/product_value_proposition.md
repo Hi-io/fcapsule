@@ -122,7 +122,7 @@ For teams processing terabytes per day, incident memory also opens a storage str
 
 At a steady **10 TB/day**, a simplified change from **90 days to 30 days** of raw retention changes the logical retained volume from **900 TB to 300 TB**. That is **600 TB less**, or approximately **66.7% less raw volume**. This illustrates the scale of the opportunity; it is not a measured FCAPSule saving. Indexes, replicas, compression, backups and storage pricing affect the actual financial outcome.
 
-FCAPSule does not change source retention policies automatically. A team must first verify that the retained incident evidence supports its investigation needs. The storage comparison must include FCAPSule's own state: both the exported capsule and bounded staged source captures, which currently follow the incident cleanup lifecycle.
+FCAPSule does not change source retention policies automatically. A team must first verify that the retained incident evidence supports its investigation needs. The storage comparison must include FCAPSule's own state: both the exported capsule and bounded staged source captures, which become eligible for independent cleanup after a configurable TTL (24 hours by default).
 
 The immediate benefit is continuity of investigation. Reduced raw-retention cost is a potential additional benefit that can be measured against it.
 

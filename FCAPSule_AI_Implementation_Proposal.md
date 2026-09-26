@@ -5,7 +5,7 @@
 ## Implemented Reference Path
 
 1. A firing Prometheus alert or an imported normalized case defines a bounded incident window. Kubernetes discovery aligns the workload identity with Prometheus labels and OpenSearch log documents.
-2. Source adapters collect bounded fault, performance, log and supported Kubernetes configuration observations. Live normalized inputs are staged under managed state until incident cleanup; the source systems remain authoritative.
+2. Source adapters collect bounded fault, performance, log and supported Kubernetes configuration observations. Live normalized inputs are staged under managed state and become eligible for independent cleanup after a configurable TTL (24 hours by default); the source systems remain authoritative.
 3. A deterministic pipeline groups log patterns, analyzes metric changes, selects evidence across domains and writes an incident report and capsule. This path does not require a model key.
 4. With a core provider configured, a background episode investigator selects from read-only diagnostic tools, records observations, compares plausible explanations and publishes a cited assessment. A review pass checks the draft against visible evidence. Valid IDs and schema are enforced, but semantic correctness still needs human review.
 5. Retained recurrence candidates can supply one bounded earlier capsule for comparison. The previous model answer is a hypothesis, while captured observations remain evidence.

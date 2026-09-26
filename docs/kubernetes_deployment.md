@@ -9,7 +9,7 @@ see [Collective Kubernetes integration](collective_kubernetes_integration.md). C
 service and PostgreSQL database are deployed from its own repository, not from
 this FCAPSule deployment.
 
-The state volume also contains bounded raw live captures under `live-cases/`. They expire independently after 24 hours by default (`FCAPSULE_LIVE_STAGING_TTL_HOURS`); retained capsules follow incident retention. Protect the whole volume, not just the derived archive. See [storage and privacy](data_privacy.md).
+The state volume also contains bounded raw live captures under `live-cases/`. They become eligible for independent cleanup after 24 hours by default (`FCAPSULE_LIVE_STAGING_TTL_HOURS`); retained capsules follow incident retention. Cleanup is snapshot-driven rather than an exact deletion deadline. Protect the whole volume, not just the derived archive. See [storage and privacy](data_privacy.md).
 
 The current live path is:
 

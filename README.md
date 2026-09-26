@@ -59,7 +59,7 @@ precedence.
 | Earlier FCAPSule capsules | Eligible retained observations and investigation records, with earlier conclusions kept distinct from evidence |
 | Operator-supplied media | Optional text, image and audio evidence after the relevant model capability is configured |
 
-The live integration does not query a trace backend. Imported cases may declare trace availability, but raw spans are not retained. Source systems remain authoritative. FCAPSule currently also stages bounded raw live inputs on its state volume until incident cleanup; a derived ZIP excludes those inputs but may still contain sensitive selected examples. See [privacy and retention](docs/data_privacy.md).
+The live integration does not query a trace backend. Imported cases may declare trace availability, but raw spans are not retained. Source systems remain authoritative. FCAPSule stages bounded raw live inputs on its state volume; they become eligible for independent cleanup after 24 hours by default, configurable with `FCAPSULE_LIVE_STAGING_TTL_HOURS`. A derived ZIP excludes those inputs but may still contain sensitive selected examples. See [privacy and retention](docs/data_privacy.md).
 
 ## Start Locally
 
@@ -98,13 +98,15 @@ See [provider operations](docs/llm_provider_operations.md), [evaluation plan](EV
 
 ## Current Boundaries
 
-FCAPSule is working single-replica software for a trusted environment, not an Internet-facing managed service. The reference HTTP server has no built-in authentication, authorization or TLS; SQLite and in-process workers are not distributed. Masking is heuristic, not a guarantee of anonymization. Historical matching is deliberately conservative and cannot equate every failure across changed workloads. Investigation quality still requires review on real incidents.
+FCAPSule is working single-replica software for a trusted environment, not an Internet-facing managed service. The Kubernetes console requires Basic Auth; standalone development without console credentials is loopback-only. The app does not terminate TLS: remote HTTPS uses the optional Caddy proxy with operator-managed certificates. Basic Auth does not provide per-user roles or SSO, and SQLite and in-process workers are not distributed. Masking is heuristic, not a guarantee of anonymization. Historical matching is deliberately conservative and cannot equate every failure across changed workloads. Investigation quality still requires review on real incidents.
 
 Cross-instance case sharing through Collective is a distinct, optional integration.
 It is disabled by default and requires the independently deployed Collective service.
-The current API uses a shared bearer token without per-instance authorization, and
-has no remote delete endpoint or automated case-retention policy. Do not treat it
-as a production multi-tenant service. Local incident capture and investigation
+The service supports instance-bound publisher credentials, read-only credentials,
+explicit episode withdrawal and optional retention expiry. Readers can still see
+cases across the deployment, so it is a single-trust-domain service, not a
+multi-tenant boundary. FCAPSule local deletion does not
+automatically withdraw a remote case. Local incident capture and investigation
 must remain useful when Collective is unavailable. Collective has its own API and
 PostgreSQL lifecycle; it is not an FCAPSule model runtime or source of provider
 credentials.

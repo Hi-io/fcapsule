@@ -58,7 +58,7 @@ Live identity resolution prefers an explicit pod. Configured alert-to-pod label 
 
 ## Source Ownership
 
-Observability systems are the system of record. FCAPSule owns derived evidence and also stages bounded live inputs until incident cleanup. The statements below describe derived artifacts, not the staging directory.
+Observability systems are the system of record. FCAPSule owns derived evidence and also stages bounded live inputs, which become eligible for independent cleanup after a configurable TTL (24 hours by default). The statements below describe derived artifacts, not the staging directory.
 
 - FM alerts may be copied into the capsule because they define the event.
 - PM series are analyzed; selected values and captured trend samples support retained charts.

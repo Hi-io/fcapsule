@@ -2,7 +2,7 @@
 
 **FCAPSule investigates; Collective remembers.** Collective is an independent, opt-in
 shared memory service with its own repository, HTTP API and PostgreSQL database:
-[service repository](https://github.com/Hi-io/estima). FCAPSule remains responsible for
+[service repository](https://github.com/Hi-io/collective). FCAPSule remains responsible for
 collecting evidence, running any configured LLM investigation, and deciding what
 minimized knowledge to publish. Collective validates, stores and retrieves that
 knowledge; it does not run LLMs, need model-provider API keys, interpret cases or
@@ -82,23 +82,28 @@ interprets a retrieved record, that is an ordinary FCAPSule model call and may
 incur provider usage and charges.
 
 Collective has an independent data lifecycle. Deleting a local incident does not
-delete a previously published remote case. Agree on remote retention, deletion,
-backup and export procedures with the Collective operator before sharing real cases.
-The current API does not provide a per-case delete endpoint or automatic case
-retention policy.
+automatically withdraw a previously published remote case. A publisher can withdraw
+all revisions for one of its episodes, and the service can expire old episodes when
+optional retention is configured; without that setting, cases remain until withdrawn.
+Agree on remote retention, withdrawal, backup and export procedures with the
+Collective operator before sharing real cases.
 
 ## API Contract
 
 The FCAPSule client speaks Collective's versioned `/v1` API. See the
-[service repository](https://github.com/Hi-io/estima) for the service's authoritative
+[service repository](https://github.com/Hi-io/collective) for the service's authoritative
 API and deployment contract.
 
 | Operation | Route | Behavior and limit |
 | --- | --- | --- |
 | Publish a case | `POST /v1/cases` | Creates a versioned case revision. Identical repeats are idempotent; conflicting reuse of a producer/episode/revision is rejected. |
-| Search cases | `POST /v1/search` | Returns a bounded set of historical candidates, latest revision per episode, with provenance and a heuristic retrieval score. |
+| Search cases | `POST /v1/search` | Returns a bounded, paginated set of historical candidates, latest revision per episode, with provenance and a heuristic retrieval score. |
+| List cases | `GET /v1/cases` | Lists latest revisions by page, with optional scope and text filters. |
 | Read a case | `GET /v1/cases/{id}` | Returns one retained case with observations and hypotheses as separate fields. |
+| Withdraw an episode | `DELETE /v1/episodes/{episode_id}` | A publisher withdraws all remote revisions for its bound instance and episode; this does not delete the local FCAPSule incident. |
 | List/read patterns | `GET /v1/patterns`, `GET /v1/patterns/{id}` | Describes repeated typed-observation co-occurrence; it is not a causal conclusion. |
+| Provision credentials | `POST /v1/admin/instances/{instance_id}/publisher-credentials`, `POST /v1/admin/reader-credentials` | An administrator provisions instance-bound publisher or read-only reader credentials. |
+| Rotate/revoke credentials | `POST /v1/credentials/rotate`, `DELETE /v1/admin/credentials/{key_id}` | Rotates the authenticated key or revokes a key by ID. |
 | Health | `GET /healthz` | Unauthenticated service/database health; it says nothing about FCAPSule sources or investigation health. |
 
 The current case envelope uses `schema_version`, producer `instance_id`,
@@ -110,11 +115,13 @@ at most 100 observations, 50 hypotheses and 40 KiB per request. A local evidence
 reference is provenance from the producer's case and is not guaranteed to resolve
 to a live source link from another FCAPSule instance.
 
-The current shared API uses bearer-token authentication. The token is shared by
-participants configured with that service; it does not provide per-instance
-authorization or tenant isolation. Do not expose one deployment to mutually
-untrusted organizations until a separate authorization/isolation model is
-implemented and verified.
+The current API uses bearer credentials. Publisher credentials are bound server-
+side to one `instance_id`; read-only credentials cannot publish. Publishers and
+readers can inspect cases across the service deployment, so credentials do not
+provide tenant isolation. Treat one Collective deployment as a single trusted
+organization boundary; do not share it across mutually untrusted organizations.
+Keep the administrator credential separate from FCAPSule instance settings.
+Legacy deployment-wide credentials are read-only by default during migration.
 
 ## FCAPSule Configuration
 
@@ -124,7 +131,7 @@ FCAPSule Settings or through environment defaults:
 | Environment variable | Purpose |
 | --- | --- |
 | `FCAPSULE_COLLECTIVE_URL` | Base URL of the separately operated Collective API. |
-| `FCAPSULE_COLLECTIVE_TOKEN` | Collective bearer token; not a provider key. |
+| `FCAPSULE_COLLECTIVE_TOKEN` | Collective publisher or read-only bearer credential; not a provider key. |
 | `FCAPSULE_COLLECTIVE_INSTANCE_ID` | Stable identity for this publishing FCAPSule state directory; use a distinct value per independent instance. |
 | `FCAPSULE_COLLECTIVE_READ` | Opt in to retrieval. Off by default. |
 | `FCAPSULE_COLLECTIVE_PUBLISH` | Opt in to publishing. Off by default. |

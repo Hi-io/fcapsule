@@ -4,9 +4,9 @@
 
 ### Changed
 
-- Aligned Estima's map with the shared light visual system, balanced node placement,
+- Aligned Collective's map with the shared light visual system, balanced node placement,
   separated overlapping case marks and improved label wrapping and type hierarchy.
-- Replaced the Estima catalogue-first page with an interactive collective-memory
+- Replaced the Collective catalogue-first page with an interactive shared-memory
   map, contextual record inspector, map/list views, event-time and instance
   filters, and shareable record links. Connections reflect exact retained
   observations; visible counts describe the bounded loaded selection. No model

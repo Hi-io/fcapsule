@@ -251,4 +251,4 @@ The derived ZIP contains:
 
 Only these allowlisted files are included if present. Offline comparison prompts/responses, normalized raw inputs and raw traces are excluded. Selected log examples and retained PM trend values are still telemetry-derived content and may be sensitive.
 
-Live normalized inputs are separately staged in `state_dir/live-cases/` until incident cleanup. External input directories remain at their original path. Artifact exclusion is not evidence that no raw data exists on the state volume.
+Live normalized inputs are separately staged in `state_dir/live-cases/` and become eligible for independent cleanup after the configured staging TTL (24 hours by default). External input directories remain at their original path. Artifact exclusion is not evidence that no raw data exists on the state volume.

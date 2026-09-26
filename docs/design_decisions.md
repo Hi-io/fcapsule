@@ -6,13 +6,13 @@ The reference implementation uses `argparse`, the standard library HTTP server, 
 
 ## SQLite Metadata, Source-Owned Telemetry
 
-SQLite is sufficient for one process and makes multi-application metadata durable. Observability sources remain authoritative. Bounded live inputs are currently staged on the state volume until incident cleanup; derived-only ZIP exports must not be confused with a raw-free volume. A shorter staging TTL is future work.
+SQLite is sufficient for one process and makes multi-application metadata durable. Observability sources remain authoritative. Bounded live inputs are staged on the state volume and become eligible for independent cleanup after a configurable TTL (24 hours by default); derived-only ZIP exports must not be confused with a raw-free volume. See [privacy and retention](data_privacy.md) for cleanup behavior and limits.
 
-## Four Views, One Control Plane
+## Five Views, One Control Plane
 
-Operations is the product surface. The source/test harness is now the separate FCAPSule
+Operations is the incident-work surface. The source/test harness is now the separate FCAPSule
 Lab project, which exports the same normalized incident contract used by live-source
-adapters. Targets configures data sources and shows current workload coverage; Patterns exposes retained recurrence without merging incidents; Settings combines retention policy with model configuration. Keeping the contract shared while keeping runtime ownership
+adapters. Targets configures data sources and shows current workload coverage; Patterns exposes retained recurrence without merging incidents; Settings combines retention policy with model configuration; the optional Collective view explores shared cases without treating similarity as cause. Keeping the contract shared while keeping runtime ownership
 separate prevents the product from becoming a simulator or container controller.
 
 ## Deterministic Capture, AI Investigation
