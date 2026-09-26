@@ -186,6 +186,9 @@ class EstimaPublisher:
         for episode in episodes:
             episode_id = str(episode["episode_id"])
             try:
+                if any(signal.get("source_kind") == "imported" for signal in episode.get("signals", [])):
+                    self._seen[episode_id] = self._signature(episode)
+                    continue
                 signature = self._signature(episode)
                 if self._seen.get(episode_id) == signature:
                     continue

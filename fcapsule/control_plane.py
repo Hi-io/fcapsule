@@ -1008,6 +1008,8 @@ class ControlPlane:
         incident = self.store.get_incident(incident_id)
         if not incident:
             raise ValueError(f"Unknown incident: {incident_id}")
+        if incident.get("source_kind") == "imported":
+            raise ValueError("Imported capsules are read-only and cannot be rebuilt without their original source data")
         case_dir = Path(incident["case_dir"])
         if incident.get("source_kind") == "live":
             try:
@@ -1181,6 +1183,8 @@ class ControlPlane:
         report_path = Path(capsule_record["output_dir"]) / "incident_report.json"
         report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.is_file() else None
         if not report or report.get("report_version") != "1.3":
+            if incident.get("source_kind") == "imported":
+                return {"incident": incident, "record": capsule_record, "report": None}
             # Retained reports must remain readable after source telemetry expires.
             capsule = json.loads(capsule_path.read_text(encoding="utf-8"))
             try:
