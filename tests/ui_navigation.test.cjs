@@ -81,6 +81,6 @@ test('keyboard activation and back-forward restoration remain usable', () => {
 test('the initial document exposes a named loading state', () => {
   const html = fs.readFileSync(path.join(__dirname, '../fcapsule/ui/app.py'), 'utf8');
   assert.match(html, /<main id="app" tabindex="-1" aria-busy="true">/);
-  assert.match(html, /class="boot" role="status" aria-live="polite"/);
+  assert.match(html, /class="boot-heading" role="status" aria-live="polite"/);
   assert.match(html, /id="boot-label"/);
 });

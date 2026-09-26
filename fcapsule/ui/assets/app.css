@@ -192,23 +192,39 @@ details.engineering summary { cursor:pointer; padding:10px 11px; font-weight:650
 .log-pattern p { margin:0 0 8px 18px; color:var(--muted); font-size:12px; }
 .log-lines { margin:0 0 10px 18px; padding:9px; overflow:auto; background:#171f24; color:#dfe9ed; font:11px/1.5 "Cascadia Mono", Consolas, monospace; white-space:pre-wrap; }
 .report-note { color:var(--muted); font-size:12px; margin:0 0 9px; }
-.boot { max-width:760px; padding:25px 0; color:var(--muted); }
-.boot-heading { display:flex; align-items:center; gap:11px; color:var(--ink); font-size:16px; font-weight:650; }
-.boot-spinner { width:18px; height:18px; flex:none; border:2px solid #cbd9df; border-top-color:var(--blue); border-radius:50%; animation:boot-spin .8s linear infinite; }
-.boot-track { height:2px; margin:18px 0 25px; background:#dce4e8; overflow:hidden; }
-.boot-track span { display:block; width:32%; height:100%; background:var(--blue); animation:boot-progress 1.2s ease-in-out infinite; }
-.boot-placeholder { display:grid; gap:12px; }
-.boot-placeholder span { display:block; height:15px; background:#e5eaed; }
-.boot-placeholder span:nth-child(1) { width:36%; height:23px; }
-.boot-placeholder span:nth-child(2) { width:100%; }
-.boot-placeholder span:nth-child(3) { width:72%; }
+.boot { width:100%; min-width:0; color:var(--muted); }
+.boot-page-head { position:relative; overflow:hidden; }
+.boot-page-head h1 { color:var(--ink); }
+.boot-page-head::after { content:""; position:absolute; bottom:0; left:0; width:28%; height:2px; background:var(--accent); animation:boot-progress 1.4s ease-in-out infinite; }
+.boot-heading { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px; font-weight:500; flex:none; }
+.boot-spinner { width:14px; height:14px; flex:none; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:boot-spin .8s linear infinite; }
+.boot-toolbar { display:flex; justify-content:space-between; align-items:center; gap:24px; height:42px; margin-bottom:16px; }
+.boot-toolbar span, .boot-placeholder span { display:block; border-radius:3px; background:#e5e9ef; }
+.boot-toolbar span:first-child { width:min(160px,40%); height:16px; }
+.boot-toolbar span:last-child { width:min(104px,25%); height:32px; }
+.boot-placeholder { border:1px solid var(--line); background:var(--surface); }
+.boot-placeholder > div { display:grid; gap:10px; padding:22px 24px; min-height:84px; border-bottom:1px solid var(--line); }
+.boot-placeholder > div:last-child { border-bottom:0; }
+.boot-placeholder span:first-child { width:58%; max-width:620px; height:12px; }
+.boot-placeholder span:last-child { width:36%; max-width:380px; height:10px; }
+.boot-placeholder > div:nth-child(even) span:first-child { width:46%; }
+.boot-placeholder > div:nth-child(even) span:last-child { width:28%; }
 .boot-error { padding:26px 0; }
 .boot-error h1 { margin:0 0 6px; font-size:20px; }
 .boot-error p { margin:0 0 17px; color:var(--muted); }
 .navigation-pending main { opacity:.55; transition:opacity .12s ease; }
-.navigation-pending .product-bar { position:relative; }
-.navigation-pending .product-bar::after { content:""; position:absolute; bottom:-3px; left:0; width:30%; height:3px; background:#80c9e9; animation:boot-progress 1.2s ease-in-out infinite; }
-.product-bar nav a.is-pending { background:#202a31; color:#fff; }
+.product-bar nav a.is-pending { position:relative; color:var(--accent); background:var(--accent-soft); }
+.product-bar nav a.is-pending::after { content:""; position:absolute; right:10px; width:12px; height:12px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:boot-spin .8s linear infinite; }
+@media (max-width:600px) {
+  .boot .boot-page-head { flex-direction:row; align-items:center; gap:14px; }
+  .boot-heading { font-size:11px; gap:6px; }
+  .boot-placeholder > div { padding:20px 16px; min-height:78px; }
+  .boot-placeholder span:first-child { width:82%; }
+  .boot-placeholder span:last-child { width:58%; }
+  .boot-placeholder > div:nth-child(even) span:first-child { width:68%; }
+  .boot-placeholder > div:nth-child(even) span:last-child { width:45%; }
+  .product-bar nav a.is-pending::after { width:10px; height:10px; right:5px; top:5px; }
+}
 @keyframes boot-spin { to { transform:rotate(360deg); } }
 @keyframes boot-progress { from { transform:translateX(-110%); } to { transform:translateX(340%); } }
 .mono { font-family:"Cascadia Mono", Consolas, monospace; font-size:12px; }

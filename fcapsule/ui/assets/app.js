@@ -3,6 +3,8 @@ const app = document.querySelector('#app');
 const viewLabels = {console:'Operations', targets:'Targets', patterns:'Patterns', estima:'Estima', settings:'Settings'};
 const bootLabel = document.querySelector('#boot-label');
 if (bootLabel) bootLabel.textContent = `Loading ${viewLabels[view]}`;
+const bootTitle = document.querySelector('#boot-title');
+if (bootTitle) bootTitle.textContent = viewLabels[view];
 const fmt = new Intl.NumberFormat('en-US');
 const pct = value => typeof value === 'number' ? (value * 100).toFixed(1) + '%' : '--';
 const bytes = value => {
