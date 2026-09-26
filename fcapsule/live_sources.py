@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import threading
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -30,6 +31,9 @@ GRAFANA_ALERT_SETTING = "grafana_firing_alerts"
 GRAFANA_RECEIPT_SETTING = "grafana_last_received_at"
 IGNORED_ALERTS = {"Watchdog", "InfoInhibitor"}
 MAX_GROUP_PODS = 4
+DEFAULT_LIVE_STAGING_TTL_HOURS = 24
+MAX_LIVE_STAGING_TTL_HOURS = 24 * 365
+MAX_STAGING_CLEANUP_CASES = 100
 DEFAULT_IDENTITY_LABELS = [
     {"name": "CNFC", "alert_label": "cnfc", "pod_label": "cnfc"},
     {"name": "VNFC", "alert_label": "vnfc", "pod_label": "vnfc"},
@@ -72,7 +76,54 @@ class LiveSourceCoordinator:
         self.state_dir = state_dir
         self.case_root = state_dir / "live-cases"
         self.case_root.mkdir(parents=True, exist_ok=True)
+        self._capture_lock = threading.RLock()
         self.webhook_lock = threading.RLock()
+
+    def staging_ttl_hours(self) -> int:
+        return _environment_limit(
+            "FCAPSULE_LIVE_STAGING_TTL_HOURS",
+            DEFAULT_LIVE_STAGING_TTL_HOURS,
+            1,
+            MAX_LIVE_STAGING_TTL_HOURS,
+        )
+
+    def purge_expired_staging(
+        self,
+        *,
+        now: datetime | None = None,
+        ttl_hours: int | None = None,
+        limit: int = MAX_STAGING_CLEANUP_CASES,
+    ) -> int:
+        """Remove aged live raw captures without touching retained capsule artifacts."""
+
+        current = now or datetime.now(timezone.utc)
+        ttl = timedelta(hours=self.staging_ttl_hours() if ttl_hours is None else _bounded_int(
+            ttl_hours, 1, MAX_LIVE_STAGING_TTL_HOURS
+        ))
+        cutoff = current.timestamp() - ttl.total_seconds()
+        removed = 0
+        with self._capture_lock:
+            candidates = []
+            for path in self.case_root.iterdir():
+                try:
+                    if path.is_dir() and not path.is_symlink():
+                        candidates.append((path.stat().st_mtime, path))
+                except OSError:
+                    continue
+            candidates.sort(key=lambda item: (item[0], item[1].name))
+            for modified_at, path in candidates:
+                if removed >= max(1, min(MAX_STAGING_CLEANUP_CASES, int(limit))):
+                    break
+                try:
+                    resolved = path.resolve(strict=True)
+                    resolved.relative_to(self.case_root.resolve())
+                    if modified_at > cutoff:
+                        continue
+                    shutil.rmtree(resolved)
+                except (FileNotFoundError, OSError, ValueError):
+                    continue
+                removed += 1
+        return removed
 
     def configuration(self) -> dict[str, Any]:
         defaults = default_source_configuration()
@@ -383,6 +434,23 @@ class LiveSourceCoordinator:
             )
 
     def _capture_case(
+        self,
+        config: dict[str, Any],
+        prometheus: PrometheusAdapter,
+        opensearch: OpenSearchAdapter,
+        kubernetes: KubernetesAdapter,
+        alert: dict[str, Any],
+        pod: dict[str, Any],
+        incident_id: str,
+        *,
+        scope: dict[str, Any] | None = None,
+    ) -> Path:
+        with self._capture_lock:
+            return self._capture_case_locked(
+                config, prometheus, opensearch, kubernetes, alert, pod, incident_id, scope=scope,
+            )
+
+    def _capture_case_locked(
         self,
         config: dict[str, Any],
         prometheus: PrometheusAdapter,
