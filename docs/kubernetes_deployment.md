@@ -54,19 +54,88 @@ kubectl apply -f deploy/kubernetes/fcapsule.yaml
 kubectl rollout status deployment/fcapsule -n fcapsule
 ```
 
-The application Service is ClusterIP-only. The included Caddy HTTPS sidecar is the remote entry point on `https://<node-ip>:30767`; otherwise, use a localhost port-forward. The console requires the separate `fcapsule-console-auth` Secret described below. Create it before applying the manifest so the first rollout is immediately usable.
+The application Service is ClusterIP-only. For remote HTTPS access, add the optional Caddy proxy and NodePort service described in [HTTPS access](https_access.md); its entry point is `https://<node-ip>:30767`. Otherwise, use a localhost port-forward. The console requires the separate `fcapsule-console-auth` Secret described below. Create it before applying the manifest so the first rollout is immediately usable.
 
 ## Development Overlay
 
-`deploy/kubernetes/dev-overlay.yaml` uses an init container to install the current GitHub `master` branch into an `emptyDir`, then runs it with the same non-root security policy as the base Deployment.
+`deploy/kubernetes/dev-overlay.yaml` uses the `install-source` init container with
+`python:3.12-slim` to install source into an `emptyDir`; the application container
+runs that source with the same non-root security policy as the base Deployment.
+The checked-in overlay points at mutable `master.zip`, so applying it unchanged
+is not reproducible. In a read-only live snapshot taken on 2026-09-26, the
+Deployment used `install-source` and pinned its GitHub archive URL to
+`003d3876f1e1f708664bfb7fa7070007f7a57067`. That SHA documents the snapshot
+only; it is not a current release target. Do not apply the checked-in overlay
+unchanged to the live Deployment: strategic merge matches by name, so it would
+replace the pinned URL with mutable `master.zip`. Inspect the live template and
+preserve or update its existing source URL as described below. Pin the overlay
+URL before applying it to a fresh/base Deployment as well:
 
 ```bash
+# Run from the exact source commit that has been verified and pushed.
+source_sha="$(git rev-parse HEAD)"
+source_archive="https://github.com/Hi-io/fcapsule/archive/${source_sha}.zip"
+overlay_patch="$(mktemp)"
+trap 'rm -f "$overlay_patch"' EXIT
+sed "s#https://github.com/Hi-io/fcapsule/archive/refs/heads/master.zip#${source_archive}#" \
+  deploy/kubernetes/dev-overlay.yaml > "$overlay_patch"
+grep -F "$source_archive" "$overlay_patch"
+
+kubectl rollout history deployment/fcapsule -n fcapsule
 kubectl patch deployment fcapsule \
   -n fcapsule \
   --type strategic \
-  --patch-file deploy/kubernetes/dev-overlay.yaml
+  --patch-file "$overlay_patch"
 kubectl rollout status deployment/fcapsule -n fcapsule
 ```
+
+This overlay patch is for a fresh/base Deployment that does not already have a
+source installer. It changes the pod template and starts a rollout. Inspect the
+live init-container names, images, commands, and app image before changing an
+existing Deployment:
+
+```bash
+kubectl -n fcapsule get deployment fcapsule -o jsonpath='{range .spec.template.spec.initContainers[*]}init={.name}{" image="}{.image}{" command="}{.command}{"\n"}{end}{range .spec.template.spec.containers[*]}app={.name}{" image="}{.image}{"\n"}{end}'
+```
+
+For an existing Deployment, copy the exact current URL from the inspection
+output and the source init container's zero-based `initContainers` array index.
+The guarded JSON Patch below verifies the name, image, and current URL before
+replacing only command element 7. Do not reuse an index or current URL from a
+different Deployment layout.
+
+```bash
+# Run from the exact source commit that has been verified and pushed.
+source_sha="$(git rev-parse HEAD)"
+source_archive="https://github.com/Hi-io/fcapsule/archive/${source_sha}.zip"
+init_index=observed-index # replace with the inspected numeric array index
+current_archive='<copy-exact-current-archive-url-from-inspection>'
+kubectl rollout history deployment/fcapsule -n fcapsule
+patch="[\
+{\"op\":\"test\",\"path\":\"/spec/template/spec/initContainers/${init_index}/name\",\"value\":\"install-source\"},\
+{\"op\":\"test\",\"path\":\"/spec/template/spec/initContainers/${init_index}/image\",\"value\":\"python:3.12-slim\"},\
+{\"op\":\"test\",\"path\":\"/spec/template/spec/initContainers/${init_index}/command/7\",\"value\":\"${current_archive}\"},\
+{\"op\":\"replace\",\"path\":\"/spec/template/spec/initContainers/${init_index}/command/7\",\"value\":\"${source_archive}\"}]"
+kubectl patch deployment fcapsule -n fcapsule --type=json --patch "$patch"
+kubectl rollout status deployment/fcapsule -n fcapsule
+```
+
+The observed live profile used `python:3.12-slim` for the source installer and
+application container. A plain `kubectl rollout restart` recreates pods from the
+existing template; it does not advance a pinned source revision. To roll back,
+inspect the exact prior revision and confirm its init-container URL and images
+before changing the template:
+
+```bash
+known_good_revision=your-known-good-revision # replace with the recorded numeric revision
+kubectl rollout history deployment/fcapsule -n fcapsule --revision="$known_good_revision"
+kubectl rollout undo deployment/fcapsule -n fcapsule --to-revision="$known_good_revision"
+kubectl rollout status deployment/fcapsule -n fcapsule
+```
+
+This Deployment rollback leaves the persistent state volume and Secrets intact.
+Record and restore any separately changed ConfigMaps or other resources
+separately; `rollout undo` only restores the Deployment template.
 
 Make source changes on a dedicated branch, not on `master`:
 
@@ -86,15 +155,14 @@ them to the shared instance; do not trigger provider calls or mutate incidents
 during a presentation-only check.
 
 After verification, merge the tested branch (through a reviewed pull request or a
-local merge), then deploy:
-
-```bash
-git switch master
-git merge --no-ff feature/your-change
-git push origin master
-kubectl rollout restart deployment/fcapsule -n fcapsule
-kubectl rollout status deployment/fcapsule -n fcapsule
-```
+local merge). From a checkout at that exact merged commit, set `source_sha` to
+`$(git rev-parse HEAD)` in the guarded JSON Patch procedure above, then patch the
+existing live init container's `command[7]` URL after inspecting its name, image,
+array index, and current URL. Do not apply the strategic overlay patch to an
+existing Deployment; it can overwrite live pod-template fields. Use the pinned
+overlay procedure above only for a fresh/base Deployment without a source
+installer. After either path, wait for rollout readiness and verify the live
+source URL and images again.
 
 This profile is for iteration only. Build an immutable image pinned by digest for release deployments.
 These steps are a working convention, not server-enforced branch protection.
