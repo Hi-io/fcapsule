@@ -304,6 +304,21 @@ small.cell-note { display:block; color:var(--muted); margin-top:3px; }
 .history-contribution-item { border-top:1px solid #e5eaed; padding:10px 0; }
 .history-contribution-item .coverage-details > div { display:grid; grid-template-columns:minmax(120px,.4fr) minmax(0,1fr); align-items:start; gap:14px; }
 .history-contribution-item .coverage-details dd { max-width:none; text-align:left; overflow-wrap:anywhere; }
+.publication-provenance { border-top:1px solid var(--line); margin-top:18px; }
+.publication-provenance > summary { cursor:pointer; padding:12px 0; color:var(--ink); font-size:13px; font-weight:550; overflow-wrap:anywhere; }
+.publication-provenance > summary span { color:var(--muted); margin-left:10px; font-size:12px; font-weight:400; }
+.publication-provenance ol { list-style:none; margin:0; padding:0 0 8px; }
+.publication-record { border-top:1px solid #e5eaed; padding:10px 0; overflow-wrap:anywhere; }
+.publication-record-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+.publication-record-head strong { font-size:12px; }
+.publication-status { font-size:12px; color:var(--muted); text-align:right; }
+.publication-status[data-status="published"] { color:var(--green); }
+.publication-status[data-status="retry_scheduled"], .publication-status[data-status="queued"] { color:var(--amber); }
+.publication-status[data-status="attention_required"] { color:var(--red); }
+.publication-record-meta { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:4px 12px; margin-top:5px; color:var(--muted); font-size:12px; }
+.publication-receipt { overflow-wrap:anywhere; }
+.publication-receipt code { font-family:"Cascadia Mono", Consolas, monospace; font-size:11px; }
+.publication-reason { margin:6px 0 0; color:var(--muted); font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
 .evidence-view { padding:10px 26px 22px; }
 .evidence-view > details > summary { font-size:14px; padding:18px 0; }
 .evidence-record { padding:15px 0; border-bottom:1px solid #e5eaed; }
@@ -357,6 +372,10 @@ small.cell-note { display:block; color:var(--muted); margin-top:3px; }
   .overview-layout { grid-template-columns:1fr; padding:18px; }
   .overview-layout aside { border-left:0; padding:20px 0 0; border-top:1px solid var(--line); }
   .history-contribution-item .coverage-details > div { grid-template-columns:1fr; gap:3px; }
+  .publication-provenance > summary span { display:block; margin:4px 0 0; }
+  .publication-record-head { align-items:start; flex-direction:column; gap:3px; }
+  .publication-status { text-align:left; }
+  .publication-record-meta { justify-content:flex-start; }
   .episode-summary { grid-template-columns:1fr; gap:8px; }
   .episode-state { display:flex; gap:12px; }
   .episode-count { display:none; }
