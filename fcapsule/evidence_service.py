@@ -149,6 +149,25 @@ class EvidenceService:
 
         self.executor.shutdown(wait=wait, cancel_futures=True)
 
+    def resume(self) -> None:
+        """Recover uploads queued before shutdown without replaying provider calls."""
+
+        for episode in self.plane.store.list_episodes(limit=10000):
+            episode_id = str(episode["episode_id"])
+            for attachment in self.plane.store.list_evidence_attachments(episode_id):
+                attachment_id = str(attachment["attachment_id"])
+                if attachment["status"] == "queued":
+                    self.executor.submit(self._process, attachment_id)
+                elif attachment["status"] == "processing":
+                    self.plane.store.update_evidence_attachment(
+                        attachment_id,
+                        status="failed",
+                        extraction={
+                            "limitation": "Evidence processing was interrupted. Upload the original again to retry.",
+                        },
+                    )
+                    self.plane.refresh_evidence_exports(episode_id)
+
     def _public(self, record: dict[str, Any]) -> dict[str, Any]:
         result = {key: value for key, value in record.items() if key != "storage_path"}
         result["uploaded_at"] = record["created_at"]
@@ -243,8 +262,13 @@ class EvidenceService:
 
     def _process(self, attachment_id: str) -> None:
         attachment = self.plane.store.get_evidence_attachment(attachment_id)
-        if not attachment or attachment["kind"] == "text":
+        if not attachment or attachment["kind"] == "text" or attachment["status"] != "queued":
             return
+        attachment = self.plane.store.update_evidence_attachment(
+            attachment_id,
+            status="processing",
+            extraction=attachment.get("extraction") if isinstance(attachment.get("extraction"), dict) else {},
+        )
         capability = "vision" if attachment["kind"] == "image" else "audio"
         allowed, reason = self.plane.media_submission_allowed(capability)
         if not allowed:

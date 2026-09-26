@@ -69,8 +69,8 @@ test('case detail separates observations and hypotheses and shows source provena
   assert.match(html, /episode-7/);
 });
 
-test('local deletion warns that an Estima record is retained', () => {
-  assert.match(source, /A record already published to Estima will remain there/);
+test('local deletion warns that a Collective record is retained', () => {
+  assert.match(source, /A record already published to Collective will remain there/);
 });
 
 test('Estima retrieval trail links record IDs without treating them as FCAPSule evidence', () => {
@@ -79,7 +79,7 @@ test('Estima retrieval trail links record IDs without treating them as FCAPSule 
   const html = renderTrail({context:{atlas_cases:[{
     atlas_case_id:'prior-case',summary:'Earlier timeout',instance_id:'edge-east',relation:'fingerprint_match',
   }]}});
-  assert.match(html, /href="\/estima\?case=prior-case"/);
+  assert.match(html, /href="\/collective\?case=prior-case"/);
   assert.match(html, /not FCAPSule evidence citations/);
   assert.match(html, /Fingerprint match/);
   assert.equal(renderTrail({context:{atlas_cases:[]}}), '');

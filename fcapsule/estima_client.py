@@ -26,11 +26,11 @@ def validate_estima_url(value: str) -> str:
     url = str(value or "").strip().rstrip("/")
     parts = urlsplit(url)
     if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password:
-        raise ValueError("Estima URL must be an absolute HTTP(S) URL without embedded credentials")
+        raise ValueError("Collective URL must be an absolute HTTP(S) URL without embedded credentials")
     if parts.scheme == "http":
         host = parts.hostname.lower().rstrip(".")
         if host not in {"localhost", "127.0.0.1", "::1"} and not (host.endswith(".svc") or host.endswith(".svc.cluster.local")):
-            raise ValueError("Estima URL must use HTTPS except for localhost or in-cluster .svc DNS")
+            raise ValueError("Collective URL must use HTTPS except for localhost or in-cluster .svc DNS")
     return url
 
 
@@ -42,8 +42,11 @@ def validate_atlas_url(value: str) -> str:
 def estima_settings_from_env(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
     env = os.environ if environ is None else environ
     def value(name: str, default: str = "") -> str:
+        current_name = f"FCAPSULE_COLLECTIVE_{name}"
         new_name = f"FCAPSULE_ESTIMA_{name}"
         old_name = f"FCAPSULE_ATLAS_{name}"
+        if current_name in env:
+            return str(env[current_name])
         return str(env[new_name] if new_name in env else env.get(old_name, default))
 
     return {
@@ -94,6 +97,22 @@ class EstimaClient:
 
     def create_case(self, case: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/cases", case)
+
+    def stats(self) -> dict[str, Any]:
+        return self._request("GET", "/v1/stats")
+
+    def list_cases(
+        self, scope: dict[str, Any] | None = None, query: str | None = None,
+        limit: int = 20, cursor: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, str] = {"limit": str(max(1, min(50, int(limit))))}
+        if scope:
+            params["scope"] = json.dumps(scope, separators=(",", ":"), ensure_ascii=True)
+        if query:
+            params["query"] = str(query)[:500]
+        if cursor:
+            params["cursor"] = str(cursor)[:2048]
+        return self._request("GET", "/v1/cases?" + urlencode(params))
 
     def search(
         self, scope: dict[str, Any] | None, query: str = "", limit: int = 10, before: str | None = None,

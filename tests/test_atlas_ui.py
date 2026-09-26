@@ -15,6 +15,14 @@ class FakeAtlasClient:
         self.calls.append(("list_patterns", kwargs))
         return {"patterns": [{"id": "p-1"}], "limit": kwargs["limit"]}
 
+    def stats(self):
+        self.calls.append(("stats", None))
+        return {"episodes": 3, "revisions": 5, "patterns": 2}
+
+    def list_cases(self, **kwargs):
+        self.calls.append(("list_cases", kwargs))
+        return {"cases": [{"id": "c-1", "episode_id": "ep-1"}], "next_cursor": "next-page"}
+
     def get_pattern(self, pattern_id):
         self.calls.append(("get_pattern", pattern_id))
         return {"pattern": {"id": pattern_id}, "cases": []}
@@ -88,28 +96,38 @@ class AtlasUIRouteTests(unittest.TestCase):
         connection.close()
         return response.status, result
 
-    def test_estima_page_is_the_public_route_and_legacy_page_still_resolves(self):
-        for path in ("/estima", "/atlas"):
+    def test_collective_page_is_the_public_route_and_legacy_pages_still_resolve(self):
+        for path in ("/collective", "/estima", "/atlas"):
             connection = HTTPConnection("127.0.0.1", self.port)
             connection.request("GET", path)
             response = connection.getresponse()
             body = response.read().decode("utf-8")
             connection.close()
             self.assertEqual(response.status, 200)
-            self.assertIn('href="/estima"', body)
-            self.assertIn(">Estima</a>", body)
-        self.assertIn("no LLM API keys are sent to Estima", JS)
-        self.assertIn("/api/settings/estima", JS)
+            self.assertIn('href="/collective"', body)
+            self.assertIn(">Collective</a>", body)
+        self.assertIn("no LLM API keys are sent to Collective", JS)
+        self.assertIn("/api/settings/collective", JS)
         self.assertNotIn("/api/settings/atlas", JS)
 
     def test_legacy_local_api_aliases_continue_to_work(self):
         self.assertEqual(self.request("GET", "/api/atlas/patterns")[0], 200)
+        self.assertEqual(self.request("GET", "/api/estima/stats")[1]["episodes"], 3)
         status, result = self.request("POST", "/api/settings/atlas", {
             "url": "https://atlas.example.test", "instance_id": "fcapsule-test",
             "read_enabled": True, "publish_enabled": False,
         })
         self.assertEqual(status, 200)
         self.assertEqual(result["url"], "https://atlas.example.test")
+
+    def test_collective_stats_and_case_pages_reach_the_service(self):
+        self.assertEqual(self.request("GET", "/api/collective/stats")[1]["episodes"], 3)
+        status, result = self.request("GET", "/api/collective/cases?cluster=west&query=timeout&limit=7&cursor=next")
+        self.assertEqual(status, 200)
+        self.assertEqual(result["next_cursor"], "next-page")
+        self.assertEqual(self.plane.client.calls[-1], ("list_cases", {
+            "scope": {"cluster": "west"}, "query": "timeout", "limit": 7, "cursor": "next",
+        }))
 
     def test_list_pattern_passes_structured_cluster_scope(self):
         status, result = self.request("GET", "/api/estima/patterns?cluster=west&query=timeout&limit=5")

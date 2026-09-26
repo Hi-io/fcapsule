@@ -93,8 +93,9 @@ test('explorer is read-only and uses bounded existing retrieval routes, not mode
   assert.match(source,/limit:10/);
   assert.match(source,/Promise.all\(\[worker\(\),worker\(\),worker\(\)\]\)/);
   assert.doesNotMatch(source,/\/api\/(?:investigations|briefing|settings)|openrouter|api\.deepseek|method:'(?:DELETE|PUT|PATCH)'/);
-  assert.match(source,/Cases loaded/);
-  assert.match(source,/loaded selection, not the entire memory/);
+  assert.match(source,/Cases in this map/);
+  assert.match(source,/map is a loaded selection/);
+  assert.match(source,/Load more cases/);
   assert.match(source,/Unverified hypotheses/);
 });
 

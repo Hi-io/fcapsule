@@ -164,6 +164,14 @@ class AtlasClientTests(unittest.TestCase):
                                            "FCAPSULE_ATLAS_READ": "true"})
         self.assertEqual(legacy["url"], "https://old-atlas.example")
         self.assertTrue(legacy["read_enabled"])
+        collective = estima_settings_from_env({
+            "FCAPSULE_COLLECTIVE_URL": "https://collective.example",
+            "FCAPSULE_COLLECTIVE_READ": "true",
+            "FCAPSULE_ESTIMA_URL": "https://estima.example",
+            "FCAPSULE_ESTIMA_READ": "false",
+        })
+        self.assertEqual(collective["url"], "https://collective.example")
+        self.assertTrue(collective["read_enabled"])
 
     def test_estima_connection_stays_disabled_without_read_or_publish_opt_in(self):
         self.assertIsNone(estima_client_from_env(environ={"FCAPSULE_ESTIMA_URL": "https://estima.example"}))

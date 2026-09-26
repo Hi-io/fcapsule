@@ -91,6 +91,9 @@ spec:
             - secretRef:
                 name: fcapsule-secrets
                 optional: true
+            - secretRef:
+                name: fcapsule-console-auth
+                optional: true
           ports:
             - name: http
               containerPort: 8765
@@ -143,10 +146,12 @@ data:
   FCAPSULE_NAMESPACES: "default"
   FCAPSULE_PROMETHEUS_URL: "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090"
   FCAPSULE_OPENSEARCH_URL: "http://opensearch.logging.svc.cluster.local:9200"
+  FCAPSULE_SOURCE_ALLOWED_ORIGINS: ""
   FCAPSULE_OPENSEARCH_INDEX: "k8s-logs-*"
   FCAPSULE_POLL_INTERVAL_SECONDS: "30"
   FCAPSULE_INCIDENT_WINDOW_MINUTES: "10"
   FCAPSULE_AUTO_BUILD_REPORTS: "true"
+  FCAPSULE_CONSOLE_AUTH_REQUIRED: "true"
 ---
 apiVersion: v1
 kind: Service
@@ -154,11 +159,10 @@ metadata:
   name: fcapsule
   namespace: fcapsule
 spec:
-  type: NodePort
+  type: ClusterIP
   selector:
     app.kubernetes.io/name: fcapsule
   ports:
     - name: http
       port: 8765
       targetPort: http
-      nodePort: 30765

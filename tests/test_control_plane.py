@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import shutil
@@ -28,6 +29,43 @@ def wait_for_idle(control_plane: ControlPlane, timeout: float = 15) -> None:
 
 
 class ControlPlaneTests(unittest.TestCase):
+    def test_staging_expiry_skips_active_jobs_and_preserves_retained_capsule(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "DEEPSEEK_API_KEY": "", "FCAPSULE_LIVE_STAGING_TTL_HOURS": "1",
+        }):
+            plane = ControlPlane(Path(directory) / "state")
+            case_dir = plane.live_sources.case_root / "retained-live-case"
+            shutil.copytree(REFERENCE_CASE, case_dir)
+            incident = plane.ingest_case(case_dir, "checkout", "Checkout", source_kind="live")
+            capsule_dir = plane.output_root / incident["incident_id"]
+            capsule_dir.mkdir(parents=True)
+            capsule_file = capsule_dir / "capsule.json"
+            capsule_file.write_text("{}", encoding="utf-8")
+            plane.store.record_capsule({
+                "capsule_id": f"capsule-{incident['incident_id']}",
+                "incident_id": incident["incident_id"],
+                "app_id": incident["app_id"],
+                "output_dir": capsule_dir,
+                "size_bytes": capsule_file.stat().st_size,
+            })
+            old = time.time() - 2 * 3600
+            os.utime(case_dir, (old, old))
+
+            with plane.lock:
+                plane.running = True
+                plane.active_job = "capsule"
+            self.assertEqual(plane.purge_expired_staging(force=True), 0)
+            self.assertTrue(case_dir.is_dir())
+            with plane.lock:
+                plane.running = False
+                plane.active_job = None
+
+            self.assertEqual(plane.purge_expired_staging(force=True), 1)
+            self.assertFalse(case_dir.exists())
+            self.assertTrue(capsule_file.is_file())
+            with self.assertRaisesRegex(FileNotFoundError, "staged live source capture has expired"):
+                plane._build_capsule(incident["incident_id"])
+
     def test_grafana_webhook_requires_explicit_enablement_and_bearer_token(self):
         payload = {"status": "firing", "alerts": [{"status": "firing", "fingerprint": "test-1",
                    "startsAt": "2026-09-25T05:00:00Z", "labels": {"alertname": "GatewayErrors", "namespace": "core", "cnfc": "edge-a"}}]}
@@ -61,6 +99,41 @@ class ControlPlaneTests(unittest.TestCase):
             incident = plane.ingest_case(REFERENCE_CASE, "checkout")
             self.assertEqual(incident["status"], "firing")
             self.assertIsNone(incident["ended_at"])
+
+    def test_interrupted_capture_can_be_retried_after_server_restart(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
+            state_dir = Path(directory) / "state"
+            plane = ControlPlane(state_dir)
+            incident = plane.ingest_case(REFERENCE_CASE, "checkout")
+
+            def interrupt_capture(_case_dir, _output_dir, progress):
+                progress("running", "Collecting retained evidence", {})
+                raise RuntimeError("controlled capture interruption")
+
+            with patch("fcapsule.control_plane.investigate_case", side_effect=interrupt_capture):
+                self.assertTrue(plane.start_capsule(incident["incident_id"]))
+                wait_for_idle(plane)
+            self.assertIn("controlled capture interruption", plane.snapshot()["error"])
+            self.assertIsNone(plane.store.get_capsule_for_incident(incident["incident_id"]))
+            plane.evidence.shutdown(wait=True)
+            plane.briefing_executor.shutdown(wait=True, cancel_futures=True)
+
+            server = None
+            try:
+                server = create_app_server("127.0.0.1", 0, state_dir)
+                self.assertEqual(server.control_plane.snapshot()["current_incident_id"], incident["incident_id"])
+                self.assertFalse(server.control_plane.snapshot()["running"])
+                self.assertTrue(server.control_plane.start_capsule(incident["incident_id"]))
+                wait_for_idle(server.control_plane)
+
+                capsule = server.control_plane.store.get_capsule_for_incident(incident["incident_id"])
+                self.assertIsNotNone(capsule)
+                self.assertTrue(Path(capsule["archive_path"]).is_file())
+            finally:
+                if server is not None:
+                    server.control_plane.evidence.shutdown(wait=True)
+                    server.control_plane.briefing_executor.shutdown(wait=True, cancel_futures=True)
+                    server.server_close()
 
     def test_identity_refresh_only_parses_alert_and_optional_configuration(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
@@ -190,6 +263,34 @@ class ControlPlaneTests(unittest.TestCase):
             self.assertEqual(rebuilt["report"]["report_version"], "1.3")
             self.assertTrue(rebuilt["report"]["log_patterns"])
 
+    def test_retained_report_survives_restart_after_capture_source_expires(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
+            state_dir = Path(directory) / "state"
+            source = Path(directory) / "source"
+            shutil.copytree(REFERENCE_CASE, source)
+            first = ControlPlane(state_dir)
+            self.addCleanup(first.evidence.shutdown)
+            self.addCleanup(lambda: first.briefing_executor.shutdown(wait=True, cancel_futures=True))
+            incident = first.ingest_case(source, "checkout", "Checkout")
+            first._build_capsule(incident["incident_id"])
+            before = first.incident_report_payload(incident["incident_id"])
+            shutil.rmtree(source)
+
+            with (
+                patch("fcapsule.control_plane.load_case", side_effect=AssertionError("Expired source must not be loaded")),
+                patch("fcapsule.control_plane.read_case_json", side_effect=AssertionError("Expired source must not be read")),
+            ):
+                restarted = ControlPlane(state_dir)
+                self.addCleanup(restarted.evidence.shutdown)
+                self.addCleanup(lambda: restarted.briefing_executor.shutdown(wait=True, cancel_futures=True))
+                after = restarted.incident_report_payload(incident["incident_id"])
+
+            self.assertIsNotNone(before)
+            self.assertIsNotNone(after)
+            self.assertEqual(before["report"], after["report"])
+            self.assertTrue(after["report"]["log_patterns"])
+            self.assertEqual(after["report"]["report_version"], "1.3")
+
     def test_http_streams_large_capsule_and_keeps_cached_report_readable(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
             server = create_app_server("127.0.0.1", 0, Path(directory) / "state")
@@ -236,6 +337,133 @@ class ControlPlaneTests(unittest.TestCase):
                         artifact_body = response.read()
                         self.assertEqual(int(response.headers["Content-Length"]), len(artifact_body))
                 self.assertEqual(json.loads(artifact_body), capsule)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_console_auth_blocks_unauthorized_source_actions_and_rejects_hostile_origins(self):
+        environment = {
+            "FCAPSULE_CONSOLE_USERNAME": "operator",
+            "FCAPSULE_CONSOLE_PASSWORD": "test-password",
+            "FCAPSULE_CONSOLE_AUTH_REQUIRED": "true",
+            "FCAPSULE_LIVE_ENABLED": "false",
+            "FCAPSULE_PROMETHEUS_URL": "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090",
+            "FCAPSULE_OPENSEARCH_URL": "http://opensearch.logging.svc.cluster.local:9200",
+            "FCAPSULE_SOURCE_ALLOWED_ORIGINS": "http://prometheus:9090,http://opensearch:9200",
+        }
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, environment):
+            server = create_app_server("127.0.0.1", 0, Path(directory) / "state")
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_port}"
+                headers = {
+                    "Authorization": "Basic " + base64.b64encode(b"operator:test-password").decode("ascii"),
+                    "Content-Type": "application/json",
+                }
+
+                before = server.control_plane.source_configuration()
+                unauthenticated_update = Request(
+                    f"{base}/api/settings/sources",
+                    data=json.dumps({"cluster_name": "attacker"}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with self.assertRaises(HTTPError) as denied_update:
+                    urlopen(unauthenticated_update, timeout=3)
+                self.assertEqual(denied_update.exception.code, 401)
+                self.assertEqual(server.control_plane.source_configuration()["cluster_name"], before["cluster_name"])
+
+                csrf_update = Request(
+                    f"{base}/api/settings/sources",
+                    data=json.dumps({"cluster_name": "cross-origin"}).encode("utf-8"),
+                    headers={**headers, "Origin": "https://attacker.example"},
+                    method="POST",
+                )
+                with self.assertRaises(HTTPError) as denied_csrf:
+                    urlopen(csrf_update, timeout=3)
+                self.assertEqual(denied_csrf.exception.code, 403)
+                self.assertEqual(server.control_plane.source_configuration()["cluster_name"], before["cluster_name"])
+
+                with patch.object(server.control_plane, "test_source_connections", return_value={"ok": True, "targets": {}}) as probe:
+                    with self.assertRaises(HTTPError) as denied_probe:
+                        urlopen(Request(f"{base}/api/sources/test", data=b"", method="POST"), timeout=3)
+                    self.assertEqual(denied_probe.exception.code, 401)
+                    probe.assert_not_called()
+
+                    health = urlopen(f"{base}/healthz", timeout=3)
+                    self.assertEqual(json.loads(health.read())["status"], "ok")
+
+                    remote_http = Request(
+                        f"{base}/api/state",
+                        headers={**headers, "X-Forwarded-For": "198.51.100.20", "X-Forwarded-Proto": "http"},
+                    )
+                    with self.assertRaises(HTTPError) as insecure_proxy:
+                        urlopen(remote_http, timeout=3)
+                    self.assertEqual(insecure_proxy.exception.code, 403)
+                    remote_https = Request(
+                        f"{base}/api/state",
+                        headers={**headers, "X-Forwarded-For": "198.51.100.20", "X-Forwarded-Proto": "https"},
+                    )
+                    with urlopen(remote_https, timeout=3) as response:
+                        self.assertIn("overview", json.loads(response.read()))
+
+                    payload = {
+                        "prometheus_url": before["prometheus_url"],
+                        "opensearch_url": before["opensearch_url"],
+                        "kubernetes_url": "",
+                        "cluster_name": "authorized-cluster",
+                        "namespaces": ["default"],
+                    }
+                    request = Request(
+                        f"{base}/api/settings/sources",
+                        data=json.dumps(payload).encode("utf-8"),
+                        headers=headers,
+                        method="POST",
+                    )
+                    with urlopen(request, timeout=3) as response:
+                        saved = json.loads(response.read())
+                    self.assertEqual(saved["cluster_name"], "authorized-cluster")
+
+                    with urlopen(Request(f"{base}/api/sources/test", data=b"", headers=headers, method="POST"), timeout=3) as response:
+                        self.assertTrue(json.loads(response.read())["ok"])
+                    probe.assert_called_once_with()
+
+                hostile = {**payload, "prometheus_url": "http://169.254.169.254:80"}
+                hostile_request = Request(
+                    f"{base}/api/settings/sources",
+                    data=json.dumps(hostile).encode("utf-8"),
+                    headers=headers,
+                    method="POST",
+                )
+                with self.assertRaises(HTTPError) as blocked_target:
+                    urlopen(hostile_request, timeout=3)
+                self.assertEqual(blocked_target.exception.code, 400)
+                self.assertEqual(server.control_plane.source_configuration()["cluster_name"], "authorized-cluster")
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_console_auth_required_fails_closed_when_secret_is_missing(self):
+        environment = {
+            "FCAPSULE_CONSOLE_USERNAME": "",
+            "FCAPSULE_CONSOLE_PASSWORD": "",
+            "FCAPSULE_CONSOLE_AUTH_REQUIRED": "true",
+            "FCAPSULE_LIVE_ENABLED": "false",
+        }
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, environment):
+            server = create_app_server("127.0.0.1", 0, Path(directory) / "state")
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_port}"
+                with self.assertRaises(HTTPError) as denied:
+                    urlopen(f"{base}/console", timeout=3)
+                self.assertEqual(denied.exception.code, 401)
+                with urlopen(f"{base}/healthz", timeout=3) as response:
+                    self.assertEqual(json.loads(response.read())["status"], "ok")
             finally:
                 server.shutdown()
                 server.server_close()
@@ -314,7 +542,15 @@ class ControlPlaneTests(unittest.TestCase):
             self.assertEqual(restored["phases"]["capsule"]["status"], "done")
 
     def test_http_app_exposes_operations_settings_and_state_api(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "DEEPSEEK_API_KEY": "",
+            "FCAPSULE_CONSOLE_USERNAME": "",
+            "FCAPSULE_CONSOLE_PASSWORD": "",
+            "FCAPSULE_CONSOLE_AUTH_REQUIRED": "false",
+            "FCAPSULE_PROMETHEUS_URL": "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090",
+            "FCAPSULE_OPENSEARCH_URL": "http://opensearch.logging.svc.cluster.local:9200",
+            "FCAPSULE_SOURCE_ALLOWED_ORIGINS": "http://prometheus:9090,http://opensearch:9200",
+        }):
             server = create_app_server("127.0.0.1", 0, Path(directory) / "state")
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()

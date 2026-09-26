@@ -195,10 +195,22 @@ class AlertMetricCaptureTests(unittest.TestCase):
         self.assertEqual(params["timeout"], ["4s"])
         self.assertEqual(params["limit"], [str(MAX_ALERT_SERIES + 1)])
         self.assertIsInstance(promql.parse(params["query"][0]), promql.VectorSelector)
-        self.assertEqual(captured["alert_evidence"]["status"], "available")
+        self.assertEqual(captured["alert_evidence"]["status"], "partial")
+        self.assertEqual(captured["alert_evidence"]["reason"], "incomplete_sample_coverage")
+        coverage = captured["alert_evidence"]["sample_coverage"][0]
+        self.assertEqual((coverage["expected_samples"], coverage["observed_samples"], coverage["missing_samples"]), (5, 3, 2))
+        self.assertEqual(coverage["incident"], {
+            "expected_samples": 4, "observed_samples": 2, "missing_samples": 2, "coverage_ratio": 0.5,
+        })
+        self.assertEqual(coverage["window_end_sample_age_seconds"], 30)
+        self.assertIn("no scrape interval threshold", coverage["assessment"])
         self.assertEqual(captured["series"][0]["source"]["capture_mode"], "incident_capture")
         self.assertEqual(captured["series"][0]["labels"], LABELS)
         self.assertEqual(captured["series"][0]["rule"]["query"], alert()["rule"]["query"])
+        self.assertEqual(captured["series"][0]["unit"], "state")
+        self.assertEqual(captured["series"][0]["time_range"], {
+            "start": "2026-09-20T00:00:00Z", "end": "2026-09-20T00:01:00Z",
+        })
 
     def test_compound_rule_captures_primary_signal_and_discloses_omitted_qualifiers(self):
         expression = (
@@ -264,7 +276,7 @@ class AlertMetricCaptureTests(unittest.TestCase):
                 captured = self.adapter.collect_alert_metrics(
                     trigger, "fcapsule-lab", pod, start, start + timedelta(minutes=1),
                 )
-                self.assertEqual(captured["alert_evidence"]["status"], "available")
+                self.assertEqual(captured["alert_evidence"]["status"], "partial")
                 self.assertEqual(captured["alert_evidence"]["capture_mode"], capture_mode)
                 self.assertEqual(captured["alert_evidence"]["threshold"], threshold)
                 self.assertEqual(len(captured["series"]), 1)
@@ -340,15 +352,18 @@ class AlertMetricCaptureTests(unittest.TestCase):
                     trigger, "fcapsule-lab", pod, start, start + timedelta(minutes=1),
                 )
                 source_capture = captured["alert_evidence"]["source_metric_capture"]
-                self.assertEqual(source_capture["status"], "available")
+                self.assertEqual(source_capture["status"], "partial")
+                self.assertEqual(source_capture["reason"], "incomplete_sample_coverage")
                 self.assertEqual(set(source_capture["metric_names"]), source_names)
                 sources = [series for series in captured["series"] if series["signal_origin"] == "alert_rule_source"]
                 self.assertEqual({series["metric"] for series in sources}, source_names)
                 self.assertTrue(all(series["scope"] == {"namespace": "fcapsule-lab", "pod": pod} for series in sources))
                 self.assertTrue(all("threshold" not in series and "operator" not in series for series in sources))
                 self.assertTrue(all(all(point[1] is not None for point in series["values"]) for series in sources))
+                self.assertTrue(all(series["sample_coverage"]["missing_samples"] > 0 for series in sources))
                 _validate_metrics({"series": sources})
                 self.assertGreater(source_capture["omitted_missing_or_non_finite_points"], 0)
+                self.assertTrue(all(item["status"] == "partial" for item in source_capture["sample_coverage"]))
                 self.assertGreaterEqual(len(self.adapter.transport.request.call_args_list), 2)
                 for request in self.adapter.transport.request.call_args_list[1:]:
                     source_params = parse_qs(urlparse(request.args[0]).query)
@@ -455,7 +470,18 @@ class AlertMetricCaptureTests(unittest.TestCase):
     def test_non_finite_and_missing_samples_remain_null_not_zero(self):
         captured = self.collect([[START.timestamp(), "1"], [START.timestamp() + 15, "NaN"], [START.timestamp() + 45, "+Inf"]])
         self.assertEqual([point[1] for point in captured["series"][0]["values"]], [1, None, None, None, None])
+        self.assertEqual(captured["alert_evidence"]["status"], "partial")
+        self.assertEqual(captured["alert_evidence"]["sample_coverage"][0]["missing_samples"], 4)
         json.dumps(captured, allow_nan=False)
+
+    def test_complete_sample_coverage_remains_available(self):
+        values = [[START.timestamp() + offset * 15, str(offset)] for offset in range(5)]
+        captured = self.collect(values)
+        coverage = captured["alert_evidence"]["sample_coverage"][0]
+        self.assertEqual(captured["alert_evidence"]["status"], "available")
+        self.assertIsNone(captured["alert_evidence"]["reason"])
+        self.assertEqual(coverage["status"], "complete")
+        self.assertEqual(coverage["coverage_ratio"], 1.0)
 
     def test_prometheus_millisecond_timestamp_precision_is_preserved(self):
         start = START + timedelta(microseconds=123456)
@@ -468,6 +494,22 @@ class AlertMetricCaptureTests(unittest.TestCase):
         self.assertEqual(len(first["series"]), 2)
         self.assertNotEqual(first["series"][0]["series_id"], first["series"][1]["series_id"])
         self.assertEqual(first["series"][0]["series_id"], second["series"][1]["series_id"])
+
+    def test_empty_series_cannot_be_hidden_by_another_complete_series(self):
+        results = [
+            {"metric": {**LABELS, "instance": "observed"}, "values": [
+                [START.timestamp() + offset * 15, "1"] for offset in range(5)
+            ]},
+            {"metric": {**LABELS, "instance": "stale"}, "values": []},
+        ]
+        captured = self.collect(results=results)
+        evidence = captured["alert_evidence"]
+        self.assertEqual(evidence["status"], "partial")
+        self.assertEqual(evidence["reason"], "incomplete_sample_coverage")
+        self.assertEqual(evidence["omitted_no_finite_series_count"], 1)
+        self.assertEqual(len(captured["series"]), 1)
+        self.assertEqual([item["status"] for item in evidence["sample_coverage"]], ["complete", "unavailable"])
+        self.assertEqual(evidence["sample_coverage"][1]["missing_samples"], 5)
 
     def test_no_query_for_unsupported_rules_or_model_annotations(self):
         captured = self.collect(query="up == 0 or vector(1)")
@@ -594,7 +636,8 @@ class AlertMetricPipelineTests(unittest.TestCase):
             self.assertIn(field, signal)
         self.assertEqual(signal["alert_timestamp"], alert()["startsAt"])
         self.assertIsNone(signal["values"][-1]["value"])
-        self.assertEqual(report["alert_metric_evidence"][0]["status"], "available")
+        self.assertEqual(report["alert_metric_evidence"][0]["status"], "partial")
+        self.assertEqual(report["alert_metric_evidence"][0]["reason"], "incomplete_sample_coverage")
         self.assertIn("metric_observation", next(item for item in report["supporting_evidence"] if item["type"] == "metric_anomaly"))
 
     def test_loader_permits_alert_gaps_but_rejects_nonfinite_values(self):
@@ -630,7 +673,7 @@ class AlertMetricPipelineTests(unittest.TestCase):
             original = {path.name: path.read_bytes() for path in case.iterdir()}
             bundle = load_case(case)
             self.assertEqual(bundle.metrics[0]["signal_origin"], "alert_rule")
-            self.assertEqual(bundle.alerts[0]["metric_evidence"]["status"], "available")
+            self.assertEqual(bundle.alerts[0]["metric_evidence"]["status"], "partial")
             self.assertLessEqual((bundle.window_end - bundle.window_start).total_seconds(), 1200)
             coordinator._capture_case(config, prometheus, logs, kubernetes, alert("up > 1"), pod, "fresh-case")
             prometheus.collect_alert_metrics.assert_called_once()

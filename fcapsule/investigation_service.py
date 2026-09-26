@@ -153,7 +153,7 @@ def _atlas_case(value: Any, before: datetime) -> dict[str, Any] | None:
     }
     result = {
         "atlas_case_id": atlas_case_id,
-        "citation": f"Estima record {atlas_case_id}",
+        "citation": f"Collective record {atlas_case_id}",
         "observed_at": observed_at[:40],
         "relation": scrub(value.get("relation"), reference_ids=references)[:80]
         if isinstance(value.get("relation"), str) else "historical_analog",
@@ -255,7 +255,8 @@ class InvestigationService:
             "revision_id", "parent_revision_id", "revision_reason", "source_mode", "status", "provider", "queued_at",
             "started_at", "finished_at", "model", "policy_version", "message", "validation_error",
             "assessment", "checks", "calls", "review", "findings", "usage", "token_budget",
-            "investigation_contract", "evidence_manifest", "input_fingerprint",
+            "investigation_contract", "evidence_manifest", "input_fingerprint", "report_fingerprint",
+            "recovery_attempt",
         )
         for revision in history["revisions"]:
             path = Path(str(revision.get("state_path") or ""))
@@ -555,7 +556,7 @@ class InvestigationService:
         return observed_alert and diagnostic_overlap
 
     def _estima_retrieval(self, context: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        limitation = "Estima retrieval is optional; retained local evidence remains the investigation source of truth."
+        limitation = "Collective retrieval is optional; retained local evidence remains the investigation source of truth."
         get_client = getattr(self.plane, "estima_client", None) or getattr(self.plane, "atlas_client", None)
         if not callable(get_client):
             return [], {"status": "disabled", "case_count": 0, "limitation": limitation}
@@ -563,7 +564,7 @@ class InvestigationService:
             client = get_client("read")
         except Exception:
             return [], {"status": "unavailable", "case_count": 0,
-                        "limitation": "Estima retrieval was unavailable; the local evidence investigation continues."}
+                        "limitation": "Collective retrieval was unavailable; the local evidence investigation continues."}
         if client is None:
             return [], {"status": "disabled", "case_count": 0, "limitation": limitation}
 
@@ -571,12 +572,12 @@ class InvestigationService:
         before = _aware_capture_time(scope.get("alert_started_at"))
         if before is None:
             return [], {"status": "skipped_no_time", "case_count": 0,
-                        "limitation": "Estima retrieval was skipped because no reliable alert time was available; future records are excluded."}
+                        "limitation": "Collective retrieval was skipped because no reliable alert time was available; future records are excluded."}
         query, alert_family, diagnostic_keys = self._atlas_search_profile(context)
         if not query:
             return [], {"status": "skipped_no_diagnostics", "case_count": 0,
                         "observed_before": before.isoformat().replace("+00:00", "Z"),
-                        "limitation": "Estima retrieval was skipped because the primary alert lacked structured diagnostic keys; local evidence continues."}
+                        "limitation": "Collective retrieval was skipped because the primary alert lacked structured diagnostic keys; local evidence continues."}
         observed_before = before.isoformat().replace("+00:00", "Z")
         # Estima scope accepts deployment identity fields, not Kubernetes resource
         # kinds. Query text carries the target/alert signal without excluding
@@ -586,11 +587,11 @@ class InvestigationService:
             response = client.search(estima_scope, query, limit=ATLAS_SEARCH_LIMIT, before=observed_before)
         except Exception:
             return [], {"status": "unavailable", "case_count": 0, "observed_before": observed_before,
-                        "limitation": "Estima retrieval was unavailable; the local evidence investigation continues."}
+                        "limitation": "Collective retrieval was unavailable; the local evidence investigation continues."}
         raw_cases = response.get("cases") if isinstance(response, dict) else None
         if not isinstance(raw_cases, list):
             return [], {"status": "unavailable", "case_count": 0, "observed_before": observed_before,
-                        "limitation": "Estima returned no usable retrieval response; the local evidence investigation continues."}
+                        "limitation": "Collective returned no usable retrieval response; the local evidence investigation continues."}
         cases = []
         rejected = 0
         for raw in raw_cases[:ATLAS_SEARCH_LIMIT]:
@@ -605,9 +606,9 @@ class InvestigationService:
         status = "matched" if cases else "no_relevant_matches" if rejected else "no_matches"
         return cases, {"status": status, "case_count": len(cases), "observed_before": observed_before,
                        "limitation": limitation if cases else
-                       ("No prior Estima records met the alert-time and relevance gates; local evidence investigation continues."
+                       ("No prior Collective records met the alert-time and relevance gates; local evidence investigation continues."
                         if rejected else
-                        "No prior Estima records met the strict alert-time cutoff; local evidence investigation continues.")}
+                        "No prior Collective records met the strict alert-time cutoff; local evidence investigation continues.")}
 
     def _atlas_retrieval(self, context: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Compatibility alias for persisted FCAPSule investigation integrations."""
@@ -628,6 +629,17 @@ class InvestigationService:
             and current_name and prior_name and current_name != prior_name
             and alert_identity and _alert_family(str(prior.get("recurrence_key") or "")) == alert_identity
         )
+
+    @staticmethod
+    def report_fingerprint(entries, primary_incident_id: str | None = None) -> str:
+        payload = {
+            "reports": [
+                [item.get("incident", {}).get("incident_id", ""), item.get("report", "")]
+                for item in entries
+            ],
+            "primary_incident_id": primary_incident_id or "",
+        }
+        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
     @staticmethod
     def fingerprint(entries, evidence_manifest: list[dict[str, Any]] | None = None,
@@ -769,7 +781,8 @@ class InvestigationService:
                 self.source_review_jobs.discard(review_id)
 
     def start(self, episode_id: str, retry: bool = False, reason: str = "initial_capture",
-              source_mode: str = "live_sources", primary_incident_id: str | None = None) -> dict[str, Any]:
+              source_mode: str = "live_sources", primary_incident_id: str | None = None,
+              automatic_recovery: bool = False) -> dict[str, Any]:
         with self.plane.briefing_lock:
             episode = self.plane.store.get_episode(episode_id)
             if not episode:
@@ -798,8 +811,36 @@ class InvestigationService:
             fingerprint = self.fingerprint(entries, evidence_manifest, primary_incident_id)
             previous = self.read(episode_id)
             config = self.plane.ai_configuration()
-            if any(call.get("status") == "running" for call in previous.get("calls", [])):
-                previous.setdefault("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})["complete"] = False
+            if previous.get("status") in {"queued", "running"}:
+                interrupted_at = now()
+                calls = previous.get("calls") if isinstance(previous.get("calls"), list) else []
+                checks = previous.get("checks") if isinstance(previous.get("checks"), list) else []
+                active_call = False
+                for call in calls:
+                    if isinstance(call, dict) and call.get("status") == "running":
+                        call.update(status="failed", finished_at=interrupted_at,
+                                    error_type="InterruptedError", interrupted=True)
+                        active_call = True
+                for check in checks:
+                    if isinstance(check, dict) and check.get("status") == "running":
+                        check.update(
+                            status="unavailable",
+                            finished_at=interrupted_at,
+                            result={"limitation": "Check was interrupted before an observation was retained."},
+                        )
+                usage = previous.setdefault(
+                    "usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                )
+                if active_call:
+                    usage["complete"] = False
+                previous.update(
+                    status="incomplete",
+                    finished_at=interrupted_at,
+                    error_type="InterruptedError",
+                    message="Investigation was interrupted by process shutdown. Retained checks are available; retry is explicit.",
+                )
+                self.plane._write_briefing_state(self.path(episode_id), previous)
+                self._record_revision(previous)
             if not retry and previous.get("input_fingerprint") == fingerprint and previous.get("status") in {"ready", "incomplete", "inconclusive"}:
                 return previous
             revision_id = f"revision-{uuid.uuid4().hex}"
@@ -809,10 +850,16 @@ class InvestigationService:
                      "provider": config["provider"], "model": config["model"],
                      "input_fingerprint": fingerprint, "checks": [], "assessment": None,
                      "attempt": previous.get("attempt", 0) + 1, "evidence_manifest": evidence_manifest,
-                     "primary_incident_id": primary_incident_id}
+                     "report_fingerprint": self.report_fingerprint(entries, primary_incident_id),
+                     "primary_incident_id": primary_incident_id,
+                     "recovery_attempt": 1 if automatic_recovery else 0}
             history = list(previous.get("previous_runs", []))
             if previous.get("started_at"):
-                history.append({key: previous.get(key) for key in ("attempt", "started_at", "finished_at", "status", "provider", "model", "usage", "assessment", "checks", "calls", "draft_assessment", "review", "policy_version")})
+                history.append({key: previous.get(key) for key in (
+                    "attempt", "started_at", "finished_at", "status", "provider", "model", "usage",
+                    "assessment", "checks", "calls", "draft_assessment", "review", "policy_version",
+                    "recovery_attempt",
+                )})
             state["previous_runs"] = history[-3:]
             if previous.get("usage"):
                 prior = previous.get("lifetime_usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "complete": True})
@@ -837,18 +884,48 @@ class InvestigationService:
     def resume(self) -> None:
         for episode in self.plane.store.list_episodes(limit=10000):
             if any(signal.get("report_ready") for signal in episode["signals"]):
-                previous = self.read(episode["episode_id"])
+                episode_id = str(episode["episode_id"])
+                previous = self.read(episode_id)
+                primary_id = previous.get("primary_incident_id")
                 if previous.get("status") in {"ready", "incomplete", "inconclusive"}:
-                    primary_id = previous.get("primary_incident_id")
                     entries = self.entries(episode, primary_incident_id=primary_id or episode.get("primary_incident_id"))
-                    manifest = self.plane.evidence.manifest(episode["episode_id"])
+                    manifest = self.plane.evidence.manifest(episode_id)
+                    current_primary_id = primary_id or episode.get("primary_incident_id")
                     # Older manual revisions fingerprinted an implicit primary as
                     # None. Keep completed work when its inputs are unchanged.
                     if previous.get("input_fingerprint") == self.fingerprint(
                         entries, manifest, primary_id
                     ):
                         continue
-                self.start(episode["episode_id"], primary_incident_id=episode.get("primary_incident_id"))
+                    old_manifest = previous.get("evidence_manifest")
+                    old_attachment_ids = {
+                        str(item.get("attachment_id")) for item in old_manifest if isinstance(item, dict)
+                    } if isinstance(old_manifest, list) else set()
+                    current_attachment_ids = {
+                        str(item.get("attachment_id")) for item in manifest if isinstance(item, dict)
+                    }
+                    report_fingerprint = self.report_fingerprint(entries, current_primary_id)
+                    prior_report_fingerprint = previous.get("report_fingerprint")
+                    reports_unchanged = (
+                        prior_report_fingerprint == report_fingerprint
+                        if isinstance(prior_report_fingerprint, str)
+                        else bool(previous.get("input_fingerprint"))
+                    )
+                    if (reports_unchanged and current_attachment_ids - old_attachment_ids
+                            and old_attachment_ids.issubset(current_attachment_ids)):
+                        continue
+                if previous.get("status") in {"queued", "running"}:
+                    recover_automatically = int(previous.get("recovery_attempt", 0) or 0) < 1
+                    self.start(
+                        episode_id,
+                        retry=recover_automatically,
+                        reason=str(previous.get("revision_reason") or "initial_capture"),
+                        source_mode=str(previous.get("source_mode") or "live_sources"),
+                        primary_incident_id=primary_id or episode.get("primary_incident_id"),
+                        automatic_recovery=recover_automatically,
+                    )
+                else:
+                    self.start(episode_id, primary_incident_id=episode.get("primary_incident_id"))
 
     def invalidate(self, episode_id: str) -> None:
         """Do not retain deleted member evidence in a surviving episode assessment."""
@@ -929,6 +1006,8 @@ class InvestigationService:
                         raise RuntimeError("Investigation cancelled after shutdown or membership deletion")
                     state.update(input_fingerprint=input_fingerprint, attempt=queued["attempt"],
                                  provider=config["provider"], model=config["model"],
+                                 report_fingerprint=queued.get("report_fingerprint"),
+                                 recovery_attempt=queued.get("recovery_attempt", 0),
                                  lifetime_usage=queued.get("lifetime_usage", {}), previous_runs=queued.get("previous_runs", []),
                                  revision_id=queued.get("revision_id"), parent_revision_id=queued.get("parent_revision_id"),
                                  primary_incident_id=primary_incident_id,

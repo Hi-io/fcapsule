@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import quote, urlencode, urlsplit
 
 from fcapsule.adapters.transport import JsonTransport, ResponseTooLargeError
+from fcapsule.adapters.source_url_policy import default_kubernetes_url, validate_source_url
 
 SERVICE_ACCOUNT = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 SENSITIVE_KEY = re.compile(r"password|passwd|secret|token|credential|api[-_]?key|private[-_]?key", re.I)
@@ -194,12 +195,12 @@ def evaluate_label_selector(
 
 class KubernetesAdapter:
     def __init__(self, base_url: str | None = None, timeout: float = 8) -> None:
-        host = os.environ.get("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
-        port = os.environ.get("KUBERNETES_SERVICE_PORT_HTTPS", "443")
-        self.base_url = (base_url or f"https://{host}:{port}").rstrip("/")
+        self.base_url = (base_url or default_kubernetes_url()).rstrip("/")
         token_path = SERVICE_ACCOUNT / "token"
         ca_path = SERVICE_ACCOUNT / "ca.crt"
         token = token_path.read_text(encoding="utf-8").strip() if token_path.is_file() else os.environ.get("FCAPSULE_KUBERNETES_TOKEN", "")
+        if token:
+            self.base_url = validate_source_url(self.base_url, "kubernetes", "Kubernetes API URL")
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         context = ssl.create_default_context(cafile=str(ca_path)) if ca_path.is_file() else ssl.create_default_context()
         self.transport = JsonTransport(self.base_url, timeout=timeout, headers=headers, ssl_context=context)

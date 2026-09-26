@@ -291,7 +291,7 @@ def project_estima_record(
     encoded = json.dumps(payload, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
     if len(encoded) > MAX_CASE_BYTES:
         payload["observations"] = observations[:12]
-        payload["summary"] = "Retained evidence profile; cause is not verified by Estima."
+        payload["summary"] = "Retained evidence profile; cause is not verified by Collective."
         encoded = json.dumps(payload, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
         if len(encoded) > MAX_CASE_BYTES:
             return None

@@ -72,7 +72,7 @@ class AtlasInvestigationTests(unittest.TestCase):
         self.assertEqual(status["status"], "matched")
         self.assertEqual([item["atlas_case_id"] for item in cases], ["atlas-case-01"])
         retained = cases[0]
-        self.assertEqual(retained["citation"], "Estima record atlas-case-01")
+        self.assertEqual(retained["citation"], "Collective record atlas-case-01")
         self.assertEqual(retained["instance_id"], "atlas-instance-remote")
         self.assertEqual(retained["observations"][0]["reference"], "atlas-fact-21")
         self.assertEqual(retained["factual_reference_ids"], ["atlas-fact-21", "atlas-alert-22"])

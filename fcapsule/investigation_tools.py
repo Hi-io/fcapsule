@@ -582,12 +582,24 @@ def episode_context(
                 # Same prose can describe different sampled values or rules.
                 identity.append(metric_observation)
             metric_capture = item.get("alert_metric_evidence")
+            if not isinstance(metric_capture, dict) and item.get("signal_origin") == "alert_rule":
+                captures = report.get("alert_metric_evidence", [])
+                if isinstance(captures, list):
+                    metric_capture = next((capture for capture in captures if isinstance(capture, dict)
+                                           and capture.get("alertname") == item.get("alertname")), None)
+                    if metric_capture is None and len(captures) == 1 and isinstance(captures[0], dict):
+                        metric_capture = captures[0]
             capture_limitation = None
-            if isinstance(metric_capture, dict) and metric_capture.get("status") == "unavailable":
+            if isinstance(metric_capture, dict) and metric_capture.get("status") in {"partial", "unavailable"}:
                 reason = metric_capture.get("reason")
-                if isinstance(reason, str) and reason.strip():
-                    capture_limitation = "Alert-rule metric capture unavailable: " + anonymize_text(reason.strip())[:120]
-                    identity.append(capture_limitation)
+                detail = anonymize_text(reason.strip())[:120] if isinstance(reason, str) and reason.strip() else "coverage not fully observed"
+                capture_limitation = f"Alert-rule metric capture {metric_capture['status']}: {detail}"
+                if metric_capture.get("status") == "partial":
+                    omitted = metric_capture.get("omitted_no_finite_series_count")
+                    if type(omitted) is int and omitted > 0:
+                        capture_limitation += f"; {min(omitted, 9999)} scoped series had no finite samples"
+                    capture_limitation += ". Unobserved points are unknown, not healthy evidence."
+                identity.append(capture_limitation)
             ref = "E" + hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:12]
             if ref not in evidence:
                 evidence[ref] = {"id": ref, "domain": item.get("type"), "title": item.get("title"),

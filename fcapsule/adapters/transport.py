@@ -6,11 +6,16 @@ import base64
 import json
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 
 class ResponseTooLargeError(RuntimeError):
     """Raised when a response exceeds an explicitly requested byte limit."""
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 class JsonTransport:
@@ -27,6 +32,7 @@ class JsonTransport:
         self.timeout = timeout
         self.headers = dict(headers or {})
         self.ssl_context = ssl_context
+        self.opener = build_opener(_NoRedirectHandler(), HTTPSHandler(context=ssl_context))
         if username:
             credentials = base64.b64encode(f"{username}:{password or ''}".encode()).decode()
             self.headers["Authorization"] = f"Basic {credentials}"
@@ -46,7 +52,7 @@ class JsonTransport:
             headers["Content-Type"] = "application/json"
         request = Request(f"{self.base_url}{path}", data=data, headers=headers, method=method)
         try:
-            with urlopen(request, timeout=self.timeout, context=self.ssl_context) as response:
+            with self.opener.open(request, timeout=self.timeout) as response:
                 raw = response.read() if max_response_bytes is None else response.read(max_response_bytes + 1)
                 if max_response_bytes is not None and len(raw) > max_response_bytes:
                     raise ResponseTooLargeError(

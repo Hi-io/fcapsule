@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-import json
+import base64
+import binascii
 import hmac
+import ipaddress
+import json
 import mimetypes
 import os
 import tempfile
@@ -11,7 +14,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse, urlsplit
 
 from fcapsule.control_plane import ControlPlane
 from fcapsule.operational_health import render_operational_metrics
@@ -34,7 +37,7 @@ HTML = """<!doctype html>
       <a href="/console" data-nav="console"><span class="ui-icon" data-icon="activity" aria-hidden="true"></span>Operations</a>
       <a href="/targets" data-nav="targets"><span class="ui-icon" data-icon="network" aria-hidden="true"></span>Targets</a>
       <a href="/patterns" data-nav="patterns"><span class="ui-icon" data-icon="layers" aria-hidden="true"></span>Patterns</a>
-      <a href="/estima" data-nav="estima"><span class="ui-icon" data-icon="network" aria-hidden="true"></span>Estima</a>
+      <a href="/collective" data-nav="estima"><span class="ui-icon" data-icon="network" aria-hidden="true"></span>Collective</a>
       <a href="/settings" data-nav="settings"><span class="ui-icon" data-icon="settings-2" aria-hidden="true"></span>Settings</a>
     </nav>
     <div class="system-state" role="status"><i></i><span id="system-state">Connecting</span></div>
@@ -57,7 +60,11 @@ JSON_SPOOL_MEMORY_BYTES = 1024 * 1024
 
 
 def _canonical_memory_path(path: str) -> str:
-    """Keep local Atlas URLs as aliases while making Estima the public route."""
+    """Keep previous local memory routes available to existing clients."""
+    if path == "/api/settings/collective":
+        return "/api/settings/estima"
+    if path == "/api/collective" or path.startswith("/api/collective/"):
+        return path.replace("/api/collective", "/api/estima", 1)
     if path == "/api/settings/atlas":
         return "/api/settings/estima"
     if path == "/api/atlas" or path.startswith("/api/atlas/"):
@@ -187,6 +194,89 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encoded)
 
+    def _authorize(self, path: str, method: str) -> bool:
+        if path == "/healthz" or (method == "POST" and path == "/api/webhooks/grafana"):
+            return True
+
+        if method in {"POST", "DELETE"}:
+            origin = self.headers.get("Origin")
+            fetch_site = self.headers.get("Sec-Fetch-Site", "").lower()
+            if origin:
+                parsed_origin = urlsplit(origin)
+                expected_scheme = self.headers.get("X-Forwarded-Proto", "http").strip().lower()
+                expected_host = self.headers.get("Host", "").lower()
+                if (parsed_origin.scheme.lower() != expected_scheme or parsed_origin.netloc.lower() != expected_host
+                        or parsed_origin.username is not None or parsed_origin.password is not None):
+                    self._json({"error": "Cross-origin console requests are not allowed"}, HTTPStatus.FORBIDDEN)
+                    return False
+            elif fetch_site in {"cross-site", "same-site"}:
+                self._json({"error": "Cross-origin console requests are not allowed"}, HTTPStatus.FORBIDDEN)
+                return False
+
+        username = os.environ.get("FCAPSULE_CONSOLE_USERNAME", "")
+        password = os.environ.get("FCAPSULE_CONSOLE_PASSWORD", "")
+        configured = bool(username and password)
+        required = os.environ.get("FCAPSULE_CONSOLE_AUTH_REQUIRED", "false").lower() in {"1", "true", "yes"}
+        try:
+            peer = ipaddress.ip_address(self.client_address[0].split("%", 1)[0])
+        except (ValueError, IndexError):
+            peer = None
+        loopback = peer is not None and peer.is_loopback
+        forwarded_clients = []
+        for value in self.headers.get("X-Forwarded-For", "").split(","):
+            try:
+                forwarded_clients.append(ipaddress.ip_address(value.strip().split("%", 1)[0]))
+            except ValueError:
+                continue
+        forwarded_remote = any(not address.is_loopback for address in forwarded_clients)
+        forwarded_proto = self.headers.get("X-Forwarded-Proto", "").strip().lower()
+
+        # The app speaks HTTP. Remote Basic credentials are accepted only from a
+        # configured HTTPS reverse proxy; loopback remains available for dev/port-forward.
+        if loopback and forwarded_remote and forwarded_proto != "https":
+            self._json({"error": "Console access requires HTTPS"}, HTTPStatus.FORBIDDEN)
+            return False
+        if not loopback:
+            trusted_proxies = []
+            for value in os.environ.get("FCAPSULE_CONSOLE_TRUSTED_PROXY_CIDRS", "").split(","):
+                try:
+                    if value.strip():
+                        trusted_proxies.append(ipaddress.ip_network(value.strip(), strict=False))
+                except ValueError:
+                    continue
+            trusted_proxy = peer is not None and any(peer in network for network in trusted_proxies)
+            if not trusted_proxy or forwarded_proto != "https":
+                self._json({"error": "Console access requires HTTPS"}, HTTPStatus.FORBIDDEN)
+                return False
+
+        if not configured:
+            if loopback and not required:
+                return True
+            return self._unauthorized()
+
+        authorization = self.headers.get("Authorization", "")
+        scheme, separator, encoded = authorization.partition(" ")
+        if separator and scheme.lower() == "basic":
+            try:
+                supplied = base64.b64decode(encoded.strip(), validate=True).decode("utf-8")
+            except (binascii.Error, UnicodeDecodeError, ValueError):
+                supplied = ""
+            expected = f"{username}:{password}"
+            if hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8")):
+                return True
+        return self._unauthorized()
+
+    def _unauthorized(self) -> bool:
+        self.send_response(HTTPStatus.UNAUTHORIZED)
+        self.send_header("WWW-Authenticate", 'Basic realm="FCAPSule", charset="UTF-8"')
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
+        body = b'{"error":"Unauthorized"}'
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        return False
+
     def _payload(self, maximum_bytes: int = 512 * 1024) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
         if not length:
@@ -204,27 +294,29 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
         except AttributeError:
             config = {}
         if not config.get("url"):
-            status, message = "not_configured", "Add the Estima service URL in Settings."
+            status, message = "not_configured", "Add the Collective service URL in Settings."
         elif not config.get("read_enabled"):
-            status, message = "disabled", "Estima reads are disabled in Settings."
+            status, message = "disabled", "Collective reads are disabled in Settings."
         else:
-            status, message = "unavailable", "Estima client is unavailable in this FCAPSule build."
+            status, message = "unavailable", "Collective client is unavailable in this FCAPSule build."
         self._json({"status": status, "error": message}, HTTPStatus.SERVICE_UNAVAILABLE)
 
     def _atlas_failure(self, exc: Exception) -> None:
         self._json({
             "status": "unavailable",
-            "error": "Estima request failed. Check the saved URL, access token, and service availability.",
+            "error": "Collective request failed. Check the saved URL, access token, and service availability.",
         }, HTTPStatus.SERVICE_UNAVAILABLE)
 
     def do_GET(self) -> None:  # noqa: N802
         path = _canonical_memory_path(urlparse(self.path).path)
+        if not self._authorize(path, "GET"):
+            return
         if path == "/":
             self.send_response(HTTPStatus.FOUND)
             self.send_header("Location", "/console")
             self.end_headers()
             return
-        if path in {"/console", "/targets", "/patterns", "/atlas", "/estima", "/settings"} or path.startswith(("/atlas/", "/estima/")):
+        if path in {"/console", "/targets", "/patterns", "/atlas", "/estima", "/collective", "/settings"} or path.startswith(("/atlas/", "/estima/", "/collective/")):
             self._text(HTML, "text/html; charset=utf-8")
             return
         if path == "/assets/app.css":
@@ -266,6 +358,36 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/settings/estima":
             self._json(_estima_configuration(self.server.control_plane))
+            return
+        if path == "/api/estima/stats":
+            client = _estima_client(self.server.control_plane, "read")
+            if client is None:
+                self._atlas_unavailable()
+                return
+            try:
+                self._json(client.stats())
+            except Exception as exc:
+                self._atlas_failure(exc)
+            return
+        if path == "/api/estima/cases":
+            query = parse_qs(urlparse(self.path).query)
+            cluster = (query.get("cluster") or [None])[0]
+            scope = {"cluster": cluster} if cluster else None
+            search = (query.get("query") or [None])[0]
+            cursor = (query.get("cursor") or [None])[0]
+            try:
+                limit = max(1, min(50, int((query.get("limit") or ["20"])[0])))
+            except ValueError:
+                self._json({"error": "limit must be a number", "status": "invalid_request"}, HTTPStatus.BAD_REQUEST)
+                return
+            client = _estima_client(self.server.control_plane, "read")
+            if client is None:
+                self._atlas_unavailable()
+                return
+            try:
+                self._json(client.list_cases(scope=scope, query=search, limit=limit, cursor=cursor))
+            except Exception as exc:
+                self._atlas_failure(exc)
             return
         if path == "/api/estima/patterns":
             query = parse_qs(urlparse(self.path).query)
@@ -375,6 +497,8 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = _canonical_memory_path(urlparse(self.path).path)
+        if not self._authorize(path, "POST"):
+            return
         try:
             if path == "/api/webhooks/grafana":
                 config = self.server.control_plane.source_configuration()
@@ -453,7 +577,7 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
             if path == "/api/estima/retry-failed":
                 retry = getattr(self.server.control_plane, "retry_estima_publications", None) or getattr(self.server.control_plane, "retry_atlas_publications", None)
                 if retry is None:
-                    self._json({"error": "Estima retry is unavailable in this FCAPSule build"}, HTTPStatus.NOT_IMPLEMENTED)
+                    self._json({"error": "Collective retry is unavailable in this FCAPSule build"}, HTTPStatus.NOT_IMPLEMENTED)
                     return
                 self._json(retry(limit=100), HTTPStatus.ACCEPTED)
                 return
@@ -531,6 +655,8 @@ class FCAPSuleHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
+        if not self._authorize(path, "DELETE"):
+            return
         try:
             if path.startswith("/api/episodes/"):
                 episode_id = unquote(path.removeprefix("/api/episodes/").rstrip("/"))
@@ -560,6 +686,7 @@ def create_app_server(
     control_plane = ControlPlane(state_dir)
     server = FCAPSuleHTTPServer((host, port), control_plane)
     control_plane.investigator.resume()
+    control_plane.evidence.resume()
     control_plane.start_live_monitoring()
     return server
 

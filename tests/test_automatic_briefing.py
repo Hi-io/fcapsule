@@ -8,6 +8,8 @@ from unittest.mock import patch
 from zipfile import ZipFile
 
 from fcapsule.control_plane import ControlPlane
+from fcapsule.investigation_service import InvestigationService
+from fcapsule.ui.app import create_app_server
 from tests.common import REFERENCE_CASE
 
 
@@ -258,8 +260,21 @@ class AutomaticInvestigationTests(unittest.TestCase):
     def test_startup_resumes_interrupted_retained_work(self):
         capsule = self.control._build_capsule(self.id)
         path = self.control.investigator.path(self.episode_id)
-        self.control._write_briefing_state(path, {"status": "running", "calls": [{"status": "running"}],
-            "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120, "complete": True}})
+        episode = self.control.store.get_episode(self.episode_id)
+        entries = self.control.investigator.entries(episode)
+        fingerprint = self.control.investigator.fingerprint(
+            entries, self.control.evidence.manifest(self.episode_id), self.id
+        )
+        self.control._write_briefing_state(path, {
+            "episode_id": self.episode_id, "revision_id": "revision-interrupted",
+            "parent_revision_id": None, "revision_reason": "evidence_added", "source_mode": "retained_only",
+            "status": "running", "started_at": "2026-09-26T00:00:00Z", "attempt": 3,
+            "primary_incident_id": self.id, "input_fingerprint": fingerprint,
+            "checks": [{"id": "Q001", "tool": "search_logs", "status": "completed",
+                        "result": {"observations": [{"reason": "Retained log line"}]}}],
+            "calls": [{"phase": "evidence_review", "status": "running"}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120, "complete": True},
+        })
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}), patch(
             "fcapsule.investigation_service.run_investigation",
             side_effect=lambda *args: args[4]({"status": "ready", "checks": [], "assessment": {}}),
@@ -267,8 +282,100 @@ class AutomaticInvestigationTests(unittest.TestCase):
             self.control.investigator.resume()
             self.control.briefing_executor.shutdown(wait=True)
             self.assertEqual(generate.call_count, 1)
-            self.assertEqual(json.loads(path.read_text())["status"], "ready")
-            self.assertFalse(json.loads(path.read_text())["lifetime_usage"]["complete"])
+            resumed = json.loads(path.read_text())
+            self.assertEqual(resumed["status"], "ready")
+            self.assertFalse(resumed["lifetime_usage"]["complete"])
+            self.assertEqual(resumed["revision_reason"], "evidence_added")
+            self.assertEqual(resumed["source_mode"], "retained_only")
+            interrupted = resumed["previous_runs"][-1]
+            self.assertEqual(interrupted["status"], "incomplete")
+            self.assertEqual(interrupted["checks"][0]["status"], "completed")
+            self.assertEqual(interrupted["calls"][0]["status"], "failed")
+            self.assertTrue(interrupted["calls"][0].get("finished_at"))
+            revision = next(
+                item for item in self.control.investigator.revisions(self.episode_id)
+                if item["revision_id"] == "revision-interrupted"
+            )
+            self.assertEqual(revision["status"], "incomplete")
+
+    def test_startup_automatically_recovers_an_interruption_at_most_once(self):
+        self.control._build_capsule(self.id)
+        episode = self.control.store.get_episode(self.episode_id)
+        entries = self.control.investigator.entries(episode)
+        fingerprint = self.control.investigator.fingerprint(
+            entries, self.control.evidence.manifest(self.episode_id), self.id
+        )
+        self.control._write_briefing_state(self.control.investigator.path(self.episode_id), {
+            "episode_id": self.episode_id, "revision_id": "revision-interrupted-once",
+            "revision_reason": "evidence_added", "source_mode": "retained_only",
+            "status": "running", "started_at": "2026-09-26T00:00:00Z", "attempt": 1,
+            "primary_incident_id": self.id, "input_fingerprint": fingerprint,
+            "checks": [{"id": "Q001", "status": "completed", "result": {"fact": "retained"}}],
+            "calls": [{"status": "running"}],
+        })
+
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}), patch.object(
+            self.control.briefing_executor, "submit"
+        ) as first_submit:
+            self.control.investigator.resume()
+            first_submit.assert_called_once()
+            first_state = self.control.investigator.read(self.episode_id)
+            self.assertEqual(first_state["status"], "queued")
+            self.assertEqual(first_state["recovery_attempt"], 1)
+
+            self.control.investigator = InvestigationService(self.control)
+            with patch.object(self.control.briefing_executor, "submit") as second_submit:
+                self.control.investigator.resume()
+                second_submit.assert_not_called()
+
+        stopped = self.control.investigator.read(self.episode_id)
+        self.assertEqual(stopped["status"], "incomplete")
+        self.assertEqual(stopped["previous_runs"][-1]["checks"][0]["status"], "completed")
+        self.assertEqual(stopped["recovery_attempt"], 1)
+
+    def test_new_evidence_waits_for_explicit_reassessment_across_restart(self):
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}):
+            config = self.control.ai_configuration()
+            self.control._set_capability(
+                "ai_core_capability", "test-key", config["model"], "ready", "Test validation"
+            )
+
+            def finish(*args, **_kwargs):
+                args[4]({"status": "ready", "checks": [], "assessment": {"summary": "Retained result"}})
+
+            with patch("fcapsule.investigation_service.run_investigation", side_effect=finish) as assess:
+                self.control._build_capsule(self.id)
+                self.control.briefing_executor.shutdown(wait=True)
+                self.assertEqual(assess.call_count, 1)
+                prior = self.control.investigator.read(self.episode_id)
+
+            attachment = self.control.submit_evidence(self.episode_id, {
+                "kind": "text", "content_text": "An operator added context after the assessment.",
+            })
+            self.assertEqual(attachment["status"], "ready")
+            self.control.evidence.shutdown(wait=True)
+
+            server = None
+            try:
+                with patch("fcapsule.investigation_service.run_investigation", side_effect=finish) as assess:
+                    server = create_app_server("127.0.0.1", 0, Path(self.directory.name))
+                    after_restart = server.control_plane.investigator.read(self.episode_id)
+                    self.assertEqual(after_restart["revision_id"], prior["revision_id"])
+                    assess.assert_not_called()
+
+                    server.control_plane.update_investigation_with_evidence(self.episode_id)
+                    server.control_plane.briefing_executor.shutdown(wait=True)
+                    assess.assert_called_once()
+
+                reassessed = server.control_plane.investigator.read(self.episode_id)
+                self.assertEqual(reassessed["status"], "ready")
+                self.assertEqual(reassessed["revision_reason"], "evidence_added")
+                self.assertEqual(reassessed["parent_revision_id"], prior["revision_id"])
+            finally:
+                if server is not None:
+                    server.control_plane.evidence.shutdown(wait=True)
+                    server.control_plane.briefing_executor.shutdown(wait=True, cancel_futures=True)
+                    server.server_close()
 
     def test_joint_job_waits_for_members_and_deletion_invalidates_shared_exports(self):
         self.control.store.record_incident({**self.incident, "incident_id": "second-signal"})

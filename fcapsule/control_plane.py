@@ -168,6 +168,7 @@ class ControlPlane:
         self.source_state["configuration"] = self.live_sources.configuration()
         self._persist_ai_settings()
         self._last_retention_check = 0.0
+        self._last_staging_cleanup = 0.0
         self.purge_expired_incidents()
         self._refresh_existing_identities()
         existing = self.store.overview()
@@ -274,7 +275,7 @@ class ControlPlane:
 
     def update_estima_configuration(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict):
-            raise ValueError("Estima settings must be an object")
+            raise ValueError("Collective settings must be an object")
         with self._estima_config_lock:
             stored = self._read_estima_settings()
             env = estima_settings_from_env()
@@ -289,9 +290,9 @@ class ControlPlane:
                 stored["url"] = url
             instance_id = str(payload.get("instance_id", current.get("instance_id") or "")).strip()
             if not instance_id:
-                raise ValueError("Estima instance ID must be non-empty")
+                raise ValueError("Collective instance ID must be non-empty")
             if len(instance_id) > 96 or not all(character.isalnum() or character in "._:-" for character in instance_id):
-                raise ValueError("Estima instance ID contains unsupported characters")
+                raise ValueError("Collective instance ID contains unsupported characters")
             stored["instance_id"] = instance_id
             stored["instance_id_auto"] = False
             if payload.get("clear_token") is True:
@@ -299,7 +300,7 @@ class ControlPlane:
             elif isinstance(payload.get("token"), str) and payload["token"].strip():
                 token = payload["token"].strip()
                 if len(token) > 4096 or "\n" in token or "\r" in token:
-                    raise ValueError("Estima service token is invalid")
+                    raise ValueError("Collective service token is invalid")
                 stored["token"] = token
             for key in ("read_enabled", "publish_enabled"):
                 if key in payload:
@@ -744,6 +745,7 @@ class ControlPlane:
             self.current_capsule_id = None
 
     def purge_expired_incidents(self, force: bool = False) -> int:
+        self.purge_expired_staging()
         now = time.monotonic()
         if not force and now - self._last_retention_check < 60:
             return 0
@@ -754,6 +756,23 @@ class ControlPlane:
         for incident in expired:
             self.delete_incident(str(incident["incident_id"]))
         return len(expired)
+
+    def purge_expired_staging(self, force: bool = False) -> int:
+        """Expire old live source inputs while serializing against active control-plane jobs."""
+
+        now = time.monotonic()
+        if not force and now - self._last_staging_cleanup < 60:
+            return 0
+        self._last_staging_cleanup = now
+        with self.lock:
+            if self.running:
+                return 0
+            self.running = True
+            self.active_job = "staging_cleanup"
+        try:
+            return self.live_sources.purge_expired_staging()
+        finally:
+            self._finish()
 
     def _remove_managed_tree(self, value: Any) -> None:
         if not value:
@@ -989,6 +1008,19 @@ class ControlPlane:
         incident = self.store.get_incident(incident_id)
         if not incident:
             raise ValueError(f"Unknown incident: {incident_id}")
+        case_dir = Path(incident["case_dir"])
+        if incident.get("source_kind") == "live":
+            try:
+                case_dir.resolve().relative_to(self.live_sources.case_root.resolve())
+            except ValueError:
+                pass
+            else:
+                if not case_dir.is_dir() or any(not (case_dir / name).is_file() for name in REQUIRED_FILES):
+                    raise FileNotFoundError(
+                        "The staged live source capture has expired or is incomplete, so this incident "
+                        "cannot be rebuilt from raw source data. An already retained capsule remains "
+                        "available; another build requires a fresh live capture."
+                    )
         output_dir = self.output_root / incident_id
         result = investigate_case(incident["case_dir"], output_dir, self._pipeline_progress)
         render_dashboard(output_dir)

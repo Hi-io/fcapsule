@@ -1,5 +1,7 @@
 import json
+import os
 import tempfile
+import threading
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -70,6 +72,111 @@ class FocusedLogTransport:
 
 
 class LiveSourceTests(unittest.TestCase):
+    def test_live_staging_ttl_is_bounded_and_cleanup_is_batch_limited(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            coordinator = LiveSourceCoordinator(FCAPSuleStore(state / "state.db"), state)
+            now = datetime.now(timezone.utc)
+            stale = now.timestamp() - 2 * 3600
+            for number in range(3):
+                case = coordinator.case_root / f"case-{number}"
+                case.mkdir()
+                (case / "raw.json").write_text("raw", encoding="utf-8")
+                os.utime(case, (stale, stale))
+            fresh = coordinator.case_root / "fresh"
+            fresh.mkdir()
+
+            self.assertEqual(coordinator.purge_expired_staging(now=now, ttl_hours=1, limit=2), 2)
+            self.assertEqual(len(list(coordinator.case_root.iterdir())), 2)
+            self.assertEqual(coordinator.purge_expired_staging(now=now, ttl_hours=1), 1)
+            self.assertEqual([item.name for item in coordinator.case_root.iterdir()], ["fresh"])
+
+        with patch.dict("os.environ", {"FCAPSULE_LIVE_STAGING_TTL_HOURS": "0"}):
+            self.assertEqual(coordinator.staging_ttl_hours(), 1)
+        with patch.dict("os.environ", {"FCAPSULE_LIVE_STAGING_TTL_HOURS": "99999"}):
+            self.assertEqual(coordinator.staging_ttl_hours(), 24 * 365)
+        with patch.dict("os.environ", {"FCAPSULE_LIVE_STAGING_TTL_HOURS": "bad"}):
+            self.assertEqual(coordinator.staging_ttl_hours(), 24)
+
+    def test_interrupted_live_capture_is_removed_only_after_staging_ttl(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            coordinator = LiveSourceCoordinator(FCAPSuleStore(state / "state.db"), state)
+            prometheus, opensearch, kubernetes = Mock(), Mock(), Mock()
+            prometheus.collect_alert_metrics.side_effect = RuntimeError("capture interrupted")
+            alert = {"alertname": "PodRestart", "startsAt": "2026-09-20T00:05:00Z", "annotations": {}}
+            pod = {"name": "api-1", "namespace": "shop", "workload": "payments"}
+
+            with self.assertRaisesRegex(RuntimeError, "capture interrupted"):
+                coordinator._capture_case(
+                    {"cluster_name": "cluster-a", "incident_window_minutes": 10, "opensearch_index": "logs-*"},
+                    prometheus, opensearch, kubernetes, alert, pod, "incident-interrupted",
+                )
+            incomplete = coordinator.case_root / "incident-interrupted"
+            self.assertTrue(incomplete.is_dir())
+            past_ttl = datetime.now(timezone.utc) + timedelta(hours=2)
+            self.assertEqual(coordinator.purge_expired_staging(now=past_ttl, ttl_hours=1), 1)
+            self.assertFalse(incomplete.exists())
+
+    def test_staging_cleanup_waits_for_active_capture_and_rechecks_age(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            coordinator = LiveSourceCoordinator(FCAPSuleStore(state / "state.db"), state)
+            started = threading.Event()
+            release = threading.Event()
+            capture_result = []
+            cleanup_result = []
+            cleanup_done = threading.Event()
+            prometheus, opensearch, kubernetes = Mock(), Mock(), Mock()
+
+            def wait_for_capture(*_args, **_kwargs):
+                started.set()
+                if not release.wait(5):
+                    raise TimeoutError("test did not release capture")
+                return {"alert_evidence": {}, "series": []}
+
+            prometheus.collect_alert_metrics.side_effect = wait_for_capture
+            prometheus.collect_pod_metrics.return_value = []
+            opensearch.collect_logs.return_value = []
+            kubernetes.configuration_snapshot.return_value = []
+            alert = {"alertname": "PodRestart", "startsAt": "2026-09-20T00:05:00Z", "annotations": {}}
+            pod = {"name": "api-1", "namespace": "shop", "workload": "payments"}
+            args = (
+                {"cluster_name": "cluster-a", "incident_window_minutes": 10, "opensearch_index": "logs-*"},
+                prometheus, opensearch, kubernetes, alert, pod, "incident-concurrent",
+            )
+            capture_thread = threading.Thread(target=lambda: capture_result.append(coordinator._capture_case(*args)))
+            capture_thread.start()
+            self.assertTrue(started.wait(3))
+            case_dir = coordinator.case_root / "incident-concurrent"
+            old = datetime.now(timezone.utc).timestamp() - 2 * 3600
+            os.utime(case_dir, (old, old))
+            cleanup_started = threading.Event()
+
+            def cleanup():
+                cleanup_started.set()
+                try:
+                    cleanup_result.append(coordinator.purge_expired_staging(
+                        now=datetime.now(timezone.utc), ttl_hours=1,
+                    ))
+                finally:
+                    cleanup_done.set()
+
+            cleanup_thread = threading.Thread(target=cleanup)
+            cleanup_thread.start()
+            self.assertTrue(cleanup_started.wait(1))
+            self.assertFalse(cleanup_done.wait(0.1))
+            self.assertTrue(case_dir.is_dir())
+            release.set()
+            capture_thread.join(5)
+            cleanup_thread.join(5)
+
+            self.assertFalse(capture_thread.is_alive())
+            self.assertFalse(cleanup_thread.is_alive())
+            self.assertEqual(len(capture_result), 1)
+            self.assertEqual(cleanup_result, [0])
+            self.assertTrue(case_dir.is_dir())
+
     def test_existing_prometheus_pod_incident_id_is_stable(self):
         alert = {"alertname": "PodRestart", "startsAt": "2026-09-25T05:00:00Z"}
         self.assertEqual(_incident_id(alert, "core", "pod:gw-1"), _incident_id(alert, "core", "gw-1"))
@@ -258,6 +365,7 @@ class LiveSourceTests(unittest.TestCase):
             _resolve_alert_pod(orders + [unrelated], "shop", {"service": "shared"}, orders + [unrelated])
         )
 
+    @patch.dict("os.environ", {"FCAPSULE_SOURCE_ALLOWED_ORIGINS": "http://prometheus:9090,http://opensearch:9200"})
     def test_live_capture_uses_explicit_target_workload_for_a_shared_monitoring_service(self):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory)
@@ -929,6 +1037,7 @@ class LiveSourceTests(unittest.TestCase):
         self.assertEqual(monitors[2]["namespace_selector"]["status"], "unknown")
         self.assertFalse(monitors[2]["selector_complete"])
 
+    @patch.dict("os.environ", {"FCAPSULE_SOURCE_ALLOWED_ORIGINS": "http://prometheus:9090,http://opensearch:9200"})
     def test_source_configuration_is_validated_and_persisted(self):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory)
@@ -960,6 +1069,23 @@ class LiveSourceTests(unittest.TestCase):
             self.assertTrue((state / "source-settings.json").is_file())
             with self.assertRaises(ValueError):
                 coordinator.update_configuration({"prometheus_url": "prometheus:9090"})
+            with self.assertRaisesRegex(ValueError, "blocked IP"):
+                coordinator.update_configuration({"prometheus_url": "http://127.0.0.1:9090"})
+            with self.assertRaisesRegex(ValueError, "HTTPS"):
+                coordinator.update_configuration({"kubernetes_url": "http://kubernetes.default.svc"})
+
+    def test_kubernetes_service_account_token_is_pinned_to_the_configured_api_origin(self):
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "fcapsule.adapters.kubernetes_adapter.SERVICE_ACCOUNT", Path(directory)
+        ), patch.dict(os.environ, {
+            "FCAPSULE_KUBERNETES_TOKEN": "test-token",
+            "KUBERNETES_SERVICE_HOST": "10.43.0.1",
+            "KUBERNETES_SERVICE_PORT_HTTPS": "443",
+        }):
+            adapter = KubernetesAdapter()
+            self.assertEqual(adapter.base_url, "https://10.43.0.1:443")
+            with self.assertRaisesRegex(ValueError, "origin is not trusted"):
+                KubernetesAdapter("https://attacker.example")
 
     def test_live_case_persists_opensearch_coverage_metadata(self):
         with tempfile.TemporaryDirectory() as directory:

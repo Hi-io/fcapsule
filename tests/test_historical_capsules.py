@@ -128,6 +128,31 @@ class HistoricalCapsuleTests(unittest.TestCase):
         self.assertEqual(result["availability"], "retained")
         self.assertIn("not proof of the same cause", result["limitation"])
 
+    def test_report_and_historical_investigation_use_retained_evidence_after_source_expiry(self):
+        self.expire_raw_sources()
+        self.assertTrue(all(not capture["case"].exists() for capture in (self.prior, self.current)))
+
+        with (
+            patch("fcapsule.control_plane.load_case", side_effect=AssertionError("Expired cases must not be loaded")),
+            patch("fcapsule.control_plane.read_case_json", side_effect=AssertionError("Expired source files must not be read")),
+        ):
+            report_payload = self.plane.incident_report_payload(self.current["incident"]["incident_id"])
+            historical = self.kit().execute(
+                "historical_episode", {"episode_id": self.prior["episode"]["episode_id"]},
+            )
+
+        report = report_payload["report"]
+        self.assertEqual(report["report_version"], "1.3")
+        self.assertEqual(report["fault_alerts"][0]["name"], "QueueHigh")
+        report_signal = next(item for item in report["pm_signals"] if item["metric"] == "queue_depth")
+        self.assertEqual(report_signal["peak_value"], 7)
+
+        historical_metric = next(item for item in historical["observations"] if item.get("metric_observation"))
+        self.assertEqual(historical["availability"], "retained")
+        self.assertEqual(historical_metric["metric_observation"]["condition"]["max"], 42)
+        self.assertEqual(historical_metric["source"]["provenance"][0]["incident_id"],
+                         self.prior["incident"]["incident_id"])
+
     def test_historical_observations_survive_as_an_older_bounded_check(self):
         result = self.kit().execute("historical_episode", {"episode_id": self.prior["episode"]["episode_id"]})
         context = {"episode_id": self.current_episode()["episode_id"], "evidence": [], "alerts": []}

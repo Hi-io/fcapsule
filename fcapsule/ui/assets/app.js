@@ -1,6 +1,6 @@
-const view = location.pathname.startsWith('/settings') ? 'settings' : location.pathname.startsWith('/targets') ? 'targets' : location.pathname.startsWith('/patterns') ? 'patterns' : (location.pathname.startsWith('/estima') || location.pathname.startsWith('/atlas')) ? 'estima' : 'console';
+const view = location.pathname.startsWith('/settings') ? 'settings' : location.pathname.startsWith('/targets') ? 'targets' : location.pathname.startsWith('/patterns') ? 'patterns' : (location.pathname.startsWith('/collective') || location.pathname.startsWith('/estima') || location.pathname.startsWith('/atlas')) ? 'estima' : 'console';
 const app = document.querySelector('#app');
-const viewLabels = {console:'Operations', targets:'Targets', patterns:'Patterns', estima:'Estima', settings:'Settings'};
+const viewLabels = {console:'Operations', targets:'Targets', patterns:'Patterns', estima:'Collective', settings:'Settings'};
 const bootLabel = document.querySelector('#boot-label');
 if (bootLabel) bootLabel.textContent = `Loading ${viewLabels[view]}`;
 const bootTitle = document.querySelector('#boot-title');
@@ -453,9 +453,9 @@ function renderSettings(state) {
       <div class="field"><label for="asr-model">Audio model</label><input id="asr-model" value="${safe(media.audio?.model)}"></div>
       ${window.mediaSettingsNotice ? `<p class="notice">${safe(window.mediaSettingsNotice)}</p>` : ''}
       <div class="actions"><button id="save-media-settings">Validate and save media</button><button class="secondary" id="validate-media-settings">Recheck media</button></div>
-    </div></section><section id="atlas-connection" class="sheet"><div class="sheet-head"><h2>${icon('network')}Estima connection</h2><span id="atlas-settings-status" class="queue-note" role="status">Loading</span></div><div class="sheet-body">
-      <p class="queue-note">Estima stores shared observations and hypotheses. FCAPSule makes every model call and interprets retrieved context; no LLM API keys are sent to Estima. Similarity is a retrieval signal, not a verified cause.</p>
-      <div id="atlas-settings-body" aria-live="polite"><div class="empty">Loading Estima configuration...</div></div>
+    </div></section><section id="atlas-connection" class="sheet"><div class="sheet-head"><h2>${icon('network')}Collective connection</h2><span id="atlas-settings-status" class="queue-note" role="status">Loading</span></div><div class="sheet-body">
+      <p class="queue-note">Collective stores shared observations and hypotheses. FCAPSule makes every model call and interprets retrieved context; no LLM API keys are sent to Collective. Similarity is a retrieval signal, not a verified cause.</p>
+      <div id="atlas-settings-body" aria-live="polite"><div class="empty">Loading Collective configuration...</div></div>
     </div></section></div>`;
   document.querySelector('#save-general-settings').addEventListener('click', saveGeneralSettings);
   document.querySelector('#save-ai-settings').addEventListener('click', saveAiSettings);
@@ -940,17 +940,17 @@ function atlasSettingsForm(config) {
   const pending = config.pending_count == null ? 'Unknown' : fmt.format(config.pending_count);
   const failed = Number(config.failed_count || 0);
   const canRetry = Boolean(config.url && config.token_configured && config.publish_enabled);
-  return `<div class="ai-active-summary" aria-label="Estima connection status"><span><strong>Read access</strong> ${safe(state)}</span><span><strong>Service token</strong> ${config.token_configured ? 'Configured' : 'Not configured'}</span><span><strong>Pending publishes</strong> ${pending}</span></div>
+  return `<div class="ai-active-summary" aria-label="Collective connection status"><span><strong>Read access</strong> ${safe(state)}</span><span><strong>Service token</strong> ${config.token_configured ? 'Configured' : 'Not configured'}</span><span><strong>Pending publishes</strong> ${pending}</span></div>
     ${failed ? `<div class="atlas-retry-notice" role="status"><div><strong>${fmt.format(failed)} failed publish${failed === 1 ? '' : 'es'}</strong><p>${canRetry ? 'These records remain queued for recovery.' : 'Configure a service URL and token, then enable publishing before retrying.'}</p></div><button id="retry-atlas-failed" class="secondary" type="button" ${canRetry ? '' : 'disabled'}>${icon('refresh-cw')}Retry failed</button></div>` : ''}
-    <div class="field"><label for="atlas-url">Estima service URL</label><input id="atlas-url" type="url" value="${safe(config.url || '')}" placeholder="https://estima.example.internal"></div>
+    <div class="field"><label for="atlas-url">Collective service URL</label><input id="atlas-url" type="url" value="${safe(config.url || '')}" placeholder="https://collective.example.internal"></div>
     <div class="field"><label for="atlas-instance">Instance ID</label><input id="atlas-instance" value="${safe(config.instance_id || '')}" autocomplete="off"></div>
-    <div class="field"><label for="atlas-token">Estima service token</label><input id="atlas-token" type="password" autocomplete="new-password" placeholder="${config.token_configured ? 'Leave blank to keep the saved token' : 'Paste an Estima service token'}"><small>This credential only authenticates FCAPSule to Estima. It is not an LLM key and is never sent back to the browser. Enable publishing only for instances allowed to contribute records.</small></div>
-    <label class="toggle"><input id="atlas-read-enabled" type="checkbox" ${config.read_enabled ? 'checked' : ''}>Allow FCAPSule to read Estima patterns and records</label>
-    <label class="toggle" style="margin-top:8px"><input id="atlas-publish-enabled" type="checkbox" ${config.publish_enabled ? 'checked' : ''}>Allow FCAPSule to publish eligible records to Estima</label>
-    ${config.token_configured ? '<label class="toggle" style="margin-top:8px"><input id="atlas-clear-token" type="checkbox">Remove the saved Estima service token</label>' : ''}
-    ${config.last_error ? '<p class="queue-note">Estima reported a recent publish error. Error details are omitted here.</p>' : ''}
+    <div class="field"><label for="atlas-token">Collective service token</label><input id="atlas-token" type="password" autocomplete="new-password" placeholder="${config.token_configured ? 'Leave blank to keep the saved token' : 'Paste a Collective service token'}"><small>This credential only authenticates FCAPSule to Collective. It is not an LLM key and is never sent back to the browser. Enable publishing only for instances allowed to contribute records.</small></div>
+    <label class="toggle"><input id="atlas-read-enabled" type="checkbox" ${config.read_enabled ? 'checked' : ''}>Allow FCAPSule to read Collective patterns and records</label>
+    <label class="toggle" style="margin-top:8px"><input id="atlas-publish-enabled" type="checkbox" ${config.publish_enabled ? 'checked' : ''}>Allow FCAPSule to publish eligible records to Collective</label>
+    ${config.token_configured ? '<label class="toggle" style="margin-top:8px"><input id="atlas-clear-token" type="checkbox">Remove the saved Collective service token</label>' : ''}
+    ${config.last_error ? '<p class="queue-note">Collective reported a recent publish error. Error details are omitted here.</p>' : ''}
     ${window.atlasSettingsNotice ? `<p class="notice" role="status">${safe(window.atlasSettingsNotice)}</p>` : ''}
-    <div class="actions"><button id="save-atlas-settings">Save Estima settings</button></div>`;
+    <div class="actions"><button id="save-atlas-settings">Save Collective settings</button></div>`;
 }
 
 async function loadAtlasSettings() {
@@ -958,16 +958,16 @@ async function loadAtlasSettings() {
   if (!host) return;
   const status = document.querySelector('#atlas-settings-status');
   try {
-    const response = await fetch('/api/settings/estima', {cache:'no-store'});
+    const response = await fetch('/api/settings/collective', {cache:'no-store'});
     const config = await response.json();
-    if (!response.ok) throw new Error(config.error || 'Unable to load Estima settings.');
+    if (!response.ok) throw new Error(config.error || 'Unable to load Collective settings.');
     host.innerHTML = atlasSettingsForm(config);
     status.textContent = !config.url ? 'Not configured' : config.read_enabled ? 'Read enabled' : 'Read disabled';
     document.querySelector('#save-atlas-settings').addEventListener('click', saveAtlasSettings);
     document.querySelector('#retry-atlas-failed')?.addEventListener('click', retryAtlasPublications);
   } catch (error) {
     status.textContent = 'Unavailable';
-    host.innerHTML = `<p class="target-error" role="alert">${safe(error.message || 'Estima settings are unavailable.')}</p>`;
+    host.innerHTML = `<p class="target-error" role="alert">${safe(error.message || 'Collective settings are unavailable.')}</p>`;
   }
 }
 
@@ -975,12 +975,12 @@ async function retryAtlasPublications() {
   const button = document.querySelector('#retry-atlas-failed');
   button.disabled = true;
   try {
-    const response = await fetch('/api/estima/retry-failed', {method:'POST'});
+    const response = await fetch('/api/collective/retry-failed', {method:'POST'});
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Unable to retry Estima publishes.');
-    window.atlasSettingsNotice = 'Retry requested for failed Estima publishes.';
+    if (!response.ok) throw new Error(result.error || 'Unable to retry Collective publishes.');
+    window.atlasSettingsNotice = 'Retry requested for failed Collective publishes.';
   } catch (error) {
-    window.atlasSettingsNotice = error.message || 'Unable to retry Estima publishes.';
+    window.atlasSettingsNotice = error.message || 'Unable to retry Collective publishes.';
   }
   await loadAtlasSettings();
 }
@@ -997,13 +997,13 @@ async function saveAtlasSettings() {
     clear_token:document.querySelector('#atlas-clear-token')?.checked || false,
   };
   try {
-    const response = await fetch('/api/settings/estima', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const response = await fetch('/api/settings/collective', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Unable to save Estima settings.');
-    window.atlasSettingsNotice = 'Estima settings saved. The secret remains masked.';
+    if (!response.ok) throw new Error(result.error || 'Unable to save Collective settings.');
+    window.atlasSettingsNotice = 'Collective settings saved. The secret remains masked.';
     await loadAtlasSettings();
   } catch (error) {
-    window.atlasSettingsNotice = error.message || 'Unable to save Estima settings.';
+    window.atlasSettingsNotice = error.message || 'Unable to save Collective settings.';
     await loadAtlasSettings();
   }
 }
@@ -1016,7 +1016,7 @@ async function changeEpisodeState(id, action) {
 }
 
 async function deleteEpisode(id) {
-  if (!confirm('Permanently delete this local episode and its reports and capsule? A record already published to Estima will remain there.')) return;
+  if (!confirm('Permanently delete this local episode and its reports and capsule? A record already published to Collective will remain there.')) return;
   const response = await fetch(`/api/episodes/${encodeURIComponent(id)}`, {method:'DELETE'});
   const result = await response.json();
   if (!response.ok) { alert(result.error || 'Unable to delete episode'); return; }
@@ -1437,8 +1437,13 @@ function metricChart(item, linkToEvidence = false) {
     (linkToEvidence ? '<button class="evidence-link" data-evidence-link="' + safe(item.evidence_id) + '" data-domain="metrics">Open metric evidence</button>' : '') + '</article>';
 }
 function metricsPanel(report) {
-  const unavailable = (report.alert_metric_evidence || []).filter(item=>item.status !== 'available');
-  const coverage = unavailable.length ? '<p class="queue-note">Alert signal unavailable: ' + unavailable.map(item=>safe(item.alertname || 'rule') + ' (' + safe(String(item.reason || 'not captured').replaceAll('_',' ')) + ')').join('; ') + '.</p>' : !(report.pm_signals || []).some(item=>item.signal_origin === 'alert_rule') ? '<p class="queue-note">The alert-condition signal was not retained in this capture. Historical captures are not backfilled.</p>' : '';
+  const captures = report.alert_metric_evidence || [];
+  const unavailable = captures.filter(item=>item.status !== 'available' && item.status !== 'partial');
+  const partial = captures.filter(item=>item.status === 'partial');
+  const unavailableNote = unavailable.length ? '<p class="queue-note">Alert signal unavailable: ' + unavailable.map(item=>safe(item.alertname || 'rule') + ' (' + safe(String(item.reason || 'not captured').replaceAll('_',' ')) + ')').join('; ') + '.</p>' : '';
+  const partialNote = partial.length ? '<p class="queue-note">Alert signal coverage is partial: ' + partial.map(item=>safe(item.alertname || 'rule') + ' (' + safe(String(item.reason || 'some samples unavailable').replaceAll('_',' ')) + ')').join('; ') + '.</p>' : '';
+  const missingNote = !unavailable.length && !partial.length && !(report.pm_signals || []).some(item=>item.signal_origin === 'alert_rule') ? '<p class="queue-note">The alert-condition signal was not retained in this capture. Historical captures are not backfilled.</p>' : '';
+  const coverage = unavailableNote + partialNote + missingNote;
   return coverage + '<div class="metrics-grid">' + (report.pm_signals || []).map(item => metricChart(item)).join('') + '</div>' + (report.pm_coverage_note ? '<p class="queue-note">' + safe(report.pm_coverage_note) + '</p>' : '');
 }
 function overviewMetrics(report) {
@@ -1601,7 +1606,7 @@ function atlasUrl(kind = '', id = '') {
   if (kind && id) params.set(kind, id);
   if (atlasQuery) params.set('q', atlasQuery);
   if (atlasScope) params.set('scope', atlasScope);
-  return '/estima' + (params.size ? '?' + params.toString() : '');
+  return '/collective' + (params.size ? '?' + params.toString() : '');
 }
 function atlasCaseLink(item, label = '') {
   const id = atlasId(item);
@@ -1659,7 +1664,7 @@ function atlasPatternDetail(data) {
   const instanceCount = pattern.instance_count ?? pattern.instances_count;
   const counts = [caseCount == null ? '' : `Seen in ${safe(caseCount)} ${Number(caseCount) === 1 ? 'case' : 'cases'}`, instanceCount == null ? '' : `across ${safe(instanceCount)} ${Number(instanceCount) === 1 ? 'instance' : 'instances'}`].filter(Boolean).join(' ');
   const time = [pattern.first_seen_at || pattern.first_seen ? `First seen ${formatDate(pattern.first_seen_at || pattern.first_seen)}` : '', pattern.last_seen_at || pattern.last_seen ? `Last seen ${formatDate(pattern.last_seen_at || pattern.last_seen)}` : ''].filter(Boolean).join(' · ');
-  return `<div class="atlas-detail-head"><a href="${safe(atlasUrl())}">${icon('chevron-right')}Back to Estima</a><div class="eyebrow">Similarity pattern</div><h2>${safe(title)}</h2><p>${safe(counts || `${cases.length} linked case${cases.length === 1 ? '' : 's'} returned`)}${time ? ' · ' + safe(time) : ''}</p><code>${safe(id)}</code></div><p class="atlas-pattern-note">${safe(pattern.interpretation || 'Repeated observation across cases; this does not establish a shared cause.')}</p><section class="atlas-record-section atlas-case-list"><h3>Linked cases <span class="queue-note">${cases.length} returned</span></h3>${cases.length ? cases.map(item => atlasCaseLink(item)).join('') : '<p class="queue-note">No cases were returned with this pattern.</p>'}</section>`;
+  return `<div class="atlas-detail-head"><a href="${safe(atlasUrl())}">${icon('chevron-right')}Back to Collective</a><div class="eyebrow">Similarity pattern</div><h2>${safe(title)}</h2><p>${safe(counts || `${cases.length} linked case${cases.length === 1 ? '' : 's'} returned`)}${time ? ' · ' + safe(time) : ''}</p><code>${safe(id)}</code></div><p class="atlas-pattern-note">${safe(pattern.interpretation || 'Repeated observation across cases; this does not establish a shared cause.')}</p><section class="atlas-record-section atlas-case-list"><h3>Linked cases <span class="queue-note">${cases.length} returned</span></h3>${cases.length ? cases.map(item => atlasCaseLink(item)).join('') : '<p class="queue-note">No cases were returned with this pattern.</p>'}</section>`;
 }
 function atlasCaseDetail(data) {
   const record = data?.case || {};
@@ -1669,21 +1674,21 @@ function atlasCaseDetail(data) {
   const alert = atlasRecords(record.observations).find(item => item?.key === 'alert_family')?.value;
   const heading = [alert, scope.service || scope.workload].filter(Boolean).join(' · ') || record.title || 'Retained case';
   const location = [scope.cluster, scope.namespace].filter(Boolean).join(' / ');
-  return `<div class="atlas-detail-head"><a href="${safe(atlasUrl())}">${icon('chevron-right')}Back to Estima</a><div class="eyebrow">Retained record</div><h2>${safe(heading)}</h2>${record.summary ? `<p class="atlas-case-summary">${safe(record.summary)}</p>` : ''}<p>${safe([record.instance_id || record.instance, record.observed_at && formatDate(record.observed_at), location].filter(Boolean).join(' · ') || 'Record details')}</p><code>${safe(id)}</code></div>${atlasRecord(record)}${relations.length ? `<section class="atlas-record-section atlas-case-list"><h3>Related records</h3>${relations.map(item => typeof item === 'object' ? atlasCaseLink(item) : atlasCaseLink({case_id:item})).join('')}</section>` : ''}`;
+  return `<div class="atlas-detail-head"><a href="${safe(atlasUrl())}">${icon('chevron-right')}Back to Collective</a><div class="eyebrow">Retained record</div><h2>${safe(heading)}</h2>${record.summary ? `<p class="atlas-case-summary">${safe(record.summary)}</p>` : ''}<p>${safe([record.instance_id || record.instance, record.observed_at && formatDate(record.observed_at), location].filter(Boolean).join(' · ') || 'Record details')}</p><code>${safe(id)}</code></div>${atlasRecord(record)}${relations.length ? `<section class="atlas-record-section atlas-case-list"><h3>Related records</h3>${relations.map(item => typeof item === 'object' ? atlasCaseLink(item) : atlasCaseLink({case_id:item})).join('')}</section>` : ''}`;
 }
 function atlasFailureText(message, status) {
-  if (status === 'not_configured') return 'Estima is not configured. Add its service URL and enable reads in Settings.';
-  if (status === 'disabled') return 'Estima reads are disabled. Enable them in Settings to browse retained records.';
-  return message || 'Estima is currently unavailable. Try again when the service is reachable.';
+  if (status === 'not_configured') return 'Collective is not configured. Add its service URL and enable reads in Settings.';
+  if (status === 'disabled') return 'Collective reads are disabled. Enable them in Settings to browse retained records.';
+  return message || 'Collective is currently unavailable. Try again when the service is reachable.';
 }
 function relatedAtlasCases(run) {
   const cases = atlasRecords(run?.context?.atlas_cases);
-  if (cases.length) return `<section class="related-atlas-cases"><h4>Related Estima records</h4><p>Similarity references retrieved for this investigation. Estima record IDs are not FCAPSule evidence citations, and the relationship does not establish cause.</p>${cases.map(item => atlasCaseLink(item, item.summary || `Estima record ${atlasId(item)}`)).join('')}</section>`;
+  if (cases.length) return `<section class="related-atlas-cases"><h4>Related Collective records</h4><p>Similarity references retrieved for this investigation. Collective record IDs are not FCAPSule evidence citations, and the relationship does not establish cause.</p>${cases.map(item => atlasCaseLink(item, item.summary || `Collective record ${atlasId(item)}`)).join('')}</section>`;
   const state = run?.context?.atlas_retrieval?.status;
   const messages = {
-    no_matches:'Estima search completed with no matching records. This does not establish that a cause is new or absent.',
-    unavailable:'Estima retrieval was unavailable; no shared records were available to this investigation.',
-    pending:'Estima retrieval is pending; no related records are available yet.',
+    no_matches:'Collective search completed with no matching records. This does not establish that a cause is new or absent.',
+    unavailable:'Collective retrieval was unavailable; no shared records were available to this investigation.',
+    pending:'Collective retrieval is pending; no related records are available yet.',
   };
   return messages[state] ? `<p class="atlas-retrieval-note" role="status">${safe(messages[state])}</p>` : '';
 }

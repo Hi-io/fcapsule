@@ -6,16 +6,16 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import threading
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
-
 import yaml
 
 from fcapsule.adapters import KubernetesAdapter, OpenSearchAdapter, PrometheusAdapter
+from fcapsule.adapters.source_url_policy import DEFAULT_SOURCE_URLS, validate_source_url
 from fcapsule.adapters.opensearch_adapter import (
     DEFAULT_MAX_COLLECTION_BYTES,
     DEFAULT_MAX_MESSAGE_BYTES,
@@ -30,6 +30,9 @@ GRAFANA_ALERT_SETTING = "grafana_firing_alerts"
 GRAFANA_RECEIPT_SETTING = "grafana_last_received_at"
 IGNORED_ALERTS = {"Watchdog", "InfoInhibitor"}
 MAX_GROUP_PODS = 4
+DEFAULT_LIVE_STAGING_TTL_HOURS = 24
+MAX_LIVE_STAGING_TTL_HOURS = 24 * 365
+MAX_STAGING_CLEANUP_CASES = 100
 DEFAULT_IDENTITY_LABELS = [
     {"name": "CNFC", "alert_label": "cnfc", "pod_label": "cnfc"},
     {"name": "VNFC", "alert_label": "vnfc", "pod_label": "vnfc"},
@@ -41,11 +44,8 @@ def default_source_configuration() -> dict[str, Any]:
         "enabled": os.environ.get("FCAPSULE_LIVE_ENABLED", "false").lower() in {"1", "true", "yes"},
         "cluster_name": os.environ.get("FCAPSULE_CLUSTER_NAME", "kubernetes"),
         "environment": os.environ.get("FCAPSULE_ENVIRONMENT", "development"),
-        "prometheus_url": os.environ.get(
-            "FCAPSULE_PROMETHEUS_URL",
-            "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090",
-        ),
-        "opensearch_url": os.environ.get("FCAPSULE_OPENSEARCH_URL", "http://opensearch.logging.svc.cluster.local:9200"),
+        "prometheus_url": os.environ.get("FCAPSULE_PROMETHEUS_URL", DEFAULT_SOURCE_URLS["prometheus"]),
+        "opensearch_url": os.environ.get("FCAPSULE_OPENSEARCH_URL", DEFAULT_SOURCE_URLS["opensearch"]),
         "opensearch_index": os.environ.get("FCAPSULE_OPENSEARCH_INDEX", "k8s-logs-*"),
         "opensearch_max_message_bytes": _environment_limit(
             "FCAPSULE_OPENSEARCH_MAX_MESSAGE_BYTES", DEFAULT_MAX_MESSAGE_BYTES, 256, 256 * 1024
@@ -72,7 +72,54 @@ class LiveSourceCoordinator:
         self.state_dir = state_dir
         self.case_root = state_dir / "live-cases"
         self.case_root.mkdir(parents=True, exist_ok=True)
+        self._capture_lock = threading.RLock()
         self.webhook_lock = threading.RLock()
+
+    def staging_ttl_hours(self) -> int:
+        return _environment_limit(
+            "FCAPSULE_LIVE_STAGING_TTL_HOURS",
+            DEFAULT_LIVE_STAGING_TTL_HOURS,
+            1,
+            MAX_LIVE_STAGING_TTL_HOURS,
+        )
+
+    def purge_expired_staging(
+        self,
+        *,
+        now: datetime | None = None,
+        ttl_hours: int | None = None,
+        limit: int = MAX_STAGING_CLEANUP_CASES,
+    ) -> int:
+        """Remove aged live raw captures without touching retained capsule artifacts."""
+
+        current = now or datetime.now(timezone.utc)
+        ttl = timedelta(hours=self.staging_ttl_hours() if ttl_hours is None else _bounded_int(
+            ttl_hours, 1, MAX_LIVE_STAGING_TTL_HOURS
+        ))
+        cutoff = current.timestamp() - ttl.total_seconds()
+        removed = 0
+        with self._capture_lock:
+            candidates = []
+            for path in self.case_root.iterdir():
+                try:
+                    if path.is_dir() and not path.is_symlink():
+                        candidates.append((path.stat().st_mtime, path))
+                except OSError:
+                    continue
+            candidates.sort(key=lambda item: (item[0], item[1].name))
+            for modified_at, path in candidates:
+                if removed >= max(1, min(MAX_STAGING_CLEANUP_CASES, int(limit))):
+                    break
+                try:
+                    resolved = path.resolve(strict=True)
+                    resolved.relative_to(self.case_root.resolve())
+                    if modified_at > cutoff:
+                        continue
+                    shutil.rmtree(resolved)
+                except (FileNotFoundError, OSError, ValueError):
+                    continue
+                removed += 1
+        return removed
 
     def configuration(self) -> dict[str, Any]:
         defaults = default_source_configuration()
@@ -98,8 +145,12 @@ class LiveSourceCoordinator:
             "enabled": bool(payload.get("enabled", current["enabled"])),
             "cluster_name": str(payload.get("cluster_name", current["cluster_name"])).strip(),
             "environment": str(payload.get("environment", current["environment"])).strip(),
-            "prometheus_url": _url(payload.get("prometheus_url", current["prometheus_url"]), "Prometheus URL"),
-            "opensearch_url": _url(payload.get("opensearch_url", current["opensearch_url"]), "OpenSearch URL"),
+            "prometheus_url": validate_source_url(
+                payload.get("prometheus_url", current["prometheus_url"]), "prometheus", "Prometheus URL"
+            ),
+            "opensearch_url": validate_source_url(
+                payload.get("opensearch_url", current["opensearch_url"]), "opensearch", "OpenSearch URL"
+            ),
             "opensearch_index": str(payload.get("opensearch_index", current["opensearch_index"])).strip(),
             "opensearch_max_message_bytes": _bounded_int(
                 payload.get("opensearch_max_message_bytes", current["opensearch_max_message_bytes"]), 256, 256 * 1024
@@ -110,7 +161,12 @@ class LiveSourceCoordinator:
             "opensearch_max_response_bytes": _bounded_int(
                 payload.get("opensearch_max_response_bytes", current["opensearch_max_response_bytes"]), 4096, 64 * 1024 * 1024
             ),
-            "kubernetes_url": str(payload.get("kubernetes_url", current["kubernetes_url"])).strip(),
+            "kubernetes_url": validate_source_url(
+                payload.get("kubernetes_url", current["kubernetes_url"]),
+                "kubernetes",
+                "Kubernetes URL",
+                allow_empty=True,
+            ),
             "namespaces": sorted(set(str(value).strip() for value in namespaces if str(value).strip())),
             "poll_interval_seconds": min(3600, max(10, int(payload.get("poll_interval_seconds", current["poll_interval_seconds"])))),
             "incident_window_minutes": min(120, max(2, int(payload.get("incident_window_minutes", current["incident_window_minutes"])))),
@@ -134,9 +190,14 @@ class LiveSourceCoordinator:
 
     def adapters(self, config: dict[str, Any] | None = None) -> tuple[PrometheusAdapter, OpenSearchAdapter, KubernetesAdapter]:
         config = config or self.configuration()
-        prometheus = PrometheusAdapter(config["prometheus_url"])
+        prometheus_url = validate_source_url(config["prometheus_url"], "prometheus", "Prometheus URL")
+        opensearch_url = validate_source_url(config["opensearch_url"], "opensearch", "OpenSearch URL")
+        kubernetes_url = validate_source_url(
+            config.get("kubernetes_url", ""), "kubernetes", "Kubernetes URL", allow_empty=True
+        )
+        prometheus = PrometheusAdapter(prometheus_url)
         opensearch = OpenSearchAdapter(
-            config["opensearch_url"],
+            opensearch_url,
             config["opensearch_index"],
             os.environ.get("OPENSEARCH_USERNAME"),
             os.environ.get("OPENSEARCH_PASSWORD"),
@@ -144,7 +205,7 @@ class LiveSourceCoordinator:
             max_collection_bytes=config["opensearch_max_collection_bytes"],
             max_response_bytes=config["opensearch_max_response_bytes"],
         )
-        kubernetes = KubernetesAdapter(config.get("kubernetes_url") or None)
+        kubernetes = KubernetesAdapter(kubernetes_url or None)
         return prometheus, opensearch, kubernetes
 
     def test_connections(self) -> dict[str, Any]:
@@ -394,6 +455,23 @@ class LiveSourceCoordinator:
         *,
         scope: dict[str, Any] | None = None,
     ) -> Path:
+        with self._capture_lock:
+            return self._capture_case_locked(
+                config, prometheus, opensearch, kubernetes, alert, pod, incident_id, scope=scope,
+            )
+
+    def _capture_case_locked(
+        self,
+        config: dict[str, Any],
+        prometheus: PrometheusAdapter,
+        opensearch: OpenSearchAdapter,
+        kubernetes: KubernetesAdapter,
+        alert: dict[str, Any],
+        pod: dict[str, Any],
+        incident_id: str,
+        *,
+        scope: dict[str, Any] | None = None,
+    ) -> Path:
         case_dir = self.case_root / incident_id
         if case_dir.exists():
             # Retained evidence is immutable, even if a previous store import failed.
@@ -519,14 +597,6 @@ class LiveSourceCoordinator:
                     configurations.append(item)
         write_json(case_dir / "kubernetes_config.json", {"items": configurations})
         return case_dir
-
-
-def _url(value: Any, label: str) -> str:
-    text = str(value).strip().rstrip("/")
-    parsed = urlparse(text)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ValueError(f"{label} must be an http(s) URL")
-    return text
 
 
 def _bounded_int(value: Any, minimum: int, maximum: int) -> int:
