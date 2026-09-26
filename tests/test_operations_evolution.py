@@ -156,6 +156,15 @@ class OperationsEvolutionTests(unittest.TestCase):
         self.assertEqual(identity["kind"], "node")
         self.assertEqual(identity["name"], "pc-worker")
 
+    def test_cnfc_and_vnfc_scope_are_used_as_the_current_target_identity(self):
+        for kind, name in (("cnfc", "edge-a"), ("vnfc", "blue")):
+            with self.subTest(kind=kind):
+                identity = _resource_identity(
+                    {"alertname": "GenericAlert", "resolved_scope": {"kind": kind, "name": name}},
+                    "collector",
+                )
+                self.assertEqual(identity, {"kind": kind, "name": name, "alert_identity": "GenericAlert"})
+
     def test_historical_comparison_must_reference_a_supplied_episode_and_evidence(self):
         comparison = {
             "episode_id": "episode-prior",
