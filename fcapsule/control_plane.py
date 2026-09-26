@@ -747,13 +747,16 @@ class ControlPlane:
 
     def forget_episode(self, episode_id: str) -> dict[str, Any]:
         """Withdraw shared recall before removing the local episode and its artifacts."""
-        with self.estima_publisher._lock:
+        with self.estima_publisher._lock, self.briefing_lock:
             episode = self.store.get_episode(episode_id)
             if not episode:
                 raise KeyError(f"Unknown episode: {episode_id}")
             if episode.get("status") == "active":
                 raise ValueError("Resolve the alert before deleting; an active source can capture it again")
-            if self.investigator.read(episode_id).get("status") in {"queued", "running"}:
+            if (episode_id in self.investigator.jobs
+                    or self.investigator.read(episode_id).get("status") in {"queued", "running"}
+                    or any(review.get("status") in {"queued", "running"}
+                           for review in self.investigator.source_disconnected_reviews(episode_id))):
                 raise ValueError("Wait for the investigation to finish before deleting")
             if self.store.has_collective_publication(episode_id):
                 state = self.store.collective_withdrawal_status(episode_id)

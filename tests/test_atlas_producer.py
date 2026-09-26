@@ -303,6 +303,20 @@ class AtlasOutboxTests(unittest.TestCase):
                 self.plane.forget_episode(episode["episode_id"])
         self.assertIsNotNone(self.plane.store.get_episode(episode["episode_id"]))
 
+    def test_forget_rejects_active_alert_without_deleting_anything(self):
+        episode = self.add_retained_episode()
+        with patch.object(self.plane.store, "get_episode", return_value={**episode, "status": "active"}):
+            with self.assertRaisesRegex(ValueError, "Resolve the alert"):
+                self.plane.forget_episode(episode["episode_id"])
+        self.assertIsNotNone(self.plane.store.get_incident("incident-local-id"))
+
+    def test_forget_with_unavailable_publisher_keeps_local_record(self):
+        episode = self.add_retained_episode()
+        with patch.object(self.plane.store, "has_collective_publication", return_value=True):
+            with self.assertRaisesRegex(ValueError, "publisher credential"):
+                self.plane.forget_episode(episode["episode_id"])
+        self.assertIsNotNone(self.plane.store.get_incident("incident-local-id"))
+
     def test_instance_ids_are_unique_and_stable_per_state_directory(self):
         one = self.plane.atlas_configuration()["instance_id"]
         self.assertEqual(one, self.plane.atlas_configuration()["instance_id"])
