@@ -17,6 +17,7 @@ from fcapsule.reasoning.llm_client import LLMUnavailableError
 from fcapsule.reasoning.model_comparator import DEFAULT_MODELS, compare_models, rescore_comparison
 from fcapsule.control_plane import ControlPlane
 from fcapsule.archive_import import import_capsule_archive
+from fcapsule.io.archive_repack import LEGACY_REPACK_WARNING, repack_legacy_archive
 from fcapsule.store import FCAPSuleStore
 from fcapsule.ui.app import serve_app
 from fcapsule.ui.dashboard import render_dashboard
@@ -59,6 +60,13 @@ def _parser() -> argparse.ArgumentParser:
     imported = subparsers.add_parser("import-archive", help="Import a retained capsule archive as a local read-only record")
     imported.add_argument("--archive", required=True, help="Path to a verified FCAPSule capsule archive")
     imported.add_argument("--state-dir", default=".fcapsule")
+    repack = subparsers.add_parser("repack-legacy-archive", help="Explicitly add a current integrity manifest to trusted legacy files")
+    repack.add_argument("--archive", required=True, help="Path to a pre-manifest FCAPSule archive")
+    repack.add_argument("--out", required=True, help="New archive path; the source archive is never changed")
+    repack.add_argument(
+        "--accept-unverified-origin", action="store_true", required=True,
+        help="Acknowledge that the source archive's integrity and provenance cannot be verified",
+    )
     ingest = subparsers.add_parser("ingest-case", help="Register a normalized case captured by an external source")
     ingest.add_argument("--case", required=True, help="Path to a normalized incident case directory")
     ingest.add_argument("--app-id", required=True, help="Registered application ID, or a new ID to register from case metadata")
@@ -164,6 +172,20 @@ def main(argv: list[str] | None = None) -> int:
                 "episode_id": imported["episode"].get("episode_id"),
                 "capsule_id": imported["capsule"].get("capsule_id"),
                 "output_dir": imported["capsule"].get("output_dir"),
+            }, indent=2))
+        elif args.command == "repack-legacy-archive":
+            try:
+                output = repack_legacy_archive(
+                    args.archive, args.out, accept_unverified_origin=args.accept_unverified_origin,
+                )
+            except ValueError as exc:
+                print(f"Legacy archive repack failed: {exc}", file=sys.stderr)
+                return 5
+            print(json.dumps({
+                "archive": str(output),
+                "manifest": "capsule_manifest.json",
+                "warning": LEGACY_REPACK_WARNING,
+                "next_step": f"Run fcapsule import-archive --archive {output}",
             }, indent=2))
         elif args.command == "ingest-case":
             control_plane = ControlPlane(args.state_dir)
