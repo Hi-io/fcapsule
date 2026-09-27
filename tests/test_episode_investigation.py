@@ -914,8 +914,8 @@ class InvestigationEngineTests(unittest.TestCase):
         state, client = self.run_case([{"action": "finish", "assessment": assessment()}], max_checks=0, model_max_tokens=2000)
         self.assertEqual(state["status"], "ready")
         self.assertEqual(client.requests[0].reasoning_effort, "none")
-        self.assertEqual(client.requests[0].max_tokens, 1200)
-        self.assertEqual(client.requests[1].max_tokens, 1200)
+        self.assertEqual(client.requests[0].max_tokens, 2000)
+        self.assertEqual(client.requests[1].max_tokens, 1600)
         payload = json.loads(client.requests[0].messages[1]["content"])
         self.assertEqual(payload["tools"], {})
         self.assertEqual(payload["allowed_pods"], [])
@@ -976,6 +976,29 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertGreater(budget["accounted_total_tokens"], 0)
         self.assertEqual(budget["accounted_total_tokens"], budget["reserved_total_tokens"])
         self.assertLessEqual(budget["accounted_total_tokens"], budget["maximum_total_tokens"])
+
+    def test_tight_budget_finishes_before_another_optional_check(self):
+        class MeasuredClient(FakeClient):
+            def chat(self, request):
+                response = super().chat(request)
+                response["usage"] = {"prompt_tokens": 800, "completion_tokens": 200,
+                                     "total_tokens": 1000}
+                return response
+
+        decision = {"action": "check", "tool": "review_omitted", "arguments": {},
+                    "question": "Is there a contrary retained observation?",
+                    "distinguishes": "Alternative cause versus the current alert"}
+        client = MeasuredClient([decision, {"action": "finish", "assessment": assessment("Q002")},
+                                 {"decision": "accept", "reason": "Evidence supports the bounded claim."}])
+        state = run_investigation(
+            self.context, self.kit, "test-model", 1000, lambda _: None,
+            max_checks=4, max_total_tokens=4000, max_prompt_tokens=1600, client=client,
+        )
+
+        self.assertTrue(state["token_budget"]["early_finish_due_to_budget"])
+        self.assertEqual([check["tool"] for check in state["checks"]],
+                         ["workload_state", "review_omitted"])
+        self.assertEqual(json.loads(client.requests[1].messages[1]["content"])["tools"], {})
 
     def test_hard_call_budget_and_disallowed_tools(self):
         decision = {"action": "check", "tool": "resource_history", "arguments": {}, "question": "Resource pressure?", "distinguishes": "CPU or memory"}
@@ -1083,6 +1106,34 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(len(state["checks"]), 2)
         self.assertEqual(client.requests[0].reasoning_effort, "none")
         self.assertEqual(state["calls"][0]["validation_error"], "Selected check has already completed")
+
+    def test_repeated_check_correction_does_not_consume_optional_check_slot(self):
+        repeated = {"action": "check", "tool": "workload_state", "arguments": {},
+                    "question": "Read the current workload again",
+                    "distinguishes": "Current state from incident state"}
+        new_check = {"action": "check", "tool": "review_omitted", "arguments": {},
+                     "question": "Is any contradictory evidence omitted?",
+                     "distinguishes": "A different mechanism from the retained alert"}
+        state, client = self.run_case(
+            [repeated, new_check, {"action": "finish", "assessment": assessment("Q002")}],
+            max_checks=1,
+        )
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual([row["tool"] for row in state["checks"]], ["workload_state", "review_omitted"])
+        self.assertEqual(len(client.requests), 4)  # correction, check, finish, review
+        self.assertEqual(state["calls"][0]["validation_error"], "Selected check has already completed")
+
+    def test_historical_observation_survives_prompt_compaction(self):
+        check = {"id": "Q002", "tool": "historical_episode", "status": "completed",
+                 "required_observation": True,
+                 "result": {"episode": {"episode_id": "prior-episode"}, "availability": "retained",
+                            "observations": [{"summary": "Export pages stayed buffered after delivery resumed.",
+                                              "source": {"episode_id": "prior-episode"}}]}}
+        compacted, visible = compact_for_model(self.context, [check], max_prompt_tokens=3200)
+        self.assertIn("Q002", visible)
+        history = next(row for row in compacted["prior_checks"] if row["id"] == "Q002")
+        self.assertEqual(history["observation"]["episode_id"], "prior-episode")
+        self.assertIn("Export pages stayed buffered", json.dumps(history["observation"]))
 
 
 class InvestigationToolTests(unittest.TestCase):
@@ -1553,7 +1604,18 @@ class InvestigationToolTests(unittest.TestCase):
         self.assertEqual(result["min"], 1)
         self.assertEqual(result["at_or_after_latest_alert"]["min"], 40)
         self.assertEqual(result["at_or_after_latest_alert"]["samples"], 2)
+        self.assertEqual(result["incident_deviation_peak"],
+                         {"timestamp": "2026-09-20T12:05:00Z", "value": 40.0})
         self.assertEqual(metric_summary(series, stamp("2026-09-20T12:10:00Z"))[0]["at_or_after_latest_alert"], {"samples": 0})
+
+    def test_counter_summary_preserves_largest_sampled_increment(self):
+        series = [{"metric": "requests_total", "values": [
+            ["2026-09-20T12:00:00Z", 100], ["2026-09-20T12:01:00Z", 110],
+            ["2026-09-20T12:05:00Z", 115], ["2026-09-20T12:06:00Z", 150],
+        ]}]
+        result = metric_summary(series, stamp("2026-09-20T12:04:00Z"))[0]
+        self.assertEqual(result["incident_increment_peak"],
+                         {"timestamp": "2026-09-20T12:06:00Z", "value": 35.0})
 
     def test_log_focus_uses_latest_member_alert(self):
         self.entries[0]["incident"]["started_at"] = "2026-09-20T12:02:00Z"

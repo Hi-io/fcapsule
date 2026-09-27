@@ -165,7 +165,7 @@ class HistoricalCapsuleTests(unittest.TestCase):
         self.assertIn("observations", historical)
         metric = next(item for item in historical["observations"] if item.get("metric_observation"))
         self.assertEqual(metric["metric_observation"]["metric"], "queue_depth")
-        self.assertIn('"max": 42', metric["metric_observation"]["condition"])
+        self.assertEqual(metric["metric_observation"]["condition"]["max"], 42)
         self.assertEqual(metric["source"]["episode_id"], self.prior["episode"]["episode_id"])
         self.assertIn(self.prior["incident"]["incident_id"], json.dumps(metric["source"]["provenance"]))
 

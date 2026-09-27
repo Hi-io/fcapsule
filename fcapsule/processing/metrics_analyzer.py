@@ -97,6 +97,9 @@ def analyze_metrics(bundle: CaseBundle) -> list[dict[str, Any]]:
                 (points[position][0], max(0.0, points[position][1] - points[position - 1][1]))
                 for position in range(1, len(points))
             ]
+            if not analyzed_points:
+                # One absolute counter value cannot establish an increment.
+                continue
         baseline_points = [point for point in analyzed_points if point[0] < bundle.alert_time]
         incident_points = [point for point in analyzed_points if point[0] >= bundle.alert_time]
         baseline_basis = "pre_alert"

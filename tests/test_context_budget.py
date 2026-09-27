@@ -3,7 +3,7 @@ import json
 import unittest
 
 from fcapsule.reasoning.context_budget import (
-    _discovery_observation, _log_observation, _minimal_check_observation, _workload_observation, compact_for_model,
+    _check_item, _discovery_observation, _log_observation, _minimal_check_observation, _workload_observation, compact_for_model,
     compact_metric_observation, estimate_tokens,
 )
 
@@ -47,6 +47,18 @@ class ContextBudgetTests(unittest.TestCase):
                 observation = _discovery_observation(result)
                 self.assertEqual(observation["monitor_selection"][0]["name"], "exporter")
                 self.assertEqual(observation["monitor_selection"][0]["targets"][0]["scrape_path"], path)
+
+    def test_database_pressure_keeps_sampled_values_and_time(self):
+        check = {"id": "Q002", "tool": "database_pressure", "status": "completed",
+                 "result": {"latest_alert_at": "2026-09-24T14:00:00Z", "observations": [{
+                     "metric": "mysql_global_status_threads_connected", "samples": 8,
+                     "nearest_alert": {"timestamp": "2026-09-24T14:00:00Z", "value": 35.0},
+                     "sampled_peak": {"timestamp": "2026-09-24T14:00:00Z", "value": 35.0},
+                 }]}}
+        compacted = _check_item(check, latest=True)
+        self.assertEqual(compacted["observation"]["observations"][0]["nearest_alert"]["value"], 35.0)
+        self.assertEqual(compacted["observation"]["observations"][0]["sampled_peak"]["timestamp"],
+                         "2026-09-24T14:00:00Z")
 
     def test_log_diagnostics_stay_paired_with_representative_events_in_model_context(self):
         context = {"episode_id": "diag-pair", "live_capture": True, "evidence": [{

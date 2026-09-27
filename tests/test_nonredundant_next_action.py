@@ -100,6 +100,12 @@ class NonRedundantNextActionTests(unittest.TestCase):
         self.assertFalse(repeats_completed_check(new_sample, completed))
         self.assertFalse(repeats_completed_check(repeated, [{**completed[0], "status": "unavailable"}]))
 
+    def test_distinct_log_question_is_not_a_repeated_check(self):
+        completed = [{"tool": "search_logs", "status": "completed",
+                      "question": "Do credential migration logs show high CPU work during the alert?"}]
+        action = "Check worker logs for the credential migration batch completion status."
+        self.assertFalse(repeats_completed_check(action, completed))
+
     def test_review_uses_sampled_values_and_replaces_redundant_and_unfounded_actions(self):
         context = {
             "episode_id": "episode-current",

@@ -309,6 +309,12 @@ class ProcessingTests(unittest.TestCase):
         self.assertEqual(result[0]["analysis_mode"], "counter_delta")
         self.assertTrue(result[0]["peak_timestamp"].endswith("Z"))
 
+    def test_one_sample_counter_does_not_invent_an_increment(self):
+        counter = next(item for item in self.bundle.metrics if str(item["metric"]).endswith("_total"))
+        minimal_bundle = replace(self.bundle, metrics=[{**counter, "values": counter["values"][:1]}])
+
+        self.assertEqual(analyze_metrics(minimal_bundle), [])
+
 
 if __name__ == "__main__":
     unittest.main()

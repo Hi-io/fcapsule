@@ -89,6 +89,19 @@ def metric_summary(
             metric["at_or_after_latest_alert"] = ({"samples": len(recent), "start": recent[0][1], "end": recent[-1][1],
                 "min": min(recent_values), "max": max(recent_values), "median": statistics.median(recent_values),
                 "first": recent_values[0], "last": recent_values[-1]} if recent else {"samples": 0})
+            if str(item.get("metric", "")).endswith("_total"):
+                increases = [(points[index][0], points[index][1],
+                              max(0.0, points[index][2] - points[index - 1][2]))
+                             for index in range(1, len(points))]
+                incident_increases = [point for point in increases if point[0] >= focus]
+                candidates = incident_increases or increases
+                if candidates:
+                    selected = max(candidates, key=lambda point: point[2])
+                    metric["incident_increment_peak"] = {"timestamp": selected[1], "value": selected[2]}
+            else:
+                reference = statistics.median(point[2] for point in before) if before else statistics.median(values)
+                selected = max(recent or points, key=lambda point: abs(point[2] - reference))
+                metric["incident_deviation_peak"] = phase(selected)
         result.append(metric)
     return result
 

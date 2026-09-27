@@ -394,7 +394,9 @@ def repeats_completed_check(next_action: str, checks: list[dict[str, Any]]) -> b
         ))
         source_terms = _action_terms(source_text)
         shared = action_terms & source_terms
-        if len(shared) >= 3 and len(shared) / len(action_terms) >= 0.3:
+        # A common source is not the same observation: a later question about
+        # batch completion can still require logs after an earlier CPU log read.
+        if len(shared) >= 3 and len(shared) / len(action_terms) >= 0.6:
             return True
     return False
 
@@ -678,9 +680,11 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 # requested completion limit. Charge the observed excess before
                 # deciding whether another call is permitted.
                 budget["unbudgeted_provider_total_tokens"] += overflow
-                budget["accounted_total_tokens"] += overflow
-                budget["remaining_tokens"] = max(0, max_total_tokens - budget["accounted_total_tokens"])
-            call["accounted_tokens"] = reservation + overflow
+            # The reservation protects the call before dispatch. Once usage is
+            # known, release unused completion capacity for later reasoning.
+            budget["accounted_total_tokens"] += reported_total - reservation
+            budget["remaining_tokens"] = max(0, max_total_tokens - budget["accounted_total_tokens"])
+            call["accounted_tokens"] = reported_total
         else:
             call["accounted_tokens"] = reservation
         publish(state)
@@ -764,18 +768,24 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 client = OpenRouterChatClient(timeout_seconds=90)
             else:
                 raise ValueError("provider must be deepseek or openrouter")
-        for turn in range(max_checks + 1):
+        turn = 0
+        correction_attempts = 0
+        while True:
             if time.monotonic() - started > 420:
                 state["status"] = "incomplete"
                 state["message"] = "Investigation time budget reached. Checks are retained."
                 break
-            tools_for_turn = tools.CATALOG if turn < max_checks else {}
+            finishing_turn = (turn >= max_checks or
+                              state["token_budget"]["remaining_tokens"] < 2 * max_prompt_tokens + 512)
+            if finishing_turn and turn < max_checks:
+                state["token_budget"]["early_finish_due_to_budget"] = True
+            tools_for_turn = tools.CATALOG if not finishing_turn else {}
             payload, visible_evidence_ids = compact_payload({"allowed_pods": tools.pods if tools_for_turn else [], "tools": tools_for_turn,
-                       "remaining_optional_checks": max_checks - turn,
+                       "remaining_optional_checks": 0 if finishing_turn else max_checks - turn,
                        "available_evidence_ids": [], "validation_feedback": validation_feedback,
                        "instruction": (
                            "Required bounded observations have completed. Finish using collected evidence now."
-                           if turn == max_checks else
+                           if finishing_turn else
                            "Required bounded observations have completed. Choose one optional discriminating check, or finish when further queries would not help."
                        )})
             state["message"] = "Assessing episode evidence" if turn == 0 else "Reviewing check results"
@@ -784,7 +794,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 payload,
                 "none",
                 "investigation",
-                1200 if turn == max_checks else 640,
+                2000 if finishing_turn else 640,
             )
             candidate = None
             try:
@@ -827,7 +837,8 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                     review_candidate = candidate
                     state["draft_validation_error"] = str(error)
                     break
-                if validation_feedback is None and turn < max_checks:
+                if correction_attempts < 2 and not finishing_turn:
+                    correction_attempts += 1
                     validation_feedback = {"error": str(error)[:240], "instruction": "Correct the structured response using the contract and available evidence IDs. Do not repeat completed checks."}
                     publish(state)
                     continue
@@ -835,13 +846,14 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             if decision.get("action") == "finish":
                 state["status"] = "ready"
                 break
-            if turn == max_checks or decision.get("action") != "check":
+            if finishing_turn or decision.get("action") != "check":
                 raise ValueError("No valid final assessment within budget")
             name, arguments = decision.get("tool"), decision.get("arguments", {})
             if name not in tools.CATALOG or not isinstance(arguments, dict):
                 raise ValueError("Unrecognized check")
             if json.dumps([name, arguments], sort_keys=True) in seen:
-                if validation_feedback is None and turn < max_checks:
+                if correction_attempts < 2 and not finishing_turn:
+                    correction_attempts += 1
                     call["validation_error"] = "Selected check has already completed"
                     validation_feedback = {
                         "error": "The requested check has already completed. Reuse its retained observation.",
@@ -853,7 +865,13 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             question, distinguishes = decision.get("question"), decision.get("distinguishes")
             if any(not isinstance(text, str) or not 1 <= len(text) <= 400 for text in (question, distinguishes)):
                 raise ValueError("Missing purpose for check")
-            check(name, arguments, scrub(question), scrub(distinguishes))
+            check(name, arguments, scrub(question), scrub(distinguishes), required=True)
+            state["investigation_contract"]["required_observations"].append(
+                {"id": state["checks"][-1]["id"], "tool": name, "status": state["checks"][-1]["status"]}
+            )
+            turn += 1
+            correction_attempts = 0
+            validation_feedback = None
         if state["assessment"] is not None or review_candidate is not None:
             validated_draft = state.pop("assessment")
             draft = validated_draft or review_candidate
@@ -873,7 +891,7 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 review_base["available_incident_ids"] = sorted({item["incident_id"] for item in context["alerts"]})
             draft_refs = assessment_evidence_refs(draft)
             payload, visible_evidence_ids = compact_payload(review_base, review_system, draft_refs)
-            response, call = request_model(payload, "none", "evidence_review", 1200, review_system)
+            response, call = request_model(payload, "none", "evidence_review", 1600, review_system)
             decision = parse_object(str(response.get("content", "")))
             call["decision"] = scrub(decision, reference_ids=set(visible_evidence_ids))
             repaired_review = False

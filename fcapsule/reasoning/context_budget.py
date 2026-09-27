@@ -335,7 +335,7 @@ def _evidence_priority(item: dict[str, Any], priority_ids: set[str]) -> tuple[in
     if item.get("revision_addition"):
         # The service orders additions newest first. Preserve that order instead
         # of ranking operator observations by error keywords or modality.
-        return (0, 0, 0, 0, 0, 0)
+        return (0, 0, 0, 0, 0, 0, 0)
     failure_markers = (
         "critical", "fatal", "error", "exception", "traceback", "panic", "failed",
         "failure", "refused", "timeout", "oom", "crash", "sqlstate", "errno", "exit_code",
@@ -351,6 +351,7 @@ def _evidence_priority(item: dict[str, Any], priority_ids: set[str]) -> tuple[in
         1,
         0 if str(item.get("id")) in priority_ids else 1,
         -int(item.get("signal_origin") == "alert_rule" and bool(item.get("metric_observation"))),
+        -int(domain == "log_template" and bool(item.get("diagnostic_fields"))),
         -int(_has_marker(text, failure_markers)),
         -int(_has_marker(text, diagnostic_markers)),
         -int(domain == "log_template"),
@@ -1042,7 +1043,10 @@ def _resource_history_observation(result: dict[str, Any], *, minimal: bool = Fal
         row["freshness"] = {key: _bounded(freshness[key], max_items=2)
                              for key in ("status", "latest_sample_at", "age_seconds", "captured_at", "assessment")
                              if key in freshness}
-        for key in ("before_alert", "nearest_alert", "after_alert", "sampled_peak"):
+        anchors = ("before_alert", "nearest_alert", "after_alert", "sampled_peak")
+        if not minimal:
+            anchors += ("incident_deviation_peak", "incident_increment_peak")
+        for key in anchors:
             anchor = item.get(key)
             if isinstance(anchor, dict):
                 row[key] = {name: anchor[name] for name in ("timestamp", "value", "offset_seconds") if name in anchor}
@@ -1083,8 +1087,30 @@ def _check_item(check: dict[str, Any], latest: bool) -> dict[str, Any]:
         result = _discovery_observation(raw_result)
     elif check.get("tool") == "dependency_evidence" and check.get("status") == "completed":
         result = _dependency_observation(raw_result)
-    elif check.get("tool") == "resource_history" and check.get("status") == "completed":
+    elif check.get("tool") in {"resource_history", "database_pressure"} and check.get("status") == "completed":
         result = _resource_history_observation(raw_result)
+    elif check.get("tool") == "historical_episode" and check.get("status") == "completed":
+        facts = []
+        source_facts = [item for item in raw_result.get("observations", []) if isinstance(item, dict)]
+        selected = source_facts[:2]
+        metric_fact = next((item for item in source_facts
+                            if item.get("metric_observation") or item.get("metric")), None)
+        if metric_fact is not None and metric_fact not in selected:
+            selected = [metric_fact, source_facts[0]]
+        for item in selected:
+            if not isinstance(item, dict):
+                continue
+            facts.append({key: _bounded(item[key], max_items=8 if key == "metric_observation" else 3) for key in
+                          ("summary", "metric_observation", "metric", "min", "max", "threshold", "operator",
+                           "observed_samples", "matching_samples", "configuration", "time_range", "source",
+                           "provenance")
+                          if item.get(key) not in (None, "", [], {})})
+        result = {
+            "episode_id": (raw_result.get("episode") or {}).get("episode_id"),
+            "availability": raw_result.get("availability"),
+            "observations": facts,
+            "limitation": _short(raw_result.get("limitation"), 140),
+        }
     else:
         result = _bounded(raw_result, max_items=8 if latest else 4)
     return {
@@ -1175,7 +1201,7 @@ def _minimal_check_observation(check: dict[str, Any]) -> Any:
         return {key: observation[key] for key in
                 ("top_signal", "fields", "diagnostic_ranges", "other_diagnostic_patterns", "pod_samples",
                  "first_seen", "last_seen", "occurrences", "sampled") if key in observation}
-    if check.get("tool") == "resource_history" and isinstance(observation, dict):
+    if check.get("tool") in {"resource_history", "database_pressure"} and isinstance(observation, dict):
         if observation.get("minimal_resource_history"):
             return observation
         minimal = _resource_history_observation(observation, minimal=True)
@@ -1218,12 +1244,13 @@ def _minimal_check_observation(check: dict[str, Any]) -> Any:
         for item in (observation.get("observations") or [])[:2]:
             if not isinstance(item, dict):
                 continue
-            metric = item.get("metric_observation")
-            fact = ({"metric_observation": _bounded(metric, max_items=3)} if metric else
-                    {key: _bounded(item[key], max_items=2) for key in ("configuration", "examples", "summary") if item.get(key)})
+            fact = {key: _bounded(item[key], max_items=2) for key in
+                    ("summary", "metric_observation", "metric", "max", "threshold", "configuration", "source",
+                     "provenance") if item.get(key)}
             if fact:
                 facts.append(fact)
-        return {"compacted_history": True, "observations": facts,
+        return {"compacted_history": True, "episode_id": observation.get("episode_id"),
+                "availability": observation.get("availability"), "observations": facts,
                 "limitation": "Partial retained history; missing facts cannot establish the same cause."}
     if isinstance(observation, dict):
         if observation.get("compacted_observation"):
@@ -1355,13 +1382,6 @@ def compact_for_model(
         if len(payload["evidence"]) > 3 and removable_evidence():
             payload["evidence"].pop()
             visible_ids = refresh_visible_ids()
-        elif removable_evidence() and len(payload["prior_checks"]) > 1 and all(
-            item.get("required_observation") for item in payload["prior_checks"]
-        ):
-            # Source reads are fresher and more discriminating than lower-priority
-            # retained summaries. Keep their structured form before trimming it.
-            payload["evidence"].pop()
-            visible_ids = refresh_visible_ids()
         elif payload.get("impact"):
             payload["impact"] = []
         elif payload.get("scope", {}).get("cluster"):
@@ -1429,6 +1449,15 @@ def compact_for_model(
             removable = next(index for index, item in enumerate(payload["prior_checks"])
                              if not item.get("required_observation"))
             payload["prior_checks"].pop(removable)
+            visible_ids = refresh_visible_ids()
+        elif len(payload["prior_checks"]) >= 3 and len(payload["evidence"]) > 1 and any(
+            item.get("tool") == "workload_state" for item in payload["prior_checks"]
+        ):
+            # The early mutable snapshot remains retained on disk. After later
+            # diagnostic reads, preserve another incident-time source fact first.
+            index = next(index for index, item in enumerate(payload["prior_checks"])
+                         if item.get("tool") == "workload_state")
+            payload["prior_checks"].pop(index)
             visible_ids = refresh_visible_ids()
         elif removable_evidence():
             payload["evidence"].pop()
