@@ -2,13 +2,15 @@
 
 **FCAPSule investigates; Collective remembers.** AI-assisted incident investigation, durable evidence capsules and shared operational knowledge for an existing observability stack.
 
+The [Endterm snapshot](https://github.com/Hi-io/fcapsule/tree/endterm) preserves the submitted source version independently of later development on `master`.
+
 An alert identifies a symptom. Explaining it often requires joining logs, metrics, configuration and earlier incidents before their source retention expires. FCAPSule brings this evidence into one investigation, uses an AI agent to select targeted read-only checks, and preserves the findings with their supporting observations. An engineer can add a screenshot or spoken observation and review the resulting assessment alongside its earlier revision.
 
 With **Collective**, participating FCAPSule instances share selected incident knowledge. Experience from one deployment can direct checks in another, while each instance keeps its own evidence, model configuration and investigation costs.
 
 ![Incident overview with an assessment and operational evidence](docs/assets/product/incident-overview-lab.png)
 
-## V1 Capabilities
+## Endterm Capabilities
 
 - **Investigate across sources.** Correlate Prometheus alerts and metrics, OpenSearch logs and Kubernetes workload/configuration facts. Optional Grafana webhooks use the same capture workflow.
 - **Group related work.** Combine alert signals into episodes using workload identity and occurrence time. Configurable resource labels, such as a cloud-native function component (CNFC) identifier, support investigations spanning several replicas.
@@ -61,7 +63,7 @@ The [Collective service](https://github.com/Hi-io/collective) and [FCAPSule Lab]
 
 ## Deployment Scope
 
-V1 runs as a single FCAPSule instance with persistent local state, alongside existing observability sources. The supplied adapters target Prometheus, Filebeat-style OpenSearch documents and Kubernetes; other integrations can supply the same normalized case contract. The investigator runs allowlisted read-only checks, not remediation.
+Endterm runs as a single FCAPSule instance with persistent local state, alongside existing observability sources. The supplied adapters target Prometheus, Filebeat-style OpenSearch documents and Kubernetes; other integrations can supply the same normalized case contract. The investigator runs allowlisted read-only checks, not remediation.
 
 Keep the console on a trusted network: login is disabled by default. Remote access requires an appropriate HTTPS and access-control boundary; optional Basic Auth is documented in the deployment guide. Review the privacy guide before enabling external models or shared-memory publication. Source telemetry, retained capsules and published Collective cases have separate lifecycles.
 

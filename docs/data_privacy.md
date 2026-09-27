@@ -1,4 +1,4 @@
-# V1 Privacy and Retention
+# Endterm Privacy and Retention
 
 FCAPSule captures bounded operational evidence, retains an inspectable incident record and optionally shares selected knowledge. Source telemetry, local artifacts and published Collective cases have separate storage and access boundaries.
 
@@ -49,4 +49,4 @@ Keys entered in Settings are saved in the local `state_dir/.env` and loaded into
 
 Console login is disabled by default. Anyone who can reach an unprotected console can read reports and change settings. Keep it on a trusted network or behind access controls. Optional Basic Auth provides a shared account, not individual roles or SSO. Remote HTTPS terminates at the configured proxy, and certificate renewal is the operator's responsibility. See [deployment](kubernetes_deployment.md).
 
-V1 does not query a live trace backend or retain raw spans. Imported trace-availability metadata describes the captured case, not a current connection check.
+Endterm does not query a live trace backend or retain raw spans. Imported trace-availability metadata describes the captured case, not a current connection check.

@@ -1,4 +1,4 @@
-# V1 Kubernetes Deployment
+# Endterm Kubernetes Deployment
 
 FCAPSule runs alongside an existing observability stack. It does not install Prometheus, OpenSearch, Filebeat or Grafana. The reference deployment uses one replica, a persistent state volume, read-only source access and a ClusterIP service. [Collective](collective.md) is deployed separately from its own repository.
 
@@ -11,7 +11,7 @@ FCAPSule runs alongside an existing observability stack. It does not install Pro
 
 ## Install
 
-Build the root `Dockerfile` and publish to your own approved registry. Set the application image in a local copy of `deploy/kubernetes/fcapsule.yaml` to that image, preferably by digest, rather than leaving the mutable `latest` default. Configure its source URLs, cluster/namespace scope and PVC storage class before applying it. Do not assume a published V1 image or Git tag exists merely from the source version number.
+Build the root `Dockerfile` from the `endterm` tag and publish to your own approved registry. Set the application image in a local copy of `deploy/kubernetes/fcapsule.yaml` to that image, preferably by digest, rather than leaving the mutable `latest` default. Configure its source URLs, cluster/namespace scope and PVC storage class before applying it. The source tag identifies the snapshot; it does not imply a prebuilt image is published.
 
 The checked-in PVC uses the `manual` storage class. On a single-node development cluster, `deploy/kubernetes/local-single-node-storage.yaml` supplies a matching hostPath PV at `/var/lib/fcapsule`. Use your cluster's managed storage class for other installations.
 
@@ -20,7 +20,7 @@ The checked-in PVC uses the `manual` storage class. On a single-node development
 kubectl apply -f deploy/kubernetes/local-single-node-storage.yaml
 
 # Apply your configured copy of the runtime manifest.
-kubectl apply -f /path/to/fcapsule-v1.yaml
+kubectl apply -f /path/to/fcapsule-endterm.yaml
 kubectl -n fcapsule rollout status deployment/fcapsule
 kubectl -n fcapsule port-forward service/fcapsule 8765:8765
 ```
@@ -125,4 +125,4 @@ With port-forward active, check readiness, source connections in Targets and an 
 
 Record the current image/source commit and Deployment revision before an update. Use `kubectl rollout history` to inspect a known-good revision before `kubectl rollout undo --to-revision=<number>`. Deployment rollback does not restore separately changed ConfigMaps, Secrets or persistent data. Back up the state volume and protect it as operational data, including staged raw captures and credentials.
 
-Keep V1 at one replica: SQLite and in-process workers use a local persistence boundary. Retained incidents, raw staging and Collective records follow the [documented independent lifecycles](data_privacy.md).
+Keep Endterm at one replica: SQLite and in-process workers use a local persistence boundary. Retained incidents, raw staging and Collective records follow the [documented independent lifecycles](data_privacy.md).

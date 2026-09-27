@@ -1,4 +1,4 @@
-# V1 Architecture
+# Endterm Architecture
 
 FCAPSule combines two layers: a local investigator that collects and interprets incident evidence, and optional shared knowledge supplied by **Collective**. Source adapters produce a common incident contract, so evidence processing is separate from the source-specific queries.
 
@@ -94,4 +94,4 @@ Background workers coalesce updates for one episode and use input fingerprints t
 | `fcapsule/ui/`, `fcapsule/cli.py` | Operator interface, API and command-line workflows |
 | `fcapsule/evaluation/`, `tests/` | Evidence metrics, comparison baselines and automated checks |
 
-V1 uses one FCAPSule process with background workers and persistent local storage. Collective has its own service/database boundary. The separate Lab owns synthetic workloads and controlled faults; it is not embedded in either runtime.
+Endterm uses one FCAPSule process with background workers and persistent local storage. Collective has its own service/database boundary. The separate Lab owns synthetic workloads and controlled faults; it is not embedded in either runtime.

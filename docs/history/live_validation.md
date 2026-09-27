@@ -1,6 +1,6 @@
 # Live Integration Validation
 
-> Controlled development run cited in the final project report. Its [original commit-pinned record](https://github.com/Hi-io/fcapsule/blob/2eff46389a8296c740e8c3ad84f01d8097394e8b/docs/live_validation.md) preserves the citation. Use the [V1 operating guide](../operations.md) for current procedures.
+> Controlled development run cited in the final project report. Its [original commit-pinned record](https://github.com/Hi-io/fcapsule/blob/2eff46389a8296c740e8c3ad84f01d8097394e8b/docs/live_validation.md) preserves the citation. Use the [Endterm operating guide](../operations.md) for current procedures.
 
 ## Scope
 

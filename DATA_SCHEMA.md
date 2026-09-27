@@ -1,6 +1,6 @@
-# V1 Data Contracts
+# Endterm Data Contracts
 
-These contracts describe the normalized inputs and retained artifacts used by FCAPSule V1. See [Architecture](docs/architecture.md) for how the components use them and [Operations](docs/operations.md) for import/export procedures.
+These contracts describe the normalized inputs and retained artifacts used by FCAPSule Endterm. See [Architecture](docs/architecture.md) for how the components use them and [Operations](docs/operations.md) for import/export procedures.
 
 ## Normalized Incident Case
 
@@ -148,7 +148,7 @@ Trace metadata is stored under `metadata.trace_access`:
 }
 ```
 
-Raw spans are not part of the capsule archive. V1 accepts externally supplied trace-availability metadata but does not query a live trace backend. A recorded `verified` status describes the supplied case, not a connectivity check performed when the report is opened.
+Raw spans are not part of the capsule archive. Endterm accepts externally supplied trace-availability metadata but does not query a live trace backend. A recorded `verified` status describes the supplied case, not a connectivity check performed when the report is opened.
 
 ## Capsule Contract
 
@@ -213,7 +213,7 @@ Model ID, provider, enabled state, maximum tokens, and update time.
 
 ### Evidence, Revisions and Shared Publication
 
-`evidence_attachments` retains operator evidence metadata and extraction state; `investigation_revisions` records assessment revisions. Related-episode tables retain reviewed grouping state. The Collective outbox and publication-identity tables keep revision delivery, receipts and withdrawal state independently of the incident's model output. Their persisted `atlas_*` table names are compatibility identifiers, not separate V1 products. Full schema definitions are in `fcapsule/store.py`.
+`evidence_attachments` retains operator evidence metadata and extraction state; `investigation_revisions` records assessment revisions. Related-episode tables retain reviewed grouping state. The Collective outbox and publication-identity tables keep revision delivery, receipts and withdrawal state independently of the incident's model output. Their persisted `atlas_*` table names are compatibility identifiers, not separate Endterm products. Full schema definitions are in `fcapsule/store.py`.
 
 ## Artifact Policy
 

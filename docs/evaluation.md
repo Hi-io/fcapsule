@@ -1,4 +1,4 @@
-# V1 Verification and Evaluation
+# Endterm Verification and Evaluation
 
 Evaluation connects FCAPSule's design choices to observable behavior: useful investigation, durable evidence, bounded processing, multimodal extraction, an understandable operator workflow and reusable knowledge. Software checks and model-quality comparisons address different questions.
 
@@ -64,6 +64,6 @@ The scorer assesses structured output, reference validity, operational coverage,
 
 ## Validation Record and Evidence Handling
 
-The [live integration validation](history/live_validation.md) documents the controlled monitoring-discovery run cited in the academic report, including its original model, budget and token measurements. Its original [commit-pinned source](https://github.com/Hi-io/fcapsule/blob/2eff46389a8296c740e8c3ad84f01d8097394e8b/docs/live_validation.md) remains the citation target. It is a dated experiment, not the default configuration for all V1 runs.
+The [live integration validation](history/live_validation.md) documents the controlled monitoring-discovery run cited in the academic report, including its original model, budget and token measurements. Its original [commit-pinned source](https://github.com/Hi-io/fcapsule/blob/2eff46389a8296c740e8c3ad84f01d8097394e8b/docs/live_validation.md) remains the citation target. It is a dated experiment, not the default configuration for all Endterm runs.
 
 Keep private provider outputs, screenshots and evaluation records under ignored `local_reports/`. Record revisions and settings with each run. For qualitative feedback, separate practitioner observations from measured task outcomes. The report combines this feedback with controlled comparisons; neither software checks nor a selected scenario establishes a universal diagnostic success rate.

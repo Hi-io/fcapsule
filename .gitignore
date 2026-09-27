@@ -12,5 +12,5 @@ outputs/
 demo/runtime/
 *:Zone.Identifier
 local_reports/
-# Local workspace instructions, not part of the published V1 documentation.
+# Local workspace instructions, not part of the published Endterm documentation.
 /AGENTS.md
