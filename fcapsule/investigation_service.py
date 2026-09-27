@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from fcapsule.episode_investigation import now, run_investigation
+from fcapsule.estima_projection import rank_collective_observations
 from fcapsule.investigation_tools import InvestigationTools, episode_context, historical_episode_result, scrub
 from fcapsule.io.archive_writer import create_archive
 from fcapsule.reasoning.findings import derive_findings
@@ -129,7 +130,8 @@ def _atlas_case(value: Any, before: datetime) -> dict[str, Any] | None:
         references.add(instance_id)
     observations = []
     observation_references = []
-    for item in value.get("observations", [])[:8] if isinstance(value.get("observations"), list) else []:
+    source_observations = value.get("observations") if isinstance(value.get("observations"), list) else []
+    for item in rank_collective_observations(source_observations)[:8]:
         row, reference = _atlas_observation(item, observed_at[:40], references)
         if row:
             observations.append(row)

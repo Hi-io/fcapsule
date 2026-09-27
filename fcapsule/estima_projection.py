@@ -24,7 +24,34 @@ _SAFE_DIAGNOSTICS = {
     "timeout_seconds", "duration_ms", "dependency_duration_ms", "upstream_duration_ms", "max_connections",
     "threads_connected", "pool_checked_out", "utilization", "memory_limit", "buffered_bytes",
     "maximum_buffered_bytes", "buffered_pages", "page_bytes", "exit_code", "delivery", "acknowledgement",
+    "expected_schema", "observed_schema", "observed_status", "validation_failure", "consumer_decision", "outcome",
 }
+
+
+def rank_collective_observations(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Put distinct diagnostic facts before repeated identity and attempt fields."""
+    def priority(item: dict[str, Any]) -> int:
+        key = str(item.get("key") or "").lower().removeprefix("diagnostic.").removeprefix("diagnostic_")
+        if key in {"alert_family", "attempt", "retry_count", "error_type"}:
+            return 6
+        if key in {"error_signature", "missing_field", "buffered_bytes", "maximum_buffered_bytes",
+                   "upstream_status", "consumer_status", "status_code", "error_code", "errno",
+                   "validation_failure", "consumer_decision", "observed_status"}:
+            return 0
+        if str(item.get("key") or "").startswith(("diagnostic.", "diagnostic_")):
+            return 1
+        if key in {"up", "finding_category"}:
+            return 2
+        if item.get("kind") in {"PM", "pm"}:
+            return 3
+        return 4
+
+    distinct = {}
+    for item in observations:
+        if isinstance(item, dict):
+            marker = (str(item.get("key")), str(item.get("value")))
+            distinct.setdefault(marker, item)
+    return sorted(distinct.values(), key=priority)
 
 
 def _text(value: Any, limit: int = 160) -> str:
@@ -167,6 +194,35 @@ def project_estima_record(
                                                    when, evidence_ref, "")
                         if observation:
                             observations.append(observation)
+                # The retained template can hold stable, structured categorical
+                # fields that were not copied into diagnostic_fields. Extract
+                # only bounded identifiers, never free-form log messages.
+                template = str(evidence.get("title") or "")[:8000]
+                for key in ("outcome", "expected_schema", "observed_schema", "observed_status",
+                            "validation_failure", "consumer_decision", "upstream_status", "consumer_status"):
+                    if key in fields:
+                        continue
+                    match = re.search(rf'"{key}"\s*:\s*"([a-zA-Z0-9_-]{{1,64}})"', template)
+                    if match:
+                        observation = _observation("FM", f"diagnostic.{key}", match.group(1),
+                                                   "OpenSearch retained template", when, evidence_ref)
+                        if observation:
+                            observations.append(observation)
+                missing = re.search(r'"missing_fields"\s*:\s*\[\s*"([a-zA-Z0-9_-]{1,64})"', template)
+                if missing:
+                    observation = _observation("FM", "diagnostic.missing_field", missing.group(1),
+                                               "OpenSearch retained template", when, evidence_ref)
+                    if observation:
+                        observations.append(observation)
+                message = str(fields.get("error_message") or "").lower()
+                signature = ("invalid_base64" if "base64 data is allowed" in message else
+                             "mysql_table_missing" if "1146" in message and "doesn't exist" in message else
+                             "mysql_connection_refused" if "2003" in message and "connection refused" in message else None)
+                if signature:
+                    observation = _observation("FM", "diagnostic.error_signature", signature,
+                                               "OpenSearch diagnostic classification", when, evidence_ref)
+                    if observation:
+                        observations.append(observation)
             elif evidence_type == "metric_anomaly":
                 metric = _text(evidence.get("metric"), 96)
                 metric_observation = evidence.get("metric_observation") if isinstance(evidence.get("metric_observation"), dict) else {}
@@ -234,7 +290,7 @@ def project_estima_record(
     for observation in observations:
         key = (observation["kind"], observation["key"], observation["reference"])
         unique.setdefault(key, observation)
-    observations = list(unique.values())[:MAX_OBSERVATIONS]
+    observations = rank_collective_observations(list(unique.values()))[:MAX_OBSERVATIONS]
     fingerprint = _fingerprint(episode, findings, observations)
     local_episode_id = str(episode.get("episode_id") or "")
     remote_episode_id = "ep-" + hashlib.sha256(f"{instance_id}\0{local_episode_id}".encode()).hexdigest()[:24]

@@ -122,6 +122,21 @@ class AtlasInvestigationTests(unittest.TestCase):
         self.assertIn("not evidence for this incident", candidate["limitation"])
         self.assertIsNone(_atlas_case({**self.case, "observed_at": "2026-09-20T11:55:00"}, self.before))
 
+    def test_retrieval_and_prompt_keep_distinct_diagnostic_ahead_of_repeated_attempts(self):
+        repetitive = [
+            {"kind": "FM", "key": "diagnostic.attempt", "value": "1", "source": "opensearch",
+             "observed_at": "2026-09-20T11:50:00Z", "reference": f"attempt-{index}"}
+            for index in range(10)
+        ]
+        important = {"kind": "FM", "key": "diagnostic.missing_field", "value": "status",
+                     "source": "opensearch", "observed_at": "2026-09-20T11:50:00Z",
+                     "reference": "status-fact"}
+        candidate = _atlas_case({**self.case, "observations": [*repetitive, important]}, self.before)
+        self.assertEqual(candidate["observations"][0]["key"], "diagnostic.missing_field")
+        compact, _ = compact_for_model({**self.context, "atlas_cases": [candidate]}, [],
+                                       max_prompt_tokens=1400)
+        self.assertEqual(compact["atlas_cases"][0]["observations"][0]["value"], "status")
+
     def test_atlas_compaction_informs_planning_without_becoming_an_e_or_q_citation(self):
         cases, _ = self._service(Mock(search=Mock(return_value={"cases": [self.case]})))._atlas_retrieval(self.context)
         context = {**self.context, "atlas_cases": cases}

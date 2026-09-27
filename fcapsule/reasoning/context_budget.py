@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fcapsule.processing.anonymizer import anonymize_text, diagnostic_fields
+from fcapsule.estima_projection import rank_collective_observations
 
 
 def estimate_tokens(value: Any) -> int:
@@ -261,7 +262,7 @@ def _atlas_cases(value: Any) -> list[dict[str, Any]]:
         if not case_id or not isinstance(observed_at, str):
             continue
         observations = []
-        for observation in (item.get("observations") or [])[:4]:
+        for observation in rank_collective_observations(item.get("observations") or [])[:4]:
             if not isinstance(observation, dict):
                 continue
             row = {}

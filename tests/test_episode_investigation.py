@@ -300,6 +300,16 @@ class InvestigationEngineTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unavailable evidence"):
             validate_assessment(value, {"E2"}, {"one"})
 
+    def test_blank_mechanism_is_allowed_only_for_unresolved_hypotheses(self):
+        candidate = assessment("E1")
+        candidate["likely_mechanism"] = ""
+        candidate["hypotheses"][0]["status"] = "unresolved"
+        result = validate_assessment(candidate, {"E1"}, {"one"})
+        self.assertEqual(result["likely_mechanism"], "Undetermined from current evidence.")
+        candidate["hypotheses"][0]["status"] = "supported"
+        with self.assertRaisesRegex(ValueError, "Assessment text"):
+            validate_assessment(candidate, {"E1"}, {"one"})
+
     def test_basis_is_scrubbed_in_draft_review_and_final_without_extra_calls(self):
         value = assessment()
         value["basis"] = "Repeated decoder failure supports an application error. password=never-retain-basis"
@@ -543,6 +553,20 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertIn("actual peak remains unsampled", instruction)
         self.assertEqual(len(client.requests), 2)
         self.assertFalse(any(item["status"] == "ready" and item["assessment"] == assessment() for item in self.progress))
+
+    def test_final_turn_repairs_overlong_text_without_new_source_checks(self):
+        long_draft = assessment("E1")
+        long_draft["summary"] = "Observed worker state. " * 50
+        corrected = assessment("E1")
+        state, client = self.run_case([
+            {"action": "finish", "assessment": long_draft},
+            {"action": "finish", "assessment": corrected},
+        ], max_checks=0)
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["assessment"]["summary"], corrected["summary"])
+        self.assertEqual(len(client.requests), 2)
+        self.assertEqual(state["review"]["schema_repair"], True)
+        self.assertIn("Shorten overlong text", client.requests[-1].messages[0]["content"])
 
     def test_validated_draft_survives_an_optional_review_failure(self):
         state, _ = self.run_case([

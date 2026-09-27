@@ -77,6 +77,22 @@ class CapturingAtlas:
 
 
 class AtlasProjectionTests(unittest.TestCase):
+    def test_projection_prioritizes_distinct_diagnostics_over_repeated_attempts(self):
+        episode, investigation, retained, app = retained_fixture()
+        selected = retained[0]["capsule"]["selected_evidence"]
+        selected[:] = selected[:1] + [
+            {"evidence_id": f"ev_attempt_{index}", "type": "log_template", "title": "attempt",
+             "diagnostic_fields": {"attempt": "1"}, "time_range": {"end": STAMP}}
+            for index in range(10)
+        ] + [{"evidence_id": "ev_contract", "type": "log_template",
+              "title": '"missing_fields": ["status"], "validation_failure": "missing_required_field"',
+              "diagnostic_fields": {"expected_schema": "v1"}, "time_range": {"end": STAMP}}]
+        payload = project_estima_record("instance-a", episode, investigation, retained, app)
+        keys = [item["key"] for item in payload["observations"]]
+        self.assertIn("diagnostic.missing_field", keys[:4])
+        self.assertIn("diagnostic.validation_failure", keys[:4])
+        self.assertEqual(sum(key == "diagnostic.attempt" for key in keys), 1)
+
     def test_projection_is_compact_cited_and_excludes_raw_logs_and_secrets(self):
         episode, investigation, retained, app = retained_fixture()
         payload = project_estima_record("instance-a", episode, investigation, retained, app)

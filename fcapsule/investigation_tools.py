@@ -733,7 +733,7 @@ class InvestigationTools:
     CATALOG = {
         "workload_state": "Preserve current limits, last termination and configuration. Mutable state; collect early. args: {}",
         "resource_history": "Read captured-window CPU/memory/limits/throttling/restarts/OOM metrics. Pod must be in allowed_pods; dependency pods use dependency_evidence. args: {pod?: allowed_pods entry}",
-        "search_logs": "Search incident-window logs for up to 3 literal terms, preserving diagnostic variants. Pod must be in allowed_pods, not a pod discovered through a dependency. For dependency log follow-up use dependency_evidence with service and terms. args: {pod?: allowed_pods entry, terms: [text]}",
+        "search_logs": "Search bounded incident-window log patterns. Use terms: [] for a broad pattern scan when no distinctive signature is known; guessed generic error/timeout terms may miss the cause. Otherwise use up to 3 literal terms. Pod must be in allowed_pods, not a pod discovered through a dependency. For dependency log follow-up use dependency_evidence with service and terms. args: {pod?: allowed_pods entry, terms: [text]}",
         "compare_baseline": "Compare a ready peer with the same workload, or the preceding equal time window. args: {}",
         "database_pressure": "Query namespace-scoped MySQL connection/limit series and exporter database reachability, with latest-alert phase summaries. Not automatically attributed to this workload. args: {}",
         "dependency_evidence": "Inspect one declared same-namespace Service's port mapping and at most one selected pod's bounded evidence. No pod means no pod queries; a declaration does not prove traffic. args: {service: declared name, terms?: up to 3 literal log terms}",
