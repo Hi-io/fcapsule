@@ -1033,9 +1033,23 @@ def _dependency_observation(result: dict[str, Any]) -> dict[str, Any]:
 def _resource_history_observation(result: dict[str, Any], *, minimal: bool = False) -> dict[str, Any]:
     """Preserve a few timestamped alert-phase samples and report data freshness without guessing a TTL."""
     observations = []
-    for item in result.get("observations", []) if isinstance(result.get("observations"), list) else []:
+    source_items = result.get("observations", []) if isinstance(result.get("observations"), list) else []
+    mysql_pressure = "MySQL exporter" in str(result.get("source") or "")
+    if mysql_pressure:
+        preferred = ("mysql_global_status_threads_connected", "mysql_global_variables_max_connections",
+                     "mysql_up")
+        source_items = sorted(source_items, key=lambda item: (
+            preferred.index(item.get("metric")) if isinstance(item, dict) and item.get("metric") in preferred
+            else len(preferred)))
+    seen_series = set()
+    for item in source_items:
         if not isinstance(item, dict):
             continue
+        labels = item.get("labels") if isinstance(item.get("labels"), dict) else {}
+        series_key = (item.get("metric"), labels.get("instance"), labels.get("pod"), labels.get("container"))
+        if series_key in seen_series:
+            continue
+        seen_series.add(series_key)
         row = {"metric": _short(item.get("metric") or "unknown", 120),
                "samples": item.get("samples", 0)}
         if isinstance(item.get("labels"), dict) and item["labels"]:
@@ -1058,7 +1072,7 @@ def _resource_history_observation(result: dict[str, Any], *, minimal: bool = Fal
                 row[key] = item[key]
         if row:
             observations.append(row)
-        if len(observations) >= (2 if minimal else 8):
+        if len(observations) >= (3 if mysql_pressure and minimal else 2 if minimal else 8):
             break
     no_data = not observations or all(
         item.get("samples") == 0 or
@@ -1067,6 +1081,7 @@ def _resource_history_observation(result: dict[str, Any], *, minimal: bool = Fal
     )
     return {
         "compacted_resource_history": True,
+        "source": result.get("source"),
         "captured_at": result.get("captured_at") or result.get("observed_at"),
         "latest_alert_at": result.get("latest_alert_at"),
         "data_status": "no_data" if no_data else "sampled",
@@ -1209,6 +1224,12 @@ def _minimal_check_observation(check: dict[str, Any]) -> Any:
         minimal = _resource_history_observation(observation, minimal=True)
         minimal["minimal_resource_history"] = True
         for item in minimal.get("observations", []):
+            freshness = item.get("freshness")
+            if isinstance(freshness, dict):
+                freshness.pop("captured_at", None)
+                freshness.pop("assessment", None)
+            if item.get("sampled_peak"):
+                item.pop("max", None)
             item.pop("min", None)
             item.pop("median", None)
             item.pop("first", None)
@@ -1216,6 +1237,8 @@ def _minimal_check_observation(check: dict[str, Any]) -> Any:
             item.pop("start", None)
             item.pop("end", None)
         minimal.pop("metric_semantics", None)
+        if minimal.get("source") is None:
+            minimal.pop("source", None)
         return minimal
     if check.get("tool") == "dependency_evidence" and isinstance(observation, dict):
         if observation.get("minimal_dependency"):

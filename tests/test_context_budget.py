@@ -60,6 +60,30 @@ class ContextBudgetTests(unittest.TestCase):
         self.assertEqual(compacted["observation"]["observations"][0]["sampled_peak"]["timestamp"],
                          "2026-09-24T14:00:00Z")
 
+    def test_database_pressure_compaction_keeps_capacity_instead_of_replica_duplicates(self):
+        def sample(metric, value, replica):
+            return {"metric": metric, "labels": {"instance": "db:9104", "pod": "exporter-1",
+                                                  "prometheus_replica": replica},
+                    "samples": 4, "nearest_alert": {"timestamp": "2026-09-24T14:00:00Z", "value": value}}
+
+        result = {"source": "Prometheus MySQL exporter", "observations": [
+            sample("mysql_global_status_threads_connected", 35, "a"),
+            sample("mysql_global_status_threads_connected", 35, "b"),
+            sample("mysql_global_status_threads_running", 2, "a"),
+            sample("mysql_global_variables_max_connections", 40, "a"),
+            sample("mysql_global_variables_max_connections", 40, "b"),
+            sample("mysql_up", 1, "a"),
+        ]}
+        full = _check_item({"id": "Q003", "tool": "database_pressure", "status": "completed",
+                            "result": result}, latest=True)["observation"]
+        self.assertEqual([item["metric"] for item in full["observations"]], [
+            "mysql_global_status_threads_connected", "mysql_global_variables_max_connections",
+            "mysql_up", "mysql_global_status_threads_running",
+        ])
+        minimal = _minimal_check_observation({"tool": "database_pressure", "observation": full})
+        self.assertEqual([item["nearest_alert"]["value"] for item in minimal["observations"]],
+                         [35, 40, 1])
+
     def test_log_diagnostics_stay_paired_with_representative_events_in_model_context(self):
         context = {"episode_id": "diag-pair", "live_capture": True, "evidence": [{
             "id": "E-log", "domain": "log_template", "title": "reservation failed",
@@ -231,6 +255,29 @@ class ContextBudgetTests(unittest.TestCase):
         self.assertIn("E1", visible)
         self.assertIn("Q1", visible)
         self.assertNotIn("Q2", visible)
+
+    def test_metric_check_survives_later_repeated_log_check(self):
+        context = {"episode_id": "mysql-pressure", "evidence": [
+            {"id": "E1", "domain": "metric_anomaly", "summary": "Connection ratio exceeded 0.8."},
+        ], "alerts": []}
+        checks = [
+            {"id": "Q1", "tool": "search_logs", "status": "completed", "required_observation": True,
+             "result": {"patterns": [{"count": 10, "examples": [{"message": "old log"}]}]}},
+            {"id": "Q2", "tool": "database_pressure", "status": "completed", "required_observation": True,
+             "diagnostic_priority": True, "result": {"source": "Prometheus MySQL exporter", "observations": [
+                 {"metric": "mysql_global_status_threads_connected", "nearest_alert": {"value": 35.0}},
+                 {"metric": "mysql_global_variables_max_connections", "nearest_alert": {"value": 40.0}},
+             ]}},
+            {"id": "Q3", "tool": "search_logs", "status": "completed", "required_observation": True,
+             "result": {"patterns": [{"count": 10, "examples": [{"message": "old log"}]}]}},
+        ]
+
+        compact, visible = compact_for_model(context, checks, max_prompt_tokens=310)
+
+        self.assertIn("Q2", visible)
+        self.assertNotIn("Q3", visible)
+        observation = next(item["observation"] for item in compact["prior_checks"] if item["id"] == "Q2")
+        self.assertIn("mysql_global_status_threads_connected", json.dumps(observation))
 
     def test_compaction_prioritizes_error_signals_and_keeps_required_observations(self):
         context = {"episode_id": "episode-logs", "evidence": [{"id": "E1", "summary": "Crash loop alert"}], "alerts": []}

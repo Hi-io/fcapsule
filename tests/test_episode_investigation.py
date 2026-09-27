@@ -688,6 +688,15 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertFalse(repeats_completed_check(
             "Inspect and correct the Service label to match the selector, then verify the target is active.", checks))
 
+    def test_completed_log_check_does_not_mask_new_database_discriminator(self):
+        checks = [{"id": "Q004", "tool": "search_logs", "status": "completed",
+                   "question": "Are there application logs showing connection acquisition, pool exhaustion, or MySQL errors?",
+                   "distinguishes": "A connection leak versus an isolated metric-only alert."}]
+        self.assertTrue(repeats_completed_check(
+            "Inspect the application logs for connection acquisition and pool exhaustion again.", checks))
+        self.assertFalse(repeats_completed_check(
+            "Inspect the MySQL processlist and connection pool configuration for held sessions.", checks))
+
     def test_reserved_review_can_repair_excess_known_citations_without_more_calls(self):
         refs = [f"E{index}" for index in range(10)]
         self.context["evidence"] = [{"id": ref} for ref in refs]
@@ -1246,6 +1255,26 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual([row["tool"] for row in state["checks"]], ["workload_state", "review_omitted"])
         self.assertEqual(len(client.requests), 4)  # correction, check, finish, review
         self.assertEqual(state["calls"][0]["validation_error"], "Selected check has already completed")
+
+    def test_unlisted_check_can_be_corrected_without_losing_captured_evidence(self):
+        self.kit.CATALOG = {"workload_state": InvestigationTools.CATALOG["workload_state"]}
+        unlisted = {"action": "check", "tool": "search_logs", "arguments": {"terms": []},
+                    "question": "Are there relevant logs?", "distinguishes": "Logs from an alert alone"}
+        state, client = self.run_case(
+            [unlisted, {"action": "finish", "assessment": assessment("Q001")}], max_checks=1,
+        )
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(len(state["checks"]), 1)
+        self.assertEqual(state["calls"][0]["validation_error"],
+                         "Requested check is not available in this turn")
+        self.assertEqual(len(client.requests), 3)
+
+    def test_observed_metric_ratio_receives_denominator_guidance(self):
+        self.context["evidence"] = [{"id": "E1", "summary":
+            "inventory_mysql_client_sessions_active / clamp_min(inventory_mysql_server_max_connections, 1) = 0.85"}]
+        _, client = self.run_case([{"action": "finish", "assessment": assessment("E1")}], max_checks=0)
+        self.assertIn("positive measured denominator is not a clamp artifact",
+                      client.requests[0].messages[0]["content"])
 
     def test_check_purpose_nested_in_arguments_is_normalized_before_execution(self):
         nested = {"action": "check", "tool": "compare_baseline", "arguments": {
