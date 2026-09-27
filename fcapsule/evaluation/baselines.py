@@ -43,7 +43,7 @@ def build_baselines(bundle: CaseBundle, sample_size: int = 20) -> dict[str, Any]
             "selected_log_indexes": time_matches,
         },
         "single_llm": {
-            "description": "Not executed in offline mode; represented as an experimental protocol in EVALUATION_PLAN.md.",
+            "description": "Not executed by the deterministic pipeline; see the comparison protocol in docs/evaluation.md.",
             "status": "not_run",
         },
     }

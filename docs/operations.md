@@ -1,234 +1,120 @@
-# Operations Guide
+# V1 Operations
 
-## Start the Service
+## Start and Configure
 
-```bash
-python3 -m fcapsule.cli serve
-```
-
-Default URLs:
-
-- `http://127.0.0.1:8765/console`
-- `http://127.0.0.1:8765/settings`
-- `http://127.0.0.1:8765/targets`
-- `http://127.0.0.1:8765/patterns`
-
-Use `--host`, `--port`, and `--state-dir` to change the binding or storage location.
-
-## Operations View
-
-The Operations view treats an incident episode, not an individual alert notification, as the operator's unit of work. Firing Prometheus alerts and, when enabled, authenticated Grafana webhooks can open work. Signals for the same application within a 15-minute correlation window join one episode; later signals remain individually auditable and can retain their own reports. Alerts can identify one pod or a configured shared resource ID such as CNFC/VNFC; a shared ID is shown as the affected scope, not as an arbitrarily selected replica.
-
-An active episode takes its title and severity from a currently firing signal, not
-an older resolved critical alert. Once resolved, its highest-severity historical
-signal represents the episode. Time grouping is a navigation aid, not evidence that
-consecutive failures share a root cause.
-
-The view shows:
-
-- an episode queue ordered by latest observed activity, so a newly received
-  member returns its existing episode to the top even when the source alert
-  carries an earlier timestamp;
-- an **In queue / Archived** view selector; the unarchived queue contains active
-  and resolved episodes, sorted together by latest activity;
-- severity and lifecycle state, affected resource, latest signal time, related-signal count, and report readiness; node alerts prefer the captured node-exporter Pod's Kubernetes node over collector or IP labels;
-- a compact recurrence badge when the same application, affected resource and
-  normalized alert identity occurred earlier in retained history;
-- URL-persisted namespace and text/short-reference filters, with resource,
-  lifecycle and age filters in an expandable panel. Applied restrictions remain
-  visible below the controls;
-- a clickable episode row that expands its investigation, with an alert selector when several reports are available;
-- a stable episode reference and direct-link control for sharing the selected
-  episode; individual alert captures have separate references in detail views;
-- archive and restore controls that keep an episode out of the active queue without deleting its signals or evidence;
-- incident impact, a cited investigation path, uncertainty, and concrete next checks;
-- FM sequence, PM changes, representative evidence, topology, and trace-source retention context;
-
-Overview presents the retained resource and namespace, one primary episode assessment,
-next action and uncertainty. **Why this fits**, **Expected finding** and **Key
-observations** use compact native disclosures beside the relevant text. Exact retained evidence IDs in the explanation become
-named source buttons (Metric, Logs, Config, Image or a source check); unknown references
-are not guessed. **Investigation activity** sits in a right-hand column on wide screens,
-with individually expandable checks and token usage underneath. On smaller screens it
-stacks below the reading column. **Investigation** contains full check observations,
-findings, alternatives, alert relationships, retained history and capsule questions.
-Related history is not proof of the same cause. The four report tabs remain Overview,
-Investigation, Evidence and Timeline. Evidence defaults to **Captured telemetry** for
-the selected alert's alerts, logs, performance, configuration and coverage. Its
-**Investigation sources** view contains additional operator evidence and retained
-agent observations. Source links open the appropriate view and restore the originating
-tab, evidence view, focus and expanded rationale on return. Timeline separates historical
-alerts from investigation activity, including evidence uploads at their upload time
-and reassessment requests from retained revision records. Observation times remain
-separate; uploading does not itself imply a reassessment ran.
-
-One relevant performance series is previewed in Overview, prioritizing captured alert-condition signals. Its source and the total number of retained series are identified; **All performance evidence** opens the full charts, including other replicas. This is a preview, not a merged or deduplicated metric. For supported rules, new captures preserve the metric before its scalar threshold comparison: the amber line is the threshold, the red line is alert start. Generic pod charts retain their explicitly labelled selected-deviation marker, which is not alert time. Sample times determine horizontal positions and missing samples remain gaps. Query, labels and provenance are inspectable in Evidence. Unsupported rules show unavailable coverage; old captures are never backfilled. Charts describe a captured interval, not current workload health.
-
-**Add evidence** sits directly below the next check, with an **Additional evidence**
-link when uploads exist. Other report tabs retain a toolbar shortcut. The compact
-composer grows with its text and accepts a note, pasted/attached image, text/log excerpt,
-or short audio. Optional source details include file import, observation time and the
-redaction declaration. Image thumbnails open an accessible dialog in the same page;
-Close or Escape restores focus and the original remains downloadable. Save first,
-then explicitly **Review new evidence** to create a new assessment revision. Upload
-time is automatic and is not substituted for an unknown observation time. Queue ages
-are relative with exact timestamps on hover. Export names the selected capture and
-episode-wide investigation scope. Compression, preservation, grounding and runtime
-remain in collapsed engineering diagnostics.
-
-Reports use a centered workspace: the likely explanation and next check share the
-main reading column, with investigation activity alongside it. **Capture
-context** preserves the initial summary without repeating it in the first view.
-**Assessment history** appears independently when there are revisions but no
-operator attachments; **Operator evidence** is reserved for actual supplied files.
-
-## Patterns View
-
-Patterns is historical context, not a second incident queue. **Recurring issues**
-lists groups with at least two retained episodes using the same application,
-resource and normalized alert identity. A row shows the affected resource,
-occurrence count, first/most-recent observation and median observed gap, then
-links to individual episodes. **Shared conditions** shows a separate, tentative
-correlation view and preserves the ability to keep an episode separate from a
-suggested group. Archived episodes still count until FCAPSule retention
-permanently removes them. A gap describes retained history; it is not a
-forecast or proof of a common failure mechanism.
-
-## Targets View
-
-Targets is the live-source control surface. It shows connection health for Prometheus, OpenSearch, and the Kubernetes API and lets an operator change source URLs, the OpenSearch index pattern, cluster identity, namespace scope, poll interval, incident window, and automatic report generation. **Test connections** checks saved settings without erasing unsaved edits; save changes before testing them. **Sync now** performs immediate discovery and alert polling.
-
-For high-volume workloads, the OpenSearch capture budget is alert-focused. One quarter is reserved for the newest records immediately before the alert and three quarters for records from the alert onward. This preserves a small behavioral baseline without allowing routine traffic at the beginning of the incident window to displace the failure evidence.
-
-Application coverage is shown on Targets, grouped by cluster and namespace. Expand an application's pod count for pod-level details. Discovery updates without replacing unsaved connection settings. Workloads that disappear are omitted from current coverage while their historical incidents remain available.
-
-## Settings View
-
-Settings combines lifecycle and optional AI configuration. Incident retention defaults to 30 days and accepts values from 1 to 3650 days. FCAPSule permanently removes expired active or archived incidents, their metadata, and managed report/capsule files. The age is measured from the time FCAPSule captured the incident, so importing an older event does not immediately discard it.
-
-Archiving is separate from retention: it hides an episode from the active queue but preserves all related signals, reports, and capsules. Archived episodes can be restored or permanently deleted from the archived view.
-
-The optional Evidence models section configures a visual specialist and audio transcription specialist for **operator-supplied** files. It remains disabled until the core investigator and the matching specialist model have passed their bounded validation. A ready file can create a new assessment revision; it never overwrites the earlier assessment. See [optional multimodal evidence](multimodal_evidence.md) for data handling and evaluation scope.
-
-For Kubernetes installation and source prerequisites, use `docs/kubernetes_deployment.md`.
-The optional Collective client is configured in Settings or through
-`FCAPSULE_COLLECTIVE_*` environment defaults. Its reads and publication are separate
-opt-ins; local capture and same-instance history do not require Collective. See
-[Collective integration](collective.md) for service credentials, provider billing
-boundaries, lifecycle and retrieval limits.
-
-### Automatic AI Assessment
-
-When a provider key is configured, retaining member reports queues one episode investigation. Two workers run these jobs without blocking capture. The default investigator preserves mutable workload state, lets the model select one read-only check, then produces and reviews a cited assessment. Operators can raise the bounded check count to four in Settings. Overview refreshes progress while the model works. A missing key points to Settings; an inconclusive attempt retains observations, states that no cause is asserted, and offers Reassess. Startup resumes interrupted unarchived work; failed unchanged attempts are not automatically retried. New members trigger a fresh joint assessment after their reports are ready.
-
-The request includes retained alerts/rules, performance findings, log examples, configuration and subsequent check observations. The final response contains a likely mechanism, one next action, expected finding, uncertainty, competing hypotheses and alert relationships. For a recurring episode, it must inspect one bounded prior capsule and explicitly classify the historical comparison as similar, changed, or still insufficiently supported. The prior episode can include an **Earlier hypothesis, not proof** label; that is model prose from the earlier run and is never citable evidence. Citation validation confirms references exist, not causal truth. No remediation or application replication is executed. `episode_investigation.json` includes checks, assessment, usage and up to three previous attempts; it is copied to participating capsule archives on completion. Expand the token count for provider usage and the safety reserve. See [techniques and limits](ai_investigation_techniques.md).
-
-## Ingest an External Incident
-
-Use `ingest-case` when a source adapter, export job, or workload lab has prepared a
-normalized bounded case directory:
+Install with `python -m pip install -e .`, then run:
 
 ```bash
-python3 -m fcapsule.cli ingest-case \
-  --case /path/to/normalized-case \
-  --app-id payments-api \
-  --app-name "Payments API"
+python -m fcapsule.cli serve --host 127.0.0.1 --port 8765 --state-dir .fcapsule
 ```
 
-The command validates the case and records metadata without copying raw telemetry into
-`.fcapsule`. In Operations, select **Build report** for that incident, wait for the
-background evidence job to finish, and then expand the episode.
+Open `http://127.0.0.1:8765/console`. Use another port if it is occupied. See [Kubernetes deployment](kubernetes_deployment.md) for cluster access, HTTPS and credentials.
 
-FCAPSule Lab is a separate workload project for source-adapter validation and demonstrations, including Kubernetes scenarios. It is not served by FCAPSule or required in deployment.
+In **Targets**, configure Prometheus, OpenSearch and Kubernetes, the namespace scope, incident window and polling interval. Save, **Test connections**, then **Sync now**. Application coverage shows the currently discovered workloads. Source URLs must match trusted deployment origins or `FCAPSULE_SOURCE_ALLOWED_ORIGINS`.
 
-## CLI
+An explicit pod label identifies one resource. **Additional resource IDs** maps alert labels to pod labels for component-level scope, such as `cnfc` or `vnfc`. The label names are configurable. Capture records up to four matched pods and discloses omitted matches. Missing or ambiguous identities remain unmapped instead of being assigned to an arbitrary workload.
 
-### Investigate
+Optional authenticated Grafana webhooks can supply alerts; Prometheus remains the metrics source. Connection and webhook configuration are in the deployment guide.
+
+## Investigate an Episode
+
+**Operations** groups related alert signals into episodes and orders them by latest activity. The queue includes active and resolved episodes; archiving moves an episode out of the main queue without deleting it. Each episode has a stable reference, shareable link and independently retained member reports.
+
+| View | Use |
+| --- | --- |
+| Overview | Read the current explanation, supporting observations, next action and expected finding |
+| Investigation | Inspect completed checks, alternatives, alert relationships and relevant earlier cases |
+| Evidence | Review captured telemetry or investigation sources, including operator attachments |
+| Timeline | Compare alert history with separately timestamped investigation activity |
+
+Source buttons navigate to the cited record and provide a return path. Select another alert when an episode contains several captures. Performance charts show the retained interval, labels and units; supported alert rules also preserve the threshold and alert time. Missing samples remain gaps.
+
+The AI investigation starts after member reports are retained. Its activity panel shows progress, questions, observations and usage. New episode evidence can trigger an updated joint assessment. **Reassess** explicitly starts another attempt with the current configuration; prior assessment revisions remain inspectable.
+
+An inconclusive result still retains the observations and next check. Source unavailability, an exhausted allowance and provider failure are different conditions: inspect the recorded reason before retrying. The investigator recommends actions but does not execute remediation.
+
+## Models and Budgets
+
+In **Settings**, select the core provider (`deepseek` or `openrouter`) and a supported model, supply its credential and run **Validate model**. The default core IDs are `deepseek-v4-pro` and `deepseek/deepseek-v4-pro-0813`, respectively. A persisted Settings choice overrides `FCAPSULE_LLM_PROVIDER`; DeepSeek is the fallback when neither is set.
+
+| Setting | Service default |
+| --- | --- |
+| Full-request estimated input cap | 3,200 tokens |
+| Investigation total reserve | 12,000 tokens |
+| Optional model-selected checks | 1, configurable from 0 to 4 |
+| Credential | `DEEPSEEK_API_KEY` or `OPENROUTER_API_KEY`, matching the provider |
+
+Required observations are separate from optional checks. The completion allowance applies per call. Inspect provider-reported usage alongside the conservative token reserve; changing a model can change both consumption and price. A failed attempt does not silently switch providers. To change providers, select and validate the replacement, then explicitly reassess.
+
+Keys entered in Settings are stored in the protected local `.env`, not SQLite, API responses or capsule exports. An empty replacement field keeps the existing key. Review the [privacy guide](data_privacy.md) before enabling external inference.
+
+## Add Text, Image or Audio Evidence
+
+1. In an episode, choose **Add evidence** and enter a note, paste/attach an image, import a text/log excerpt or attach/record audio.
+2. Add observation time and source details when known. Upload time is recorded separately.
+3. Wait for the relevant specialist to finish. Inspect its extraction or transcript and add corrections where necessary.
+4. Choose **Review new evidence** to create a new cited assessment revision.
+
+Text requires the validated core model. Images and audio also require their corresponding specialist to be configured and validated in **Settings > Evidence models**. They use the OpenRouter credential but have separate model selections and validation states. No media is captured automatically. Microphone recording requires trusted HTTPS or localhost, browser permission and a validated audio capability; an existing audio file can also be uploaded.
+
+Attachments remain under **Evidence > Investigation sources**. Raw image/audio files stay local and are excluded from the default ZIP; derived observations and provenance are retained. The original assessment is not overwritten.
+
+## Patterns and Collective
+
+**Patterns** groups separate retained episodes with matching application, resource and normalized alert identity. It shows recurrence count, first/latest occurrence and observed gaps, with links back to individual episodes. Archived episodes remain part of history until deleted or expired.
+
+**Collective** extends retrieval to selected knowledge from other FCAPSule instances. Reads and publication are independent opt-ins in Settings. Its map/list displays shared observations, cases and provenance; selecting a case does not run a model or modify an incident. See [Collective integration](collective.md).
+
+## External Cases and Portable Capsules
+
+A normalized input directory follows the [data contract](../DATA_SCHEMA.md). Register it for the console, or run the pipeline directly:
 
 ```bash
-python3 -m fcapsule.cli investigate \
-  --case /path/to/normalized-case \
-  --out .fcapsule/capsules/<incident-id>
+python -m fcapsule.cli ingest-case \
+  --case /path/to/normalized-case --app-id payments-api --app-name "Payments API"
+python -m fcapsule.cli investigate \
+  --case /path/to/normalized-case --out .fcapsule/capsules/example
+python -m fcapsule.cli status
 ```
 
-### Inspect a normalized case
+In Operations, **Build report** processes an ingested case. **Export** downloads the retained capsule ZIP or report JSON and shows the actual file size and retention eligibility date.
+
+Import a trusted capsule into another local state directory:
 
 ```bash
-python3 -m fcapsule.cli inspect --case /path/to/normalized-case
+python -m fcapsule.cli import-archive \
+  --archive /path/to/fcapsule_incident-123.zip --state-dir .fcapsule
 ```
 
-### Register an application
+Import validates the integrity manifest, file hashes, archive paths and supported report format, with a 512 MiB expanded-size limit. It registers a new local record under `imported-capsules/`; re-importing creates another record. Imported reports are source-read-only, their retention starts at import time, and they are excluded from automatic Collective publication. Integrity checking detects corruption but does not authenticate an archive's producer.
+
+For a trusted legacy ZIP without a manifest, create a separate repacked file before importing:
 
 ```bash
-python3 -m fcapsule.cli register \
-  --app-id checkout-platform \
-  --name "Checkout Platform" \
-  --namespace commerce \
-  --cluster local-compose
+python -m fcapsule.cli repack-legacy-archive \
+  --archive /path/to/legacy.zip --out /path/to/repacked.zip --accept-unverified-origin
 ```
 
-### Control-plane status
+The acknowledgment is required. Repacking leaves the original unchanged, accepts only allowlisted files and omits executable dashboard HTML. It establishes integrity from repack time, not proof of the original source.
 
-```bash
-python3 -m fcapsule.cli status
-```
+## Retention and Deletion
 
-### Evaluate models offline
+Incident retention defaults to 30 days from capture and is configurable from 1 to 3650 days. Archiving is reversible and does not extend retention. Bounded raw live captures have their own staging TTL, 24 hours by default. Cleanup is checked during control-plane snapshots, at most once per minute; the displayed date is eligibility rather than an exact deletion deadline.
 
-```bash
-python3 -m fcapsule.cli compare-llms \
-  --capsule .fcapsule/capsules/<incident-id>/capsule.json \
-  --out .fcapsule/capsules/<incident-id>
-```
+**Delete episode and shared memory** explicitly removes an episode's local records and requests withdrawal of its published Collective revisions. Local deletion waits for Collective confirmation where necessary. If the publisher identity is mismatched or the service is unavailable, resolve the issue and retry; local evidence remains until withdrawal completes. Finish active investigations and resolve the source fault first, or an active alert may be captured again.
 
-## Model Evaluation
-
-Model comparison is an offline evaluation activity. It is not part of capsule capture and does not delay the operator report. Credentials are never stored in SQLite.
-
-Place the provider key in `.env`:
-
-```text
-DEEPSEEK_API_KEY=...
-```
-
-Capsule creation always completes with deterministic detection and evidence-grounded reasoning, whether or not a provider key is available. A configured model may be evaluated or added later as a non-blocking enrichment.
-
-## AI Investigation Settings
-
-Open **Settings** to choose the optional episode investigator's provider and model,
-set its bounded budgets, and validate the core capability. Provider precedence,
-provider-specific credentials, smoke testing, and recovery are documented in the
-[core LLM provider runbook](llm_provider_operations.md). The saved key is never
-returned to the browser or written to SQLite.
-
-## Local Files
-
-```text
-.fcapsule/
-  .env
-  fcapsule.db
-  ai-settings.json
-  source-settings.json
-  investigations/<episode-hash>.json
-  live-cases/<incident-id>/
-  capsules/<incident-id>/
-```
-
-The directory is ignored by Git. `live-cases/` contains bounded raw captures, not only summaries. Managed incident deletion/retention removes these inputs and capsule artifacts. External input directories outside managed state are not removed. See [privacy and retention](data_privacy.md) before backing up or sharing the volume.
-
-## Export and Saved Reports
-
-Expand an episode and choose **Export**. Download the capsule ZIP for the retained evidence/analysis bundle or the report JSON for structured incident details. The menu shows actual file sizes, the cleanup eligibility date and an expandable server-side storage path. It is not a full observability backup. Existing downloaded copies are not removed by FCAPSule retention.
-
-Current-format reports do not need the original source directory to open. If an old report needs rebuilding after its source disappears, only retained capsule evidence is available; missing raw time-series samples cannot be reconstructed. Trace availability in an imported case is historical context, not proof of a currently reachable trace backend.
-
-Cleanup is checked while control-plane snapshots are served, at most once per minute. Archiving does not reset capture time or extend retention. The displayed date is eligibility, not a guarantee of deletion at that exact second.
+Automatic retention and the local-only deletion API affect local records only. No deletion removes original Prometheus/OpenSearch telemetry, exported downloads, backups or evidence already copied into other investigations. See [privacy and retention](data_privacy.md).
 
 ## Troubleshooting
 
-- **Port already in use:** start with `--port 8766`.
-- **No incidents appear:** check Targets, namespace scope, and active Prometheus alerts; external cases can also be ingested manually.
-- **Pod is visible but logs are waiting:** confirm Filebeat has indexed recent documents with `kubernetes.namespace` and `kubernetes.pod.name` keyword fields.
-- **Kubernetes target fails:** verify the ServiceAccount token/CA mount and the `fcapsule-observer` ClusterRoleBinding.
-- **Build report is unavailable:** wait for the active capsule job to finish before starting another one.
-- **Trace shows zero retained spans:** this is expected; only source availability is retained.
+| Symptom | Check |
+| --- | --- |
+| No incidents | Targets connectivity, namespace scope and firing alerts; pending rules do not open episodes |
+| Pod visible but no logs | OpenSearch index and Filebeat fields `@timestamp`, `message`, `kubernetes.namespace`, `kubernetes.pod.name` |
+| Source URL rejected | Exact trusted origins in deployment configuration and `FCAPSULE_SOURCE_ALLOWED_ORIGINS` |
+| Kubernetes unavailable | ServiceAccount permissions, token and CA mount |
+| AI not configured or provider error | Selected provider/model, matching credential, validation and provider availability |
+| New evidence unavailable | Core and specialist validation, supported file type, HTTPS and microphone permission |
+| Collective pending | Endpoint, instance-bound credential and publication/withdrawal status |
+
+For automated checks and offline model comparison, see [Evaluation](evaluation.md).

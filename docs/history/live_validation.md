@@ -1,6 +1,6 @@
 # Live Integration Validation
 
-> Historical controlled run. Use the [current operating guide](../operations.md) for live procedures.
+> Controlled development run cited in the final project report. Its [original commit-pinned record](https://github.com/Hi-io/fcapsule/blob/2eff46389a8296c740e8c3ad84f01d8097394e8b/docs/live_validation.md) preserves the citation. Use the [V1 operating guide](../operations.md) for current procedures.
 
 ## Scope
 
@@ -107,6 +107,4 @@ from FCAPSule. Always restore the Service label after the run. Validate recovery
 the alert state and an `up` query rather than assuming that one particular Prometheus
 target-list representation is complete.
 
-See [AI investigation techniques](../ai_investigation_techniques.md) for the bounded
-agent design and [multimodal evidence](../multimodal_evidence.md) for the optional
-operator-supplied evidence workflow.
+See [Architecture](../architecture.md#investigation-loop) for the bounded agent design and [Operations](../operations.md#add-text-image-or-audio-evidence) for operator-supplied evidence. The measurements in this record remain unchanged.

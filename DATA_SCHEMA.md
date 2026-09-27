@@ -1,4 +1,6 @@
-# FCAPSule Data Contracts
+# V1 Data Contracts
+
+These contracts describe the normalized inputs and retained artifacts used by FCAPSule V1. See [Architecture](docs/architecture.md) for how the components use them and [Operations](docs/operations.md) for import/export procedures.
 
 ## Normalized Incident Case
 
@@ -146,7 +148,7 @@ Trace metadata is stored under `metadata.trace_access`:
 }
 ```
 
-Raw spans are never part of the normalized case archive or evidence archive. A live adapter may use them temporarily to derive evidence.
+Raw spans are not part of the capsule archive. V1 accepts externally supplied trace-availability metadata but does not query a live trace backend. A recorded `verified` status describes the supplied case, not a connectivity check performed when the report is opened.
 
 ## Capsule Contract
 
@@ -209,12 +211,16 @@ Non-secret general configuration and runtime preferences. Provider keys are not 
 
 Model ID, provider, enabled state, maximum tokens, and update time.
 
+### Evidence, Revisions and Shared Publication
+
+`evidence_attachments` retains operator evidence metadata and extraction state; `investigation_revisions` records assessment revisions. Related-episode tables retain reviewed grouping state. The Collective outbox and publication-identity tables keep revision delivery, receipts and withdrawal state independently of the incident's model output. Their persisted `atlas_*` table names are compatibility identifiers, not separate V1 products. Full schema definitions are in `fcapsule/store.py`.
+
 ## Artifact Policy
 
 ### Episode Investigation
 
 `state_dir/investigations/<sha256-episode-id>.json` stores the shared version-1 investigation.
-The report API includes it as `investigation`; completed/incomplete attempts are also
+The report API includes it as `investigation`; completed, inconclusive and incomplete attempts are also
 copied as `episode_investigation.json` into each participating capsule.
 
 - `episode_id`, `status`, `attempt`, timestamps and input fingerprint;
@@ -232,7 +238,7 @@ copied as `episode_investigation.json` into each participating capsule.
 - `previous_runs`: up to three earlier attempts;
 - `source_retention`: `unknown`, distinct from managed incident cleanup.
 
-Allowed statuses and tool boundaries are documented in [AI techniques](docs/ai_investigation_techniques.md).
+Statuses include `not_started`, `not_configured`, `waiting`, `queued`, `running`, `ready`, `inconclusive` and `incomplete`. The [investigation loop](docs/architecture.md#investigation-loop) defines its tool and budget boundaries.
 Deleting a member invalidates the shared file and its surviving artifact copies.
 
 ### Archive Members
@@ -247,8 +253,12 @@ The derived ZIP contains:
 - `incident_report.json` when a control-plane report exists;
 - `ai_briefing.json` when present;
 - `episode_investigation.json` when available;
+- `investigation_history.json` and `investigation_revisions.json` when available;
+- `evidence_manifest.json` when available;
 - `dashboard.html` when rendered.
 
-Only these allowlisted files are included if present. Offline comparison prompts/responses, normalized raw inputs and raw traces are excluded. Selected log examples and retained PM trend values are still telemetry-derived content and may be sensitive.
+The ZIP also includes `capsule_manifest.json`, with the archive format/version and each member's path, size and SHA-256 hash. Only allowlisted artifacts are included if present. The authoritative list and verifier are in `fcapsule/io/archive_writer.py`.
+
+Offline comparison prompts/responses, normalized raw inputs, original uploaded media and raw traces are excluded. Selected log examples and retained PM trend values are still telemetry-derived content and may be sensitive. Import requires a supported integrity manifest, `capsule.json`, `evidence.json` and a version `1.3` `incident_report.json`; pipeline-only capsules without a control-plane report do not satisfy that import contract. See [portable capsules](docs/operations.md#external-cases-and-portable-capsules).
 
 Live normalized inputs are separately staged in `state_dir/live-cases/` and become eligible for independent cleanup after the configured staging TTL (24 hours by default). External input directories remain at their original path. Artifact exclusion is not evidence that no raw data exists on the state volume.

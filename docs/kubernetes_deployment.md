@@ -1,293 +1,128 @@
-# Kubernetes Deployment
+# V1 Kubernetes Deployment
 
-## Purpose
-
-FCAPSule runs beside an existing observability stack. It does not install or replace Prometheus, OpenSearch, Filebeat, Grafana, or Alertmanager. Its pod reads bounded data from those systems, resolves the affected Kubernetes workload, and retains derived incident evidence on a persistent state volume.
-
-For connecting an FCAPSule deployment to an independently operated Collective API,
-see [Collective Kubernetes integration](collective_kubernetes_integration.md). Collective's
-service and PostgreSQL database are deployed from its own repository, not from
-this FCAPSule deployment.
-
-The state volume also contains bounded raw live captures under `live-cases/`. They become eligible for independent cleanup after 24 hours by default (`FCAPSULE_LIVE_STAGING_TTL_HOURS`); retained capsules follow incident retention. Cleanup is snapshot-driven rather than an exact deletion deadline. Protect the whole volume, not just the derived archive. See [storage and privacy](data_privacy.md).
-
-The current live path is:
-
-```text
-Prometheus firing alert or optional Grafana webhook
-        |
-        v
-pod, workload, Service selector, or configured ID labels
-        |
-        +-- Prometheus range queries -> PM series
-        +-- OpenSearch bounded search -> application logs
-        `-- Kubernetes API -> PodSpec + referenced ConfigMaps
-        |
-        v
-normalized case -> evidence capsule -> operator report
-```
+FCAPSule runs alongside an existing observability stack. It does not install Prometheus, OpenSearch, Filebeat or Grafana. The reference deployment uses one replica, a persistent state volume, read-only source access and a ClusterIP service. [Collective](collective.md) is deployed separately from its own repository.
 
 ## Prerequisites
 
-- a reachable Kubernetes cluster and working `kubectl` context;
-- Prometheus with kube-state-metrics and pod/container metrics;
-- OpenSearch containing Filebeat Kubernetes documents;
-- OpenSearch fields for `@timestamp`, `message`, `kubernetes.namespace`, and `kubernetes.pod.name`;
-- a persistent volume provisioner, or the included single-node development PV;
-- the FCAPSule image for a normal deployment, or outbound GitHub access for the development overlay.
+- A working `kubectl` context and a persistent volume provisioner.
+- Prometheus with the workload metrics used by your alerts, including kube-state-metrics and container metrics for the supplied pod checks.
+- OpenSearch with Filebeat-style Kubernetes fields: `@timestamp`, `message`, `kubernetes.namespace` and `kubernetes.pod.name`.
+- An image built from the intended source revision, available to the cluster; the source-install option below is also supported.
 
 ## Install
 
-For a single-node development cluster without a StorageClass:
+Build the root `Dockerfile` and publish to your own approved registry. Set the application image in a local copy of `deploy/kubernetes/fcapsule.yaml` to that image, preferably by digest, rather than leaving the mutable `latest` default. Configure its source URLs, cluster/namespace scope and PVC storage class before applying it. Do not assume a published V1 image or Git tag exists merely from the source version number.
+
+The checked-in PVC uses the `manual` storage class. On a single-node development cluster, `deploy/kubernetes/local-single-node-storage.yaml` supplies a matching hostPath PV at `/var/lib/fcapsule`. Use your cluster's managed storage class for other installations.
 
 ```bash
+# Optional: only for the included single-node manual storage configuration.
 kubectl apply -f deploy/kubernetes/local-single-node-storage.yaml
+
+# Apply your configured copy of the runtime manifest.
+kubectl apply -f /path/to/fcapsule-v1.yaml
+kubectl -n fcapsule rollout status deployment/fcapsule
+kubectl -n fcapsule port-forward service/fcapsule 8765:8765
 ```
 
-The hostPath is `/var/lib/fcapsule` on the Kubernetes node. Use a managed StorageClass instead in a multi-node or production cluster.
+Visit `http://localhost:8765/console`. The terminal running port-forward must remain open. The optional `deploy/kubernetes/prometheus-rule.yaml` supplies a pod-restart alert; it requires the Prometheus Operator CRD and a rule selector that includes its labels. Existing firing alerts can be used without installing that example rule.
 
-Install the restart alert and FCAPSule runtime:
+## Source Settings
+
+The runtime ConfigMap supplies `FCAPSULE_PROMETHEUS_URL`, `FCAPSULE_OPENSEARCH_URL`, `FCAPSULE_OPENSEARCH_INDEX`, `FCAPSULE_CLUSTER_NAME`, `FCAPSULE_NAMESPACES`, `FCAPSULE_POLL_INTERVAL_SECONDS`, `FCAPSULE_INCIDENT_WINDOW_MINUTES` and `FCAPSULE_AUTO_BUILD_REPORTS`. Saved **Targets** settings override environment defaults. A blank Kubernetes API URL uses the in-cluster ServiceAccount token and CA.
+
+Source URLs are restricted to their configured origins. Add approved alternative origins, including scheme/host/port, to `FCAPSULE_SOURCE_ALLOWED_ORIGINS` and restart before using them. Kubernetes URLs require HTTPS; the mounted token is sent only to trusted Kubernetes origins. Review saved source settings when reusing a state volume.
+
+OpenSearch Basic authentication uses `OPENSEARCH_USERNAME` and `OPENSEARCH_PASSWORD` in a Secret, not the ConfigMap. The ClusterRole can get/list/watch pods, ConfigMaps, namespaces, Services, ServiceMonitors and PodMonitors. It does not read Secrets. Narrow permissions to namespace Roles where appropriate.
+
+In Targets, **Additional resource IDs** maps alert labels to pod labels. An explicit pod is preferred; otherwise configured IDs can select several replicas. Missing or namespace-ambiguous identities remain unmapped. Capture bounds and omissions are recorded with the incident.
+
+## Model and Webhook Credentials
+
+The application consumes the optional `fcapsule-secrets` Secret through `envFrom`. Populate it through your Secret manager or a protected local env file, outside the repository:
 
 ```bash
-kubectl apply -f deploy/kubernetes/prometheus-rule.yaml
-kubectl apply -f deploy/kubernetes/fcapsule.yaml
-kubectl rollout status deployment/fcapsule -n fcapsule
+kubectl -n fcapsule create secret generic fcapsule-secrets \
+  --from-env-file=/private/path/fcapsule-secrets.env --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n fcapsule rollout restart deployment/fcapsule
+kubectl -n fcapsule rollout status deployment/fcapsule
 ```
 
-The application Service is ClusterIP-only. For remote HTTPS access, add the optional Caddy proxy and NodePort service described in [HTTPS access](https_access.md); its entry point is `https://<node-ip>:30767`. Otherwise, use a localhost port-forward. Console login is disabled by default; limit access to the HTTPS NodePort to a trusted network.
+Supply only the credentials your configuration uses: `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY`, OpenSearch credentials, `FCAPSULE_GRAFANA_WEBHOOK_TOKEN` and/or `FCAPSULE_COLLECTIVE_TOKEN`. Keep complete Secret values out of shell history and command output. Select and validate models in Settings. Persisted UI credentials in the state directory must also be protected.
 
-## Development Overlay
+To accept Grafana alerts, set the webhook token, enable the receiver in Targets, and configure a Grafana POST contact point at `http://fcapsule.fcapsule.svc.cluster.local:8765/api/webhooks/grafana` with matching Bearer authorization. The receiver is disabled by default. It reuses Kubernetes, Prometheus and OpenSearch capture; Grafana is not a replacement metric store. Repeat notifications are needed for long-running alerts because unresolved webhook state expires after 24 hours without updates. Avoid routing the same rule from two alert inputs unless separate records are intended.
 
-`deploy/kubernetes/dev-overlay.yaml` uses the `install-source` init container with
-`python:3.12-slim` to install source into an `emptyDir`; the application container
-runs that source with the same non-root security policy as the base Deployment.
-The checked-in overlay points at mutable `master.zip`, so applying it unchanged
-is not reproducible. In a read-only live snapshot taken on 2026-09-26, the
-Deployment used `install-source` and pinned its GitHub archive URL to
-`003d3876f1e1f708664bfb7fa7070007f7a57067`. That SHA documents the snapshot
-only; it is not a current release target. Do not apply the checked-in overlay
-unchanged to the live Deployment: strategic merge matches by name, so it would
-replace the pinned URL with mutable `master.zip`. Inspect the live template and
-preserve or update its existing source URL as described below. Pin the overlay
-URL before applying it to a fresh/base Deployment as well:
+## HTTPS and Console Access
+
+Localhost port-forward supports browser microphone recording. A remote HTTP node IP does not; use trusted HTTPS and normal microphone permission. Optional specialist validation is still required.
+
+The supplied Caddy sidecar terminates TLS on port 8443 and exposes HTTPS NodePort 30767. Obtain a certificate covering the intended host/IP and provision it from private files:
 
 ```bash
-# Run from the exact source commit that has been verified and pushed.
+kubectl -n fcapsule create secret tls fcapsule-tls \
+  --cert=/private/path/server.crt --key=/private/path/server.key \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f deploy/kubernetes/https-proxy.yaml
+kubectl -n fcapsule patch deployment/fcapsule --type=strategic \
+  --patch-file deploy/kubernetes/https-proxy-patch.yaml
+kubectl -n fcapsule rollout status deployment/fcapsule
+```
+
+Visit `https://<certificate-host-or-ip>:30767/console` without certificate warnings. Apply the HTTPS patch after the base manifest/source overlay. Keep the CA private key outside the cluster and repository. Renew the certificate and restart at a suitable time when required; this static example does not renew certificates automatically.
+
+**Login is disabled by default.** Restrict console reachability. To enable shared-account Basic Auth, set `FCAPSULE_CONSOLE_AUTH_REQUIRED=true` and supply `FCAPSULE_CONSOLE_USERNAME` and `FCAPSULE_CONSOLE_PASSWORD` through a referenced Secret. Basic Auth requires HTTPS for remote use. `/healthz` remains public for probes. If a separate proxy is used, set `FCAPSULE_CONSOLE_TRUSTED_PROXY_CIDRS` only to its source CIDR; the supplied sidecar uses loopback.
+
+## Source-Install Deployment
+
+`deploy/kubernetes/dev-overlay.yaml` installs a GitHub source archive into a shared volume using `python:3.12-slim`. It is an alternative to building an image. Its checked-in URL points to mutable `master.zip`; replace it with the exact tested, published commit before applying the overlay.
+
+For a fresh base Deployment without an existing source installer:
+
+```bash
 source_sha="$(git rev-parse HEAD)"
 source_archive="https://github.com/Hi-io/fcapsule/archive/${source_sha}.zip"
 overlay_patch="$(mktemp)"
 trap 'rm -f "$overlay_patch"' EXIT
 sed "s#https://github.com/Hi-io/fcapsule/archive/refs/heads/master.zip#${source_archive}#" \
   deploy/kubernetes/dev-overlay.yaml > "$overlay_patch"
-grep -F "$source_archive" "$overlay_patch"
-
-kubectl rollout history deployment/fcapsule -n fcapsule
-kubectl patch deployment fcapsule \
-  -n fcapsule \
-  --type strategic \
-  --patch-file "$overlay_patch"
-kubectl rollout status deployment/fcapsule -n fcapsule
+kubectl -n fcapsule patch deployment/fcapsule --type=strategic --patch-file "$overlay_patch"
+kubectl -n fcapsule rollout status deployment/fcapsule
 ```
 
-This overlay patch is for a fresh/base Deployment that does not already have a
-source installer. It changes the pod template and starts a rollout. Inspect the
-live init-container names, images, commands, and app image before changing an
-existing Deployment:
+Do not reapply that overlay blindly to an existing source-installed deployment: it can overwrite live template settings. Inspect its init-container names, images and command arrays first:
 
 ```bash
-kubectl -n fcapsule get deployment fcapsule -o jsonpath='{range .spec.template.spec.initContainers[*]}init={.name}{" image="}{.image}{" command="}{.command}{"\n"}{end}{range .spec.template.spec.containers[*]}app={.name}{" image="}{.image}{"\n"}{end}'
+kubectl -n fcapsule get deployment fcapsule -o jsonpath='{range .spec.template.spec.initContainers[*]}init={.name}{" image="}{.image}{" command="}{.command}{"\n"}{end}'
 ```
 
-For an existing Deployment, copy the exact current URL from the inspection
-output and the source init container's zero-based `initContainers` array index.
-The guarded JSON Patch below verifies the name, image, and current URL before
-replacing only command element 7. Do not reuse an index or current URL from a
-different Deployment layout.
+Use the observed zero-based array index and exact current URL in a guarded update. This example requires the existing `install-source` command layout, whose archive URL is element 7:
 
 ```bash
-# Run from the exact source commit that has been verified and pushed.
 source_sha="$(git rev-parse HEAD)"
 source_archive="https://github.com/Hi-io/fcapsule/archive/${source_sha}.zip"
-init_index=observed-index # replace with the inspected numeric array index
-current_archive='<copy-exact-current-archive-url-from-inspection>'
-kubectl rollout history deployment/fcapsule -n fcapsule
+init_index=observed-index
+current_archive='<copy-exact-current-archive-url>'
 patch="[\
 {\"op\":\"test\",\"path\":\"/spec/template/spec/initContainers/${init_index}/name\",\"value\":\"install-source\"},\
 {\"op\":\"test\",\"path\":\"/spec/template/spec/initContainers/${init_index}/image\",\"value\":\"python:3.12-slim\"},\
 {\"op\":\"test\",\"path\":\"/spec/template/spec/initContainers/${init_index}/command/7\",\"value\":\"${current_archive}\"},\
 {\"op\":\"replace\",\"path\":\"/spec/template/spec/initContainers/${init_index}/command/7\",\"value\":\"${source_archive}\"}]"
-kubectl patch deployment fcapsule -n fcapsule --type=json --patch "$patch"
-kubectl rollout status deployment/fcapsule -n fcapsule
+kubectl -n fcapsule patch deployment/fcapsule --type=json --patch "$patch"
+kubectl -n fcapsule rollout status deployment/fcapsule
 ```
 
-The observed live profile used `python:3.12-slim` for the source installer and
-application container. A plain `kubectl rollout restart` recreates pods from the
-existing template; it does not advance a pinned source revision. To roll back,
-inspect the exact prior revision and confirm its init-container URL and images
-before changing the template:
+Replace both placeholders before running. A plain rollout restart retains the configured source revision; it does not advance a pinned commit.
+
+## Verify and Maintain
 
 ```bash
-known_good_revision=your-known-good-revision # replace with the recorded numeric revision
-kubectl rollout history deployment/fcapsule -n fcapsule --revision="$known_good_revision"
-kubectl rollout undo deployment/fcapsule -n fcapsule --to-revision="$known_good_revision"
-kubectl rollout status deployment/fcapsule -n fcapsule
+kubectl -n fcapsule get pods,pvc,svc
+kubectl -n fcapsule logs deployment/fcapsule -c fcapsule
+curl http://localhost:8765/healthz
 ```
 
-This Deployment rollback leaves the persistent state volume and Secrets intact.
-Record and restore any separately changed ConfigMaps or other resources
-separately; `rollout undo` only restores the Deployment template.
+With port-forward active, check readiness, source connections in Targets and an existing retained report. Readiness alone does not validate provider calls or source permissions. Review changes and complete the [test suite](evaluation.md#automated-checks) before deploying a new revision.
 
-Make source changes on a dedicated branch, not on `master`:
+Record the current image/source commit and Deployment revision before an update. Use `kubectl rollout history` to inspect a known-good revision before `kubectl rollout undo --to-revision=<number>`. Deployment rollback does not restore separately changed ConfigMaps, Secrets or persistent data. Back up the state volume and protect it as operational data, including staged raw captures and credentials.
 
-```bash
-git switch -c feature/your-change
-python3 -m pip install -e .
-python3 -m unittest discover -s tests -v
-node --check fcapsule/ui/assets/app.js
-node --test tests/ui_*.test.cjs
-git push -u origin feature/your-change
-```
-
-Review the diff and wait for the branch's GitHub Actions **Test** workflow to pass.
-UI changes also require a browser smoke test with retained records. The browser
-smoke script can load branch assets over read-only live data without deploying
-them to the shared instance; do not trigger provider calls or mutate incidents
-during a presentation-only check.
-
-After verification, merge the tested branch (through a reviewed pull request or a
-local merge). From a checkout at that exact merged commit, set `source_sha` to
-`$(git rev-parse HEAD)` in the guarded JSON Patch procedure above, then patch the
-existing live init container's `command[7]` URL after inspecting its name, image,
-array index, and current URL. Do not apply the strategic overlay patch to an
-existing Deployment; it can overwrite live pod-template fields. Use the pinned
-overlay procedure above only for a fresh/base Deployment without a source
-installer. After either path, wait for rollout readiness and verify the live
-source URL and images again.
-
-This profile is for iteration only. Build an immutable image pinned by digest for release deployments.
-These steps are a working convention, not server-enforced branch protection.
-Protected-branch rules and required checks can be configured separately in GitHub.
-
-## Source Configuration
-
-The base ConfigMap defines:
-
-- `FCAPSULE_PROMETHEUS_URL`;
-- `FCAPSULE_OPENSEARCH_URL`;
-- `FCAPSULE_OPENSEARCH_INDEX`;
-- `FCAPSULE_CLUSTER_NAME`;
-- `FCAPSULE_NAMESPACES`;
-- `FCAPSULE_POLL_INTERVAL_SECONDS`;
-- `FCAPSULE_INCIDENT_WINDOW_MINUTES`;
-- `FCAPSULE_AUTO_BUILD_REPORTS`.
-
-The same non-secret values can be changed in **Targets**. UI changes persist on the state volume and override environment defaults after first save. Leaving Kubernetes API URL blank uses the mounted ServiceAccount token and cluster CA. Before upgrading an existing state volume, compare saved Target URLs with the deployment origins and allowlist any intentional custom origins; unsupported saved origins fail closed during source checks until configured. Saving a URL from an untrusted origin reports the required `FCAPSULE_SOURCE_ALLOWED_ORIGINS` setting in the UI.
-
-Configured source URLs are pinned to the origins supplied by their corresponding `FCAPSULE_*_URL` environment values. To use a different Prometheus, OpenSearch, or Kubernetes API origin, add its exact origin (scheme, host, and port) to the comma-separated `FCAPSULE_SOURCE_ALLOWED_ORIGINS` ConfigMap value and restart FCAPSule. Kubernetes API URLs must use HTTPS. The mounted ServiceAccount token is sent only to a trusted Kubernetes origin. Never add an origin that you do not control.
-
-**Additional resource IDs** in Targets map an alert label to a Kubernetes pod label. The default mappings are `cnfc -> cnfc` and `vnfc -> vnfc`; edit the pod label if the cluster uses a qualified key such as `telecom.example.com/cnfc`. A pod-named alert resolves that exact pod first. Otherwise, configured IDs narrow the Kubernetes inventory (multiple IDs intersect); a matching CNFC can capture several replicas in one bounded incident. Workload and Service scope remain available when no configured ID is present. A namespace-free ID is accepted only if all matches are in one namespace. Missing or ambiguous matches appear as unmapped alerts in Targets, not as guessed incidents. At most four matching pods have per-pod metrics, logs and configuration captured; the retained case records the full match count and any omitted pods.
-
-Grafana is an **optional alert input**, not a telemetry store. Set `FCAPSULE_GRAFANA_WEBHOOK_TOKEN` in the `fcapsule-secrets` Secret, restart FCAPSule, then enable **Accept Grafana webhook alerts** in Targets. Configure a Grafana Alerting webhook contact point with URL `http://fcapsule.fcapsule.svc.cluster.local:8765/api/webhooks/grafana`, HTTP method POST, and Authorization scheme `Bearer` with the same token as credentials. Keep the token out of the URL. The receiver accepts Grafana's standard JSON notification, normalizes each firing alert, and reuses the same Kubernetes/Prometheus/OpenSearch capture path. Resolved notifications remove active alerts. Unresolved webhook state expires after 24 hours if Grafana stops notifying; configure Grafana repeat notifications for long incidents. The receiver is disabled by default. It can be turned off in Targets without deleting prior retained capsules.
-
-Grafana-managed rules are not necessarily available through Prometheus `/api/v1/rules`, so rule-expression evidence may be unavailable for those alerts even when pod metrics are captured. Avoid routing the same rule from both Prometheus polling and Grafana unless two separate source records are desired.
-
-OpenSearch Basic authentication can be supplied through `OPENSEARCH_USERNAME` and `OPENSEARCH_PASSWORD`. Do not place credentials in the ConfigMap.
-
-## Console Authentication
-
-Console login is disabled by default. To enable optional Basic Auth, set `FCAPSULE_CONSOLE_AUTH_REQUIRED` to `"true"` in the runtime ConfigMap, add an optional `secretRef` for `fcapsule-console-auth` to the FCAPSule container's `envFrom`, and create that Secret. Enter the password at the prompt so it is not written in shell history or printed in the command output:
-
-```bash
-umask 077
-auth_file="$(mktemp)"
-trap 'rm -f "$auth_file"' EXIT
-read -r -p "Console username: " console_user
-read -r -s -p "Console password: " console_password
-printf '\n'
-printf 'FCAPSULE_CONSOLE_USERNAME=%s\nFCAPSULE_CONSOLE_PASSWORD=%s\n' "$console_user" "$console_password" > "$auth_file"
-unset console_password
-kubectl -n fcapsule create secret generic fcapsule-console-auth \
-  --from-env-file="$auth_file" --dry-run=client -o yaml | kubectl apply -f -
-```
-
-For a remote browser, configure the TLS Caddy endpoint first and visit
-`https://<certificate-host-or-ip>:30767/console`. No username or password is
-requested unless Basic Auth was explicitly enabled. The backend `fcapsule`
-Service is ClusterIP-only, so port 30765 is no longer reachable through a node
-IP. `/healthz` remains public for Kubernetes probes. The unauthenticated
-console has no per-user permissions; use a network boundary before exposing it.
-
-The included Caddy sidecar shares the app pod's loopback network and sets the
-forwarded HTTPS scheme itself. If another reverse proxy runs in a different pod,
-set `FCAPSULE_CONSOLE_TRUSTED_PROXY_CIDRS` to only that proxy's source CIDR; the
-app rejects forwarded HTTPS headers from other peers.
-
-On an existing cluster, keep the HTTPS sidecar available while applying the new
-manifest. Confirm the HTTPS endpoint is healthy, then apply
-`deploy/kubernetes/fcapsule.yaml` and wait for the rollout. The main
-Service becoming ClusterIP removes the plaintext LAN entry point; it does not
-modify the persistent state volume or the existing `fcapsule-secrets` Secret.
-
-## Model Credential
-
-The Deployment references an optional Secret named `fcapsule-secrets`. Create or update it without committing the value:
-
-```bash
-kubectl create secret generic fcapsule-secrets \
-  -n fcapsule \
-  --from-literal=DEEPSEEK_API_KEY='<value>' \
-  --from-literal=OPENROUTER_API_KEY='<optional-value>' \
-  --from-literal=FCAPSULE_GRAFANA_WEBHOOK_TOKEN='<optional-random-token>' \
-  --dry-run=client -o yaml | kubectl apply -f -
-kubectl rollout restart deployment/fcapsule -n fcapsule
-```
-
-The console reports only whether a key is configured. A replacement entered in Settings is written to `/var/lib/fcapsule/.env`, never SQLite or the API response.
-
-`OPENROUTER_API_KEY` is optional. It enables only manually supplied image/audio evidence after the core investigator and relevant specialist model pass their own small validation checks. It is not required for normal alert, metric, log, or configuration capture.
-
-## RBAC and Configuration Evidence
-
-The `fcapsule-observer` ClusterRole has read-only access to pods, ConfigMaps, namespaces, and Services. Services resolve explicitly declared, same-namespace dependencies for bounded agent checks; arbitrary endpoints are not followed. It does not grant access to Secrets. For an affected pod, FCAPSule retains:
-
-- pod and workload identity;
-- node, phase, readiness, containers, and image references;
-- names of referenced ConfigMaps;
-- a masked ConfigMap snapshot and content hash.
-
-Restrict the ClusterRole to namespace Roles when cluster-wide discovery is unnecessary.
-
-## Alert Trigger
-
-The included `PrometheusRule` fires `FCAPSulePodRestartDetected` when a non-system workload restarts in a five-minute window. FCAPSule also consumes existing firing Prometheus alerts that carry namespace and pod labels. When the Prometheus rules API is available, FCAPSule captures the matching PromQL expression, pending duration, rule group, and health so the responder can inspect why the alert fired. `Watchdog` and `InfoInhibitor` are ignored.
-
-An incident ID is derived from alert name, start time, namespace, and pod. Repeated polls of the same firing alert are idempotent. A later firing period can create a new incident.
-
-## Verify
-
-```bash
-kubectl get pods,pvc,svc -n fcapsule
-kubectl logs deployment/fcapsule -n fcapsule -c fcapsule
-curl --cacert /path/to/trusted-root.crt https://<certificate-host-or-ip>:30767/healthz
-```
-
-Use the browser login to inspect `/api/state`; it contains operational data and is authenticated like the rest of the console.
-
-In **Targets**, all three targets should be healthy. **Application coverage** should show each currently discovered workload, its pods, and FM/PM/LOG/CFG status. A removed workload disappears from current coverage after the next sync while its incident history remains available in Operations.
-
-## Current Constraints
-
-For microphone recording from a node IP, use the optional [HTTPS proxy](https_access.md).
-Alternatively, use a localhost port-forward. The browser requires a secure context
-and normal microphone permission in addition to a validated audio model.
-
-- one replica, SQLite, and in-process background threads;
-- one shared Basic-auth account is configured through a Kubernetes Secret; per-user roles are not implemented;
-- TLS terminates at the optional Caddy reverse proxy, not in the application;
-- no durable job queue or distributed locking;
-- OpenSearch mapping currently targets Filebeat Kubernetes fields;
-- Prometheus queries assume kube-state-metrics and container metrics;
-- trace backends are not yet connected;
-- the hostPath manifest is a single-node development default.
-
-Use a single replica until metadata and jobs move to shared transactional services. Do not expose the current UI directly to an untrusted network.
+Keep V1 at one replica: SQLite and in-process workers use a local persistence boundary. Retained incidents, raw staging and Collective records follow the [documented independent lifecycles](data_privacy.md).

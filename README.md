@@ -1,69 +1,25 @@
 # FCAPSule
 
-**FCAPSule investigates; Collective remembers.** An AI investigator for the observability stack you already have, with an optional memory of past incidents.
+**FCAPSule investigates; Collective remembers.** AI-assisted incident investigation, durable evidence capsules and shared operational knowledge for an existing observability stack.
 
-An alert tells a monitoring team that something is wrong. The explanation is usually scattered across logs, metrics, workload configuration and earlier incidents, often in systems with different retention windows. FCAPSule joins those observations around the incident, lets a bounded AI investigator ask follow-up questions, and preserves the evidence and reasoning in an inspectable capsule.
+An alert identifies a symptom. Explaining it often requires joining logs, metrics, configuration and earlier incidents before their source retention expires. FCAPSule brings this evidence into one investigation, uses an AI agent to select targeted read-only checks, and preserves the findings with their supporting observations. An engineer can add a screenshot or spoken observation and review the resulting assessment alongside its earlier revision.
 
-When a related problem returns, the investigator can consult eligible earlier capsules. It remembers through retained evidence, not by changing model weights. That distinction matters: the engineer can inspect what was captured, what the model inferred and what is still unknown.
+With **Collective**, participating FCAPSule instances share selected incident knowledge. Experience from one deployment can direct checks in another, while each instance keeps its own evidence, model configuration and investigation costs.
 
-**The result is investigation continuity:** from the first alert, through a human review, to a future recurrence after the original source window may have expired. FCAPSule complements Prometheus, OpenSearch and Kubernetes; it does not replace them.
+![Incident overview with an assessment and operational evidence](docs/assets/product/incident-overview-lab.png)
 
-![Incident overview showing an AI assessment and cited operational evidence](docs/assets/product/incident-overview-lab.png)
+## V1 Capabilities
 
-## Why It Matters
-
-- **An investigator, not another summary.** After bounded deterministic capture, the model can choose read-only checks, examine their observations, compare explanations and propose a next action with an expected finding. Checks, citations, uncertainty and token use remain reviewable.
-- **Several signals, one incident.** Prometheus alerts (or optional Grafana webhooks), time series, OpenSearch logs, and Kubernetes workload/configuration facts are aligned to the affected resource. Pod identity is preferred; configured labels such as CNFC/VNFC can scope an alert to several replicas. Related alerts form an episode without losing their individual reports.
-- **A memory an engineer can audit.** Selected evidence, completed checks and provenance survive in a retained capsule. Patterns exposes recurrence; an eligible earlier capsule can inform a later investigation even when its original telemetry is no longer searchable.
-- **A place for the missing clue.** An engineer may add text, an external screenshot or an audio note. Optional vision and transcription models turn supplied media into attributable observations for a reviewed reassessment.
-- **A new retention option to evaluate.** Preserving compact incident evidence can extend investigative context beyond raw-source retention. It does not recover data that was never captured or justify reducing source retention without measuring the result.
-
-For the full product narrative, see [Observability With Memory](docs/product_value_proposition.md). The screenshots use synthetic Lab incidents, not production performance claims.
-
-## The Operator Workflow
-
-1. Configure and test Prometheus, OpenSearch and Kubernetes access in **Targets**. Coverage shows currently observed workloads by namespace. Optionally map alert IDs to pod labels or enable the authenticated Grafana webhook.
-2. A firing alert opens a bounded capture. FCAPSule preserves selected fault, performance, log and configuration evidence and builds a report even if the model provider is unavailable.
-3. **Operations** presents the episode, affected resource, observed impact and AI investigation. Follow citations into the captured evidence or the investigator's checks; add evidence or export the report when needed.
-4. **Patterns** shows recurring issues and links back to separate episodes. An eligible earlier capsule can become bounded context for a new investigation.
-5. Optionally connect **Collective** in Settings. Its independent API and PostgreSQL store minimized, versioned cases from participating instances; the Collective view lets engineers inspect observations, hypotheses and provenance without treating similarity as a verified cause.
-6. **Settings** also controls FCAPSule incident retention and model configuration. Offline model comparisons remain an evaluation workflow, not an operator dashboard.
-
-![Investigation activity with diagnostic checks and retained-history comparison](docs/assets/product/ai-investigation-lab.png)
-
-The model's assessment is a supported hypothesis, not a certified root cause or an executed fix. The investigator only uses allowlisted read-only checks; it does not reproduce workloads or remediate systems. See [AI investigation techniques](docs/ai_investigation_techniques.md) for the actual tools, budgets and validation limits.
-
-## Evidence and Memory
-
-Each FCAPSule instance retains its own capsules and uses conservative same-instance
-history. An independent, opt-in **Collective** service can share compact cases across
-participating instances; it is disabled by default and does not replace local
-history or turn a similar case into a shared-cause finding. FCAPSule runs the
-models and interprets any retrieved context using its own provider configuration.
-Collective stores and returns cases; it does not run LLMs, receive provider keys or
-incur token charges. See the [Collective integration guide](docs/collective.md) for its
-privacy boundary, API, operator limits and evaluation plan.
-
-The Collective page and local API use `/collective`, `/api/settings/collective`
-and `/api/collective/*`. Existing `/estima` and `/atlas` page paths, `/api/estima/*`
-and `/api/settings/estima` routes, `FCAPSULE_ESTIMA_*` settings and
-`estima-settings.json` state remain compatible. New configuration can use
-`FCAPSULE_COLLECTIVE_*`; when both names are set, Collective settings take
-precedence.
-
-| Source | What FCAPSule uses today |
-| --- | --- |
-| Prometheus | Firing alerts, matching rule conditions where available, and bounded metric windows |
-| OpenSearch | Incident-window logs, grouped into patterns with representative masked examples |
-| Kubernetes API | Workload identity, pod state, topology and referenced ConfigMaps; not Secrets |
-| Earlier FCAPSule capsules | Eligible retained observations and investigation records, with earlier conclusions kept distinct from evidence |
-| Operator-supplied media | Optional text, image and audio evidence after the relevant model capability is configured |
-
-The live integration does not query a trace backend. Imported cases may declare trace availability, but raw spans are not retained. Source systems remain authoritative. FCAPSule stages bounded raw live inputs on its state volume; they become eligible for independent cleanup after 24 hours by default, configurable with `FCAPSULE_LIVE_STAGING_TTL_HOURS`. A derived ZIP excludes those inputs but may still contain sensitive selected examples. See [privacy and retention](docs/data_privacy.md).
+- **Investigate across sources.** Correlate Prometheus alerts and metrics, OpenSearch logs and Kubernetes workload/configuration facts. Optional Grafana webhooks use the same capture workflow.
+- **Group related work.** Combine alert signals into episodes using workload identity and occurrence time. Configurable resource labels, such as a cloud-native function component (CNFC) identifier, support investigations spanning several replicas.
+- **Ask targeted questions.** The agent examines retained evidence, selects bounded source checks and returns a cited explanation, alternatives and a useful next action.
+- **Preserve incident context.** Selected evidence and completed checks remain inspectable after the original source window expires. Capsules can be exported and imported for later review.
+- **Use multimodal evidence.** Configurable visual and speech models extract observations from operator-supplied screenshots and recordings for a revised investigation.
+- **Reuse operational knowledge.** Local history supports recurrence analysis; the optional Collective service makes selected experience available across instances.
 
 ## Start Locally
 
-Requirements: Python 3.11+. From this repository:
+Requirements: Python 3.11 or later. Install from the checked-out revision:
 
 ```bash
 python3 -m venv .venv
@@ -72,53 +28,50 @@ python -m pip install -e .
 python -m fcapsule.cli serve
 ```
 
-Open `http://127.0.0.1:8765/console`. Collective, Targets, Patterns and Settings are linked in the UI. On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`. No external source is connected until configured in Targets or through environment variables. The CLI works without the web interface.
+On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1` instead. Open `http://127.0.0.1:8765/console`.
 
-To deploy the single-replica reference service in Kubernetes, follow the [Kubernetes guide](docs/kubernetes_deployment.md). It uses read-only Kubernetes access, a persistent state volume and configurable Prometheus/OpenSearch URLs. FCAPSule Lab is a [separate workload project](https://github.com/Hi-io/fcapsule-lab), not a runtime dependency.
+1. Configure source access and workload scope in **Targets**, then test the connections.
+2. Select and validate the investigator's provider/model in **Settings**. Credentials can be supplied there or through `DEEPSEEK_API_KEY` / `OPENROUTER_API_KEY`.
+3. Open an episode in **Operations** to inspect the assessment, checks and retained evidence.
+4. Use **Patterns** for local recurrence or connect **Collective** for shared knowledge.
 
-## CLI and Evaluation
-
-```bash
-python -m fcapsule.cli status
-python -m fcapsule.cli ingest-case --case /path/to/normalized-case --app-id payments-api --app-name "Payments API"
-python -m fcapsule.cli investigate --case /path/to/normalized-case --out ./.fcapsule/capsules/example
-python -m fcapsule.cli import-archive --archive /path/to/fcapsule_incident-123.zip --state-dir ./.fcapsule
-python -m fcapsule.cli repack-legacy-archive --archive /path/to/legacy.zip --out /path/to/repacked.zip --accept-unverified-origin
-```
-
-See [importing a retained capsule archive](docs/capsule_archive_import.md) for its trust, retention, legacy repack and read-only boundaries.
-
-Offline comparison uses the same capsule input for each selected model. It is useful for testing provider choice, latency, token use and answer quality without turning the operator console into a benchmark:
+Capture and deterministic reports also work without model credentials. To inspect the included offline fixture:
 
 ```bash
-python -m fcapsule.cli compare-llms --capsule ./.fcapsule/capsules/<incident-id>/capsule.json --out ./.fcapsule/capsules/<incident-id> --models deepseek-v4-flash deepseek-v4-pro
+python -m fcapsule.cli investigate \
+  --case tests/fixtures/checkout_dependency_failure \
+  --out .fcapsule/capsules/example
 ```
 
-See [provider operations](docs/llm_provider_operations.md), [evaluation plan](EVALUATION_PLAN.md) and the [data schema](DATA_SCHEMA.md) for configuration and contracts. Never commit provider keys or captured telemetry.
+![Investigation activity and retained-history comparison](docs/assets/product/ai-investigation-lab.png)
 
-## Current Boundaries
+## Documentation
 
-FCAPSule is working single-replica software for a trusted environment, not an Internet-facing managed service. Console login is disabled by default, so anyone who can reach the HTTPS endpoint can read reports and change settings; restrict network access accordingly. Basic Auth can be enabled explicitly but does not provide per-user roles or SSO. The app does not terminate TLS: remote HTTPS uses the optional Caddy proxy with operator-managed certificates. SQLite and in-process workers are not distributed. Masking is heuristic, not a guarantee of anonymization. Historical matching is deliberately conservative and cannot equate every failure across changed workloads. Investigation quality still requires review on real incidents.
+| Document | Contents |
+| --- | --- |
+| [Operations](docs/operations.md) | Sources, models, investigation workflow, media, capsule import/export and deletion |
+| [Architecture](docs/architecture.md) | Evidence processing, the agent loop, local history, shared knowledge and implementation map |
+| [Kubernetes deployment](docs/kubernetes_deployment.md) | Installation, source permissions, HTTPS, credentials and version-pinned updates |
+| [Collective](docs/collective.md) | Connect independent instances, publish/retrieve cases and manage shared records |
+| [Data contracts](DATA_SCHEMA.md) | Normalized input, retained evidence, investigation records and archive format |
+| [Privacy and retention](docs/data_privacy.md) | Storage boundaries, external disclosures, credentials and record lifecycle |
+| [Evaluation](docs/evaluation.md) | Automated verification, comparison methods and the recorded validation cited in the report |
 
-Cross-instance case sharing through Collective is a distinct, optional integration.
-It is disabled by default and requires the independently deployed Collective service.
-The service supports instance-bound publisher credentials, read-only credentials,
-explicit episode withdrawal and optional retention expiry. Readers can still see
-cases across the deployment, so it is a single-trust-domain service, not a
-multi-tenant boundary. FCAPSule local deletion does not
-automatically withdraw a remote case. Local incident capture and investigation
-must remain useful when Collective is unavailable. Collective has its own API and
-PostgreSQL lifecycle; it is not an FCAPSule model runtime or source of provider
-credentials.
+The [Collective service](https://github.com/Hi-io/collective) and [FCAPSule Lab](https://github.com/Hi-io/fcapsule-lab) have separate repositories. Collective is optional; the Lab provides controlled workloads for evaluation and is not a runtime dependency. Screenshots above show Lab incidents.
 
-The [roadmap](ROADMAP.md) covers production hardening, source scaling, durable workers and broader evaluation. No measured storage-cost reduction, diagnosis accuracy or industry-first claim is implied by the product narrative.
+## Deployment Scope
 
-## Verify and Explore
+V1 runs as a single FCAPSule instance with persistent local state, alongside existing observability sources. The supplied adapters target Prometheus, Filebeat-style OpenSearch documents and Kubernetes; other integrations can supply the same normalized case contract. The investigator runs allowlisted read-only checks, not remediation.
+
+Keep the console on a trusted network: login is disabled by default. Remote access requires an appropriate HTTPS and access-control boundary; optional Basic Auth is documented in the deployment guide. Review the privacy guide before enabling external models or shared-memory publication. Source telemetry, retained capsules and published Collective cases have separate lifecycles.
+
+## Verification
 
 ```bash
 python -m unittest discover -s tests -v
 node --check fcapsule/ui/assets/app.js
+node --check fcapsule/ui/assets/estima.js
 node --test tests/ui_*.test.cjs
 ```
 
-Node is needed for frontend tests, not to run the service. Start with the [documentation index](docs/README.md) for current operating guides, implementation details, research framing and clearly separated historical records. FCAPSule is [MIT licensed](LICENSE).
+Node is required for frontend tests, not for running the service. FCAPSule is [MIT licensed](LICENSE).

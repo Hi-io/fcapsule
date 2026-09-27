@@ -1,256 +1,88 @@
 # Collective Integration
 
-**FCAPSule investigates; Collective remembers.** Collective is an independent, opt-in
-shared memory service with its own repository, HTTP API and PostgreSQL database:
-[service repository](https://github.com/Hi-io/collective). FCAPSule remains responsible for
-collecting evidence, running any configured LLM investigation, and deciding what
-minimized knowledge to publish. Collective validates, stores and retrieves that
-knowledge; it does not run LLMs, need model-provider API keys, interpret cases or
-incur model-token charges. Any interpretation of retrieved cases happens in the
-requesting FCAPSule instance, under that instance's model configuration and cost.
-
-Collective is the current product name. Earlier FCAPSule releases called this
-integration Estima, so existing configuration, local API paths and saved settings
-continue to work during the rename.
-
-The integration is optional and disabled unless read and/or publication are
-enabled. A service outage, missing configuration or empty result must not prevent
-FCAPSule from capturing evidence, using its own retained history or completing a
-local investigation. This is development integration guidance, not a production
-readiness claim.
-
-## Responsibilities
+**Collective** is the optional shared-knowledge service used by independent FCAPSule instances. Its [repository](https://github.com/Hi-io/collective) owns the HTTP service, PostgreSQL schema and deployment. FCAPSule owns evidence capture, model inference and the choice of knowledge to publish.
 
 ```text
-FCAPSule instance A                       FCAPSule instance B
-sources -> evidence -> local LLM           sources -> evidence -> local LLM
-          |                                             ^
-          | minimize and publish                       | retrieve candidates
-          +-------------------+-------------------------+
-                              v
-                  Collective HTTP API
-                              |
-                              v
-                       PostgreSQL
+FCAPSule A                     FCAPSule B
+local incident                 new incident
+    |                              ^
+selected knowledge                 | historical leads
+    +------------+-----------------+
+                 |
+          Collective API
+                 |
+             PostgreSQL
 ```
 
-- **FCAPSule investigates.** It owns source access, incident capture, per-instance
-  capsules, local history, model calls and the interpretation of current and
-  retrieved evidence. Provider credentials stay in FCAPSule.
-- **Collective remembers.** It accepts versioned, bounded case records, preserves
-  observations separately from hypotheses, and returns historical candidates with
-  provenance. It does not inspect Prometheus, OpenSearch, Kubernetes or live
-  incident sources, and it does not execute actions.
-- **Operators choose what to share.** Collective reads and publication are separate
-  opt-ins. Published records are a minimized projection, not a capsule archive,
-  telemetry backup or proof of anonymization.
-- **Instances remain independent.** Shared records do not merge episodes, assert
-  a common workload identity or establish a shared cause. Local investigation
-  continues when Collective is unavailable.
+Collective stores and retrieves versioned cases without running LLMs or receiving provider keys. Each requesting FCAPSule instance interprets retrieved observations with its own model and budget. This separates shared storage costs from per-instance inference costs and lets local investigation continue when shared memory is unavailable.
 
-## Facts, Hypotheses and Similarity
+## Connect an Instance
 
-Measurements, log-derived findings, configuration observations and their source
-and time provenance are kept in `observations`. Model-generated explanations, if
-included, remain separate in `hypotheses` and are unverified context. A hypothesis
-is never an observation, even when it appears in repeated cases.
-
-Search is a candidate-retrieval heuristic, not semantic understanding or a
-diagnostic model. The current contract ranks exact fingerprints or simple lexical
-overlap and can include recent in-scope records; it does not use embeddings or
-learn from remediation outcomes. A score is not a probability, and a returned
-case is not evidence that two incidents share a cause. FCAPSule must show source,
-time, version and observation/hypothesis distinction, then interpret any useful
-context using its own current evidence and configured model.
-
-## Data and Privacy
-
-Publishing transfers incident-derived information outside the FCAPSule instance's
-storage boundary. Review the actual outgoing case and the organization's sharing,
-retention and access policy before enabling it. The producer projection is bounded
-and allowlisted: it excludes raw telemetry windows, uploaded media, Kubernetes
-Secrets, raw trace spans and capsule ZIPs. It may contain selected observations,
-provenance, a bounded summary and separately labeled hypotheses. The service
-validates input shape and recognized secret patterns, but it is not a complete DLP
-system or an anonymization guarantee. Rare values, timestamps, topology and
-combinations of observations may still identify an environment.
-
-The `FCAPSULE_COLLECTIVE_TOKEN` is a credential for the Collective service API; it
-is not an LLM API key and is not used for model inference. Collective does not receive
-FCAPSule provider keys. Conversely, whenever FCAPSule's configured provider
-interprets a retrieved record, that is an ordinary FCAPSule model call and may
-incur provider usage and charges.
-
-Collective has an independent data lifecycle. Deleting a local incident does not
-automatically withdraw a previously published remote case. A publisher can withdraw
-all revisions for one of its episodes, and the service can expire old episodes when
-optional retention is configured; without that setting, cases remain until withdrawn.
-Agree on remote retention, withdrawal, backup and export procedures with the
-Collective operator before sharing real cases.
-
-## API Contract
-
-The FCAPSule client speaks Collective's versioned `/v1` API. See the
-[service repository](https://github.com/Hi-io/collective) for the service's authoritative
-API and deployment contract.
-
-| Operation | Route | Behavior and limit |
-| --- | --- | --- |
-| Publish a case | `POST /v1/cases` | Creates a versioned case revision. Identical repeats are idempotent; conflicting reuse of a producer/episode/revision is rejected. |
-| Search cases | `POST /v1/search` | Returns a bounded, paginated set of historical candidates, latest revision per episode, with provenance and a heuristic retrieval score. |
-| List cases | `GET /v1/cases` | Lists latest revisions by page, with optional scope and text filters. |
-| Read a case | `GET /v1/cases/{id}` | Returns one retained case with observations and hypotheses as separate fields. |
-| Withdraw an episode | `DELETE /v1/episodes/{episode_id}` | A publisher withdraws all remote revisions for its bound instance and episode; this does not delete the local FCAPSule incident. |
-| List/read patterns | `GET /v1/patterns`, `GET /v1/patterns/{id}` | Describes repeated typed-observation co-occurrence; it is not a causal conclusion. |
-| Provision credentials | `POST /v1/admin/instances/{instance_id}/publisher-credentials`, `POST /v1/admin/reader-credentials` | An administrator provisions instance-bound publisher or read-only reader credentials. |
-| Rotate/revoke credentials | `POST /v1/credentials/rotate`, `DELETE /v1/admin/credentials/{key_id}` | Rotates the authenticated key or revokes a key by ID. |
-| Health | `GET /healthz` | Unauthenticated service/database health; it says nothing about FCAPSule sources or investigation health. |
-
-The current case envelope uses `schema_version`, producer `instance_id`,
-`episode_id`, timezone-bearing `observed_at`, optional scope labels, summary,
-observations and hypotheses. An optional fingerprint supports candidate matching;
-it deliberately does not establish that failure mechanisms are equal. The current
-FCAPSule projection is capped at 24 observations and 24 KiB; the service accepts
-at most 100 observations, 50 hypotheses and 40 KiB per request. A local evidence
-reference is provenance from the producer's case and is not guaranteed to resolve
-to a live source link from another FCAPSule instance.
-
-The current API uses bearer credentials. Publisher credentials are bound server-
-side to one `instance_id`; read-only credentials cannot publish. Publishers and
-readers can inspect cases across the service deployment, so credentials do not
-provide tenant isolation. Treat one Collective deployment as a single trusted
-organization boundary; do not share it across mutually untrusted organizations.
-Keep the administrator credential separate from FCAPSule instance settings.
-Legacy deployment-wide credentials are read-only by default during migration.
-
-## FCAPSule Configuration
-
-Configure the Collective endpoint, service token and stable producer identity in
-FCAPSule Settings or through environment defaults:
+1. Deploy Collective using its repository's instructions and obtain its endpoint and an appropriate credential.
+2. Set a distinct, stable producer identity for each independent FCAPSule instance. Use a publisher credential bound to that identity, or a read-only credential when publication is disabled.
+3. Configure the endpoint and credential in **Settings > Collective**, or use the environment defaults below.
+4. Verify connectivity and the outgoing projection with a permitted test case. Enable reads, publication or both according to the sharing policy.
 
 | Environment variable | Purpose |
 | --- | --- |
-| `FCAPSULE_COLLECTIVE_URL` | Base URL of the separately operated Collective API. |
-| `FCAPSULE_COLLECTIVE_TOKEN` | Collective publisher or read-only bearer credential; not a provider key. |
-| `FCAPSULE_COLLECTIVE_INSTANCE_ID` | Stable identity for this publishing FCAPSule state directory; use a distinct value per independent instance. |
-| `FCAPSULE_COLLECTIVE_READ` | Opt in to retrieval. Off by default. |
-| `FCAPSULE_COLLECTIVE_PUBLISH` | Opt in to publishing. Off by default. |
+| `FCAPSULE_COLLECTIVE_URL` | Base URL of the separately deployed API |
+| `FCAPSULE_COLLECTIVE_TOKEN` | Service bearer credential, not a model-provider key |
+| `FCAPSULE_COLLECTIVE_INSTANCE_ID` | Stable, unique publishing identity |
+| `FCAPSULE_COLLECTIVE_READ` | Enable retrieval; off by default |
+| `FCAPSULE_COLLECTIVE_PUBLISH` | Enable publication; off by default |
 
-Saved Settings override environment defaults. For compatibility, the token is
-saved in the owner-readable local state file `estima-settings.json`; if absent,
-FCAPSule migrates legacy `atlas-settings.json` settings without removing that file. Keep
-the ID stable for one instance's publishing history, and do not clone a state
-directory into multiple independent publishers without assigning distinct IDs.
-The ID is an attribution field, not an authentication credential. Existing
-`FCAPSULE_ESTIMA_*` environment variables remain supported, and legacy
-`FCAPSULE_ATLAS_*` names remain fallbacks. When both are set, use the
-`FCAPSULE_COLLECTIVE_*` values; they take precedence.
+Saved Settings override environment defaults. Keep the identity stable across restarts; assign a new identity and matching credential when cloning an instance into an independent publisher. In Kubernetes, use a Secret for the token, not a ConfigMap. The client requires HTTPS except for localhost and in-cluster `.svc` names. Remote endpoints need a trusted certificate.
 
-The FCAPSule page is `/collective`, and its preferred local API uses
-`/api/settings/collective` and `/api/collective/*`. The previous `/estima` page,
-`/api/settings/estima` and `/api/estima/*` paths remain compatibility aliases;
-older `/atlas` paths remain supported as well. These are FCAPSule-local routes.
-The remote Collective API continues to use `/v1`.
+The local page is `/collective`; settings and browsing use `/api/settings/collective` and `/api/collective/*`. Compatibility settings are retained in `estima-settings.json`. Earlier `FCAPSULE_ESTIMA_*` and `FCAPSULE_ATLAS_*` names/routes remain supported, but `FCAPSULE_COLLECTIVE_*` takes precedence. New installations should use the Collective names.
 
-The client requires HTTPS except for localhost and in-cluster `.svc` DNS names.
-Use a trusted TLS ingress/proxy for remote endpoints. The client applies bounded
-request timeouts and response sizes and keeps a local SQLite outbox for retryable
-publication. Publication does not hold up live capture. Watch the Collective status
-in FCAPSule for unavailable service or failed/pending delivery; neither is the
-same as "no relevant case found."
+## Published Knowledge
 
-## Operator Workflow
+FCAPSule projects a capsule into a bounded case with producer/episode identity, observation time, scope, source provenance and selected observations. Any included model explanation remains separate in `hypotheses`. Publication excludes raw telemetry windows, original uploads, capsule ZIPs, Kubernetes Secrets and provider credentials.
 
-### Explore Collective Memory
+The client projection is capped at 24 observations and 24 KiB. An identical projection reuses its revision; changed content produces a new revision. A persistent outbox retries transient failures without holding up local capture. Report-level publication provenance links shared revisions to local investigation revisions and shows delivery attempts and receipts.
 
-The Collective page presents retained knowledge as an interactive map and an
-equivalent list. Larger colored nodes are repeated typed observations; smaller
-nodes are retained cases. An edge means that the case contains the observation's
-same domain, key, typed value and unit. It is not a causal link or an inferred
-root cause. Color groups are presentation categories, not learned clusters.
+| Delivery status | Meaning |
+| --- | --- |
+| `queued` | Waiting for its first delivery attempt |
+| `retry_scheduled` | Transient failure; retry is waiting for backoff |
+| `attention_required` | Delivery needs operator attention |
+| `published` | The remote service accepted the request |
 
-Selecting a node highlights its neighborhood and opens an adjacent detail panel.
-Cases retain their summaries, observations, separately labeled hypotheses and
-source provenance. Pattern details explain the shared observation and list
-recent members. Direct case and pattern links remain shareable. Zoom, pan,
-keyboard selection and a list alternative support different exploration styles.
+A successful response may omit a recognizable remote case ID; the receipt records that distinction. Inspect delivery state rather than inferring publication from successful connectivity alone.
 
-The time control filters the **event times of loaded cases**, not when Collective
-learned or ingested them. The instance control isolates contributions visible in
-the loaded records. These controls only change the presentation; they do not
-publish, modify, delete or re-investigate anything, and make no model calls.
+## Retrieval and Investigation
 
-The browser requests up to 20 patterns and expands their existing detail
-endpoints with at most three concurrent requests. Each endpoint returns a bounded
-set of recent members. Search can add up to 10 matching cases. Counts explicitly
-refer to the loaded view, except pattern totals labeled across memory. Revisions
-of one producer/episode are deduplicated to the newest loaded revision. Pattern
-totals must not be summed to infer a global incident count. There is no claim that
-the map contains every record stored by Collective. Loading, unavailable, partial
-retrieval and empty states are distinct, with refresh/retry controls.
+The shared fingerprint summarizes stable diagnostic features such as alert family, resource kind, finding categories and diagnostic keys. Retrieval ranks candidate cases through fingerprint matching and textual overlap. The investigator then checks relevant measurements or configuration against the current incident. A historical hypothesis is a lead, not a current observation or a probability of the same cause.
 
-### Connect Instances
+The Collective page provides a map and an equivalent list. Case nodes connect to repeated typed observations; selecting either exposes the associated measurements, hypotheses and provenance. Filters operate on loaded cases and their event times. Loaded counts are not a global inventory, and repeated-observation edges are not causal links. Browsing makes no LLM calls.
 
-1. Obtain the endpoint and bearer token from the Collective operator. Review who may
-   publish and search, what data may leave each instance, and the remote lifecycle.
-2. Configure each FCAPSule instance with the same approved endpoint and token,
-   but a distinct, stable `FCAPSULE_COLLECTIVE_INSTANCE_ID`.
-3. Keep both reads and publication disabled while validating connectivity, schema
-   compatibility and the outgoing minimized projection with synthetic cases.
-4. Enable only the desired action. Publishing and searching can be opted into
-   separately; neither is necessary for local investigation.
-5. When FCAPSule retrieves candidates, inspect provenance and facts separately
-   from hypotheses. Continue checking current incident evidence; do not treat
-   similarity as a verified root cause.
-6. Test timeout, authentication failure, incompatible responses and complete
-   Collective outage. Confirm local capture, local history and investigation still
-   work and that missing shared context is labeled accurately.
+## Service Contract
 
-### Publication provenance
+The remote service uses `/v1`, distinct from the FCAPSule-local UI API. Consult the Collective repository for the authoritative service schema.
 
-Incident report data includes a bounded `publication_provenance` list for
-outbox records linked to that local episode. Each entry ties the minimized
-Collective revision to up to 32 local investigation revision IDs, delivery
-state, attempt count and timestamps. `investigation_revision_links_truncated`
-marks entries whose older revision links exceed that bound. Local episode and
-investigation revision IDs are kept in FCAPSule's SQLite state; they are not
-added to the Collective request. The report does not expose the queued payload,
-service credential, or raw exception text. A validated remote case ID is
-retained only when the successful response provides one.
+| Operation | Route |
+| --- | --- |
+| Publish a versioned case | `POST /v1/cases` |
+| Search historical candidates | `POST /v1/search` |
+| List/read cases | `GET /v1/cases`, `GET /v1/cases/{id}` |
+| List/read observation patterns | `GET /v1/patterns`, `GET /v1/patterns/{id}` |
+| Withdraw a producer's episode | `DELETE /v1/episodes/{episode_id}` |
+| Check service/database health | `GET /healthz` |
 
-Delivery `status` values are `queued` (durably waiting, no failure yet),
-`retry_scheduled` (a transient failure is waiting for backoff),
-`attention_required` (a permanent failure is quarantined), and `published`
-(the service returned a successful response). `receipt_status` distinguishes
-`not_yet_confirmed`, `remote_id_recorded`, `remote_id_not_returned`, and
-`legacy_receipt_unknown`. A successful response without a recognizable case ID
-is still `published`; it is not proof that the remote case is absent. A repeated
-identical projection keeps its Collective revision and accumulates local
-investigation revision links; a changed projection receives a new revision.
-Retries reuse the same outbox projection and revision, matching the remote
-idempotency key.
+Case records include `schema_version`, `instance_id`, `episode_id`, timezone-bearing `observed_at`, observations, separate hypotheses and optional scope/fingerprint fields. Identical publication retries are idempotent; conflicting reuse of one producer/episode/revision is rejected. Search returns bounded candidates with provenance and the latest revision per episode.
 
-Older outbox rows are retained during schema migration. They have no recoverable
-local episode link or response receipt, so `local_episode_link_status` and the
-receipt remain explicitly unknown rather than being guessed. An empty
-incident-level list means no linked delivery receipt is available; it does not
-prove that no remote record exists. Deleting a local incident also does not
-delete a published Collective case.
+## Privacy and Lifecycle
 
-## Evaluation and Limits
+One Collective deployment is a shared trust domain: publisher credentials restrict publication identity, but readers can inspect cases across that deployment. Use separate deployments for mutually untrusted organizations. Review the actual outgoing observations and the remote retention/access policy before enabling publication. Minimization and masking reduce disclosure but do not guarantee anonymity.
 
-Evaluate relevance and false matches on a fixed, reviewed dataset with negative
-controls, independent reviewers and a no-Collective/local-history baseline. Measure
-latency, outages, payload size, privacy exposure and source-expiry behavior.
-Report dataset composition, API/schema version, retrieval settings, protocol,
-uncertainty and limitations. A successful request or repeated observation pattern
-does not establish diagnostic accuracy, causal learning, fewer incidents, faster
-resolution, cost savings or safe reduction of source retention.
+**Delete episode and shared memory** coordinates remote withdrawal and local deletion using the original publishing identity. Local records remain until required withdrawal is confirmed. Automatic local retention and the local-only DELETE API do not withdraw remote cases. Collective retention, database backups and previously exported records have their own lifecycle.
 
-A synthetic two-instance smoke test was recorded on 2026-09-25 UTC using the
-earlier Atlas-branded integrated prototype and an isolated PostgreSQL-backed
-service. It exercised publication, retrieval, provenance, separate hypotheses,
-source expiry and unavailable-service behavior. That snapshot does not certify the
-current independent Collective deployment, access isolation, relevance across
-varied incidents or production readiness. Keep screenshots and test records in
-ignored `local_reports/`, not in the repository.
+## Verify the Connection
+
+- Confirm endpoint health and model-independent local operation.
+- Publish an approved test case and check its delivery receipt and producer identity.
+- Retrieve it from another instance and inspect source/time provenance and the observation/hypothesis distinction.
+- Check that unavailable service, invalid credentials and an empty result are distinguishable.
+- Confirm local capture and investigation continue when Collective cannot be reached.
+
+See [Evaluation](evaluation.md) for paired investigation comparisons and [Privacy and retention](data_privacy.md) for the complete local data boundary.
