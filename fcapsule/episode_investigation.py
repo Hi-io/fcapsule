@@ -565,6 +565,10 @@ def inconclusive_assessment(evidence_ids: set[str], error: Exception | None = No
     }
 
 
+class ReviewEvidenceUnavailable(ValueError):
+    """The optional reviewer cannot inspect every source cited by a validated draft."""
+
+
 def run_investigation(context: dict[str, Any], tools: InvestigationTools, model: str, max_tokens: int,
                       publish: Callable[[dict[str, Any]], None], max_checks: int | None = None,
                       max_total_tokens: int | None = None, max_prompt_tokens: int | None = None,
@@ -737,15 +741,21 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
         publish(state)
         return response, call
 
-    def check(name, arguments, question, distinguishes, automatic=False, required=False):
+    def check(name, arguments, question, distinguishes, automatic=False, required=False,
+              diagnostic_priority=False):
         row = {"id": f"Q{len(state['checks']) + 1:03d}", "tool": name, "arguments": arguments,
                "question": question, "distinguishes": distinguishes, "status": "running", "started_at": now(),
-               "automatic_preservation": automatic, "required_observation": required}
+               "automatic_preservation": automatic, "required_observation": required,
+               "diagnostic_priority": diagnostic_priority}
         state["checks"].append(row)
         publish(state)
         try:
             row["result"] = tools.execute(name, arguments)
             row["status"] = "completed"
+            if row["diagnostic_priority"]:
+                row["diagnostic_priority"] = bool(
+                    isinstance(row["result"], dict) and row["result"].get("patterns")
+                )
             evidence_ids.add(row["id"])
         except (ValueError, RuntimeError, OSError) as error:
             row["status"] = "unavailable"
@@ -783,6 +793,27 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             "What bounded incident-window log observations survive source retention?",
             "An application/dependency failure signature versus only the retained alert symptom.",
             required=True,
+        )
+    collective_log_lead = (
+        not requires_log_search
+        and not discovery_capture
+        and not any(item.get("domain") == "log_template" for item in context["evidence"])
+        and any(
+            isinstance(observation, dict)
+            and str(observation.get("source") or "").startswith("OpenSearch")
+            and str(observation.get("key") or "").startswith("diagnostic.")
+            for case in context.get("atlas_cases", []) if isinstance(case, dict)
+            for observation in (case.get("observations") if isinstance(case.get("observations"), list) else [])
+        )
+    )
+    if collective_log_lead:
+        check(
+            "search_logs",
+            {"terms": []},
+            "Does the current incident contain the diagnostic signature seen in a prior Collective case?",
+            "A matching current failure signature versus a historical analogy without current support.",
+            required=True,
+            diagnostic_priority=True,
         )
     historical_candidates = context.get("historical_candidates") or []
     if historical_candidates:
@@ -826,7 +857,16 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                               state["token_budget"]["remaining_tokens"] < 2 * max_prompt_tokens + 512)
             if finishing_turn and turn < max_checks:
                 state["token_budget"]["early_finish_due_to_budget"] = True
-            tools_for_turn = tools.CATALOG if not finishing_turn else {}
+            completed_singletons = {
+                row["tool"] for row in state["checks"]
+                if row["tool"] in {"workload_state", "scrape_discovery", "alert_rule_logic",
+                                   "compare_baseline", "database_pressure"}
+            }
+            if any(row["tool"] == "search_logs" and row.get("arguments", {}).get("terms") == []
+                   for row in state["checks"]):
+                completed_singletons.add("search_logs")
+            tools_for_turn = ({name: description for name, description in tools.CATALOG.items()
+                               if name not in completed_singletons} if not finishing_turn else {})
             payload, visible_evidence_ids = compact_payload({"allowed_pods": tools.pods if tools_for_turn else [], "tools": tools_for_turn,
                        "remaining_optional_checks": 0 if finishing_turn else max_checks - turn,
                        "available_evidence_ids": [], "validation_feedback": validation_feedback,
@@ -905,6 +945,11 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             name, arguments = decision.get("tool"), decision.get("arguments", {})
             if name not in tools.CATALOG or not isinstance(arguments, dict):
                 raise ValueError("Unrecognized check")
+            arguments = dict(arguments)
+            question = decision.get("question") or arguments.pop("question", None)
+            distinguishes = decision.get("distinguishes") or arguments.pop("distinguishes", None)
+            arguments.pop("question", None)
+            arguments.pop("distinguishes", None)
             if json.dumps([name, arguments], sort_keys=True) in seen:
                 if correction_attempts < 2 and not finishing_turn:
                     correction_attempts += 1
@@ -916,7 +961,6 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                     publish(state)
                     continue
                 raise ValueError("Repeated check would not add observations")
-            question, distinguishes = decision.get("question"), decision.get("distinguishes")
             if any(not isinstance(text, str) or not 1 <= len(text) <= 400 for text in (question, distinguishes)):
                 raise ValueError("Missing purpose for check")
             check(name, arguments, scrub(question), scrub(distinguishes), required=True)
@@ -949,6 +993,8 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                 review_base["available_incident_ids"] = sorted({item["incident_id"] for item in context["alerts"]})
             draft_refs = assessment_evidence_refs(draft)
             payload, visible_evidence_ids = compact_payload(review_base, review_system, draft_refs)
+            if validated_draft is not None and not draft_refs.issubset(visible_evidence_ids):
+                raise ReviewEvidenceUnavailable("The reviewer prompt omitted a cited current observation")
             response, call = request_model(payload, "none", "evidence_review", 1600, review_system)
             decision = parse_object(str(response.get("content", "")))
             call["decision"] = scrub(decision, reference_ids=set(visible_evidence_ids))
@@ -1022,12 +1068,18 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
             state.update(
                 status="ready",
                 assessment=validated_draft,
-                message="Validated conclusion retained; the optional consistency review was unavailable.",
+                message=("Validated conclusion retained; reviewer lacked a cited source."
+                         if isinstance(error, ReviewEvidenceUnavailable) else
+                         "Validated conclusion retained; the optional consistency review was unavailable."),
                 review={
                     "status": "unavailable",
                     "changed": False,
                     "schema_repair": bool(state.get("review", {}).get("schema_repair")),
-                    "limitation": "The validated assessment was retained because the optional consistency review could not complete.",
+                    "limitation": (
+                        "The reviewer could not inspect every cited source within its prompt budget; the already validated draft was retained."
+                        if isinstance(error, ReviewEvidenceUnavailable) else
+                        "The validated assessment was retained because the optional consistency review could not complete."
+                    ),
                     "error_type": type(error).__name__,
                 },
             )

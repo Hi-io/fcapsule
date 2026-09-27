@@ -1119,6 +1119,7 @@ def _check_item(check: dict[str, Any], latest: bool) -> dict[str, Any]:
         "tool": check.get("tool"),
         "status": check.get("status"),
         "required_observation": bool(check.get("required_observation")),
+        "diagnostic_priority": bool(check.get("diagnostic_priority")),
         "question": _short(check.get("question"), 180),
         "distinguishes": _short(check.get("distinguishes"), 220),
         "observation": result,
@@ -1441,6 +1442,13 @@ def compact_for_model(
                     item["observation"] = _tiny_discovery_observation(observation)
                 else:
                     item["observation"] = _minimal_check_observation(item)
+        elif (len(payload["prior_checks"]) > 1
+              and any(item.get("diagnostic_priority") for item in payload["prior_checks"])
+              and any(not item.get("diagnostic_priority") for item in payload["prior_checks"])):
+            removable = next(index for index in range(len(payload["prior_checks"]) - 1, -1, -1)
+                             if not payload["prior_checks"][index].get("diagnostic_priority"))
+            payload["prior_checks"].pop(removable)
+            visible_ids = refresh_visible_ids()
         elif len(payload["prior_checks"]) > 1 and any(
             not item.get("required_observation") for item in payload["prior_checks"]
         ):

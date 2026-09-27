@@ -580,6 +580,31 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertFalse(state["usage"]["complete"])
         self.assertNotIn("do-not-save", json.dumps(state))
 
+    def test_reviewer_cannot_discard_validated_check_when_source_is_compacted_out(self):
+        self.context.update(live_capture=True, evidence=[{"id": "E1", "domain": "log_template"}])
+        self.kit.execute.side_effect = lambda name, _: (
+            {"patterns": [{"count": 3, "examples": [
+                {"message": "Only base64 data is allowed", "level": "ERROR"}]}]}
+            if name == "search_logs" else {"observations": []}
+        )
+        draft = assessment("Q002")
+        draft["summary"] = "The current decoder rejected a sampled import document. " * 12
+        draft["basis"] = "Q002 contains a current decoder error for the affected pod. " * 8
+        def omit_cited_on_review(source, checks, **kwargs):
+            compact, refs = compact_for_model(source, checks, **kwargs)
+            if not source.get("evidence"):
+                compact["prior_checks"] = [row for row in compact["prior_checks"] if row["id"] != "Q002"]
+                refs = [ref for ref in refs if ref != "Q002"]
+            return compact, refs
+
+        with patch("fcapsule.episode_investigation.compact_for_model", side_effect=omit_cited_on_review):
+            state, client = self.run_case([{"action": "finish", "assessment": draft}],
+                                          max_checks=0, max_prompt_tokens=2100, max_total_tokens=12000)
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["assessment"]["evidence_ids"], ["Q002"])
+        self.assertEqual(state["review"]["status"], "unavailable")
+        self.assertEqual(len(client.requests), 1)
+
     def test_review_schema_omission_gets_one_bounded_repair_attempt(self):
         malformed = assessment()
         malformed["hypotheses"][0].pop("evidence_ids")
@@ -1116,6 +1141,54 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual([item["tool"] for item in state["checks"]], ["workload_state", "search_logs"])
         self.assertTrue(state["checks"][1]["required_observation"])
 
+    def test_collective_log_fact_prompts_one_current_broad_verification(self):
+        self.context["atlas_cases"] = [{"observations": [
+            {"key": "diagnostic.error_signature", "value": "invalid_base64",
+             "source": "OpenSearch diagnostic classification"}
+        ]}]
+        self.kit.execute.side_effect = lambda name, _: (
+            {"patterns": [{"count": 1, "examples": [{"message": "Only base64 data is allowed"}]}]}
+            if name == "search_logs" else {"observations": []}
+        )
+        state, client = self.run_case([{"action": "finish", "assessment": assessment()}], max_checks=1)
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual([item["tool"] for item in state["checks"]], ["workload_state", "search_logs"])
+        self.assertEqual(state["checks"][1]["arguments"], {"terms": []})
+        self.assertTrue(state["checks"][1]["required_observation"])
+        self.assertTrue(state["checks"][1]["diagnostic_priority"])
+        available = json.loads(client.requests[0].messages[1]["content"])["tools"]
+        self.assertNotIn("workload_state", available)
+        self.assertNotIn("search_logs", available)
+
+        self.context["evidence"] = [{"id": "E1", "domain": "log_template"}]
+        state, _ = self.run_case([{"action": "finish", "assessment": assessment()}], max_checks=0)
+        self.assertEqual([item["tool"] for item in state["checks"]], ["workload_state"])
+
+        self.context["evidence"] = [{"id": "E1"}]
+        self.kit.execute.side_effect = None
+        self.kit.execute.return_value = {"status": "unavailable", "limitation": "Logs expired"}
+        state, _ = self.run_case([{"action": "finish", "assessment": assessment()}], max_checks=0)
+        self.assertFalse(state["checks"][1]["diagnostic_priority"])
+
+    def test_compaction_keeps_current_diagnostic_check_ahead_of_later_empty_checks(self):
+        checks = [
+            {"id": "Q001", "tool": "workload_state", "status": "completed",
+             "required_observation": True, "result": {"observations": []}},
+            {"id": "Q002", "tool": "search_logs", "status": "completed",
+             "required_observation": True, "diagnostic_priority": True,
+             "result": {"patterns": [{"count": 2, "examples": [
+                 {"timestamp": "2026-09-24T13:20:00Z", "message": "Only base64 data is allowed",
+                  "level": "ERROR", "pod": "worker"}]}]}},
+            {"id": "Q003", "tool": "dependency_evidence", "status": "completed",
+             "required_observation": True, "result": {"limitation": "No matching source"}},
+            {"id": "Q004", "tool": "database_pressure", "status": "completed",
+             "required_observation": True, "result": {"limitation": "No matching source"}},
+        ]
+        compact, visible = compact_for_model(self.context, checks, max_prompt_tokens=550)
+        self.assertIn("Q002", visible)
+        self.assertTrue(any(row["id"] == "Q002" and "base64" in json.dumps(row["observation"])
+                            for row in compact["prior_checks"]))
+
     def test_historical_candidate_is_preserved_without_spending_an_optional_model_check(self):
         self.context["historical_candidates"] = [{"episode_id": "prior-episode"}]
         value = assessment("Q002")
@@ -1173,6 +1246,18 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual([row["tool"] for row in state["checks"]], ["workload_state", "review_omitted"])
         self.assertEqual(len(client.requests), 4)  # correction, check, finish, review
         self.assertEqual(state["calls"][0]["validation_error"], "Selected check has already completed")
+
+    def test_check_purpose_nested_in_arguments_is_normalized_before_execution(self):
+        nested = {"action": "check", "tool": "compare_baseline", "arguments": {
+            "question": "Is the observed buffer increase unusual?",
+            "distinguishes": "A changed workload from an ordinary baseline",
+        }}
+        state, _ = self.run_case([nested, {"action": "finish", "assessment": assessment("Q002")}],
+                                  max_checks=1)
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["checks"][1]["tool"], "compare_baseline")
+        self.assertEqual(state["checks"][1]["arguments"], {})
+        self.assertEqual(state["checks"][1]["question"], nested["arguments"]["question"])
 
     def test_historical_observation_survives_prompt_compaction(self):
         check = {"id": "Q002", "tool": "historical_episode", "status": "completed",
