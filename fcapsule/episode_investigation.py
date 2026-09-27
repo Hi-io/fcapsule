@@ -306,6 +306,14 @@ def assessment_payload(decision: dict[str, Any], call: dict[str, Any]) -> Any:
         if field not in value:
             value[field] = decision[field]
             call.setdefault("schema_adjustments", []).append(f"Moved {field} into assessment")
+    hypotheses = value.get("hypotheses")
+    if isinstance(hypotheses, list):
+        complete = [item for item in hypotheses if isinstance(item, dict)
+                    and isinstance(item.get("explanation"), str) and item["explanation"].strip()
+                    and isinstance(item.get("reason"), str) and item["reason"].strip()]
+        if complete and len(complete) < len(hypotheses):
+            value["hypotheses"] = complete
+            call.setdefault("schema_adjustments", []).append("Discarded empty hypothesis entries")
     return value
 
 

@@ -1000,6 +1000,16 @@ class InvestigationEngineTests(unittest.TestCase):
                          ["workload_state", "review_omitted"])
         self.assertEqual(json.loads(client.requests[1].messages[1]["content"])["tools"], {})
 
+    def test_empty_extra_hypotheses_do_not_discard_a_grounded_assessment(self):
+        value = assessment("Q001")
+        value["hypotheses"].append({"explanation": "", "reason": "No additional mechanism", "status": "unresolved",
+                                    "evidence_ids": ["Q001"]})
+        state, _ = self.run_case([{"action": "finish", "assessment": value}], max_checks=0)
+
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(len(state["assessment"]["hypotheses"]), 1)
+        self.assertIn("Discarded empty hypothesis entries", state["calls"][0]["schema_adjustments"])
+
     def test_hard_call_budget_and_disallowed_tools(self):
         decision = {"action": "check", "tool": "resource_history", "arguments": {}, "question": "Resource pressure?", "distinguishes": "CPU or memory"}
         state, client = self.run_case([decision, decision], max_checks=1)
