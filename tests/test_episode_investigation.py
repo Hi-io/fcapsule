@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import Mock, patch
 
-from fcapsule.episode_investigation import SYSTEM, RELATIONSHIP_REVIEW_SYSTEM, EVIDENCE_REVIEW_SYSTEM, assessment_payload, normalize_evidence_citations, repeats_completed_check, run_investigation, validate_assessment
+from fcapsule.episode_investigation import SYSTEM, RELATIONSHIP_REVIEW_SYSTEM, EVIDENCE_REVIEW_SYSTEM, assessment_payload, discard_unavailable_hypothesis_refs, normalize_evidence_citations, repeats_completed_check, run_investigation, validate_assessment
 from fcapsule.investigation_tools import InvestigationTools, episode_context, log_patterns, metric_summary, scrub, stamp
 from fcapsule.processing.anonymizer import anonymize_text, template_for_message
 from fcapsule.adapters.kubernetes_adapter import KubernetesInventory
@@ -1009,6 +1009,23 @@ class InvestigationEngineTests(unittest.TestCase):
         self.assertEqual(state["status"], "ready")
         self.assertEqual(len(state["assessment"]["hypotheses"]), 1)
         self.assertIn("Discarded empty hypothesis entries", state["calls"][0]["schema_adjustments"])
+
+    def test_extra_invalid_hypothesis_reference_is_discarded_but_unanchored_one_is_not(self):
+        value = assessment("Q001")
+        value["hypotheses"][0]["evidence_ids"] = ["Q001", "Q999"]
+        normalized, dropped = discard_unavailable_hypothesis_refs(value, {"Q001"})
+        self.assertEqual(normalized["hypotheses"][0]["evidence_ids"], ["Q001"])
+        self.assertEqual(dropped, ["Q999"])
+        self.assertEqual(value["hypotheses"][0]["evidence_ids"], ["Q001", "Q999"])
+
+        value["hypotheses"][0]["evidence_ids"] = ["Q999"]
+        normalized, dropped = discard_unavailable_hypothesis_refs(value, {"Q001"})
+        self.assertEqual(normalized["hypotheses"][0]["evidence_ids"], ["Q999"])
+        self.assertEqual(dropped, [])
+
+        malformed, dropped = discard_unavailable_hypothesis_refs({"hypotheses": None}, {"Q001"})
+        self.assertIsNone(malformed["hypotheses"])
+        self.assertEqual(dropped, [])
 
     def test_hard_call_budget_and_disallowed_tools(self):
         decision = {"action": "check", "tool": "resource_history", "arguments": {}, "question": "Resource pressure?", "distinguishes": "CPU or memory"}

@@ -242,6 +242,27 @@ def normalize_evidence_citations(
     return normalized, applied
 
 
+def discard_unavailable_hypothesis_refs(value: Any, visible_evidence_ids: set[str]) -> tuple[Any, list[str]]:
+    """Keep a cited hypothesis when only its additional references are invalid."""
+    if not isinstance(value, dict):
+        return value, []
+    normalized = copy.deepcopy(value)
+    dropped = []
+    hypotheses = normalized.get("hypotheses")
+    if not isinstance(hypotheses, list):
+        return normalized, dropped
+    for hypothesis in hypotheses:
+        if not isinstance(hypothesis, dict) or not isinstance(hypothesis.get("evidence_ids"), list):
+            continue
+        refs = hypothesis["evidence_ids"]
+        valid = [ref for ref in refs if isinstance(ref, str) and ref in visible_evidence_ids]
+        if valid and len(valid) < len(refs):
+            hypothesis["evidence_ids"] = valid
+            dropped.extend(str(ref) for ref in refs
+                           if not isinstance(ref, str) or ref not in visible_evidence_ids)
+    return normalized, dropped
+
+
 def ground_historical_comparison(assessment: dict[str, Any], checks: list[dict[str, Any]],
                                 model_context: dict[str, Any]) -> dict[str, Any]:
     """A valid current citation cannot substitute for the selected prior capsule."""
@@ -815,6 +836,10 @@ def run_investigation(context: dict[str, Any], tools: InvestigationTools, model:
                     )
                     if normalized_aliases:
                         call["citation_aliases_normalized"] = normalized_aliases
+                    candidate, dropped_refs = discard_unavailable_hypothesis_refs(
+                        candidate, set(visible_evidence_ids))
+                    if dropped_refs:
+                        call["unavailable_hypothesis_refs_discarded"] = dropped_refs
                     validated = validate_assessment(candidate, set(visible_evidence_ids),
                                                      {item["incident_id"] for item in context["alerts"]},
                                                      {item["episode_id"] for item in context.get("historical_candidates", [])},
